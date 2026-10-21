@@ -20,6 +20,37 @@ enum Watchdog {
         return false
     }
 
+    static func vdscreenStatus() -> String? {
+        guard FileManager.default.isExecutableFile(atPath: vdscreen) else { return nil }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: vdscreen)
+        p.arguments = ["status"]
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        p.environment = env
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        do {
+            try p.run()
+            p.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return nil
+        }
+    }
+
+    static func isHealthy() -> Bool {
+        // The CLI asks launchd + the actual display, which is reliable from a
+        // LaunchAgent. CGGetActiveDisplayList alone was returning stale/false
+        // negatives for the virtual display and caused a restart loop.
+        if let status = vdscreenStatus(), status.contains("6016 x 3384") || status.contains("6016x3384") {
+            return true
+        }
+        return hasTargetDisplay()
+    }
+
     static func restartDisplay() {
         guard FileManager.default.isExecutableFile(atPath: vdscreen) else {
             log("watchdog: vdscreen not found at \(vdscreen)")
@@ -113,27 +144,28 @@ enum Watchdog {
         if args.contains("--install") { install(interval: interval); exit(0) }
         let once = args.contains("--once")
         var missing = 0
+        var lastRestart = 0.0
         while true {
-            let ok = hasTargetDisplay()
+            let ok = isHealthy()
+            let now = Date().timeIntervalSince1970
             if !ok {
                 missing += 1
-                log("watchdog: target display missing (\(missing))")
+                let status = vdscreenStatus() ?? "<nil>"
+                log("watchdog: display unhealthy (\(missing)) status=\(status.replacingOccurrences(of: "\n", with: " | "))")
             } else {
-                if missing > 0 { log("watchdog: target display present again") }
-                missing = 0
-            }
-            if (!ok && once) || missing >= 2 {
-                restartDisplay()
-                if once {
-                    for _ in 0..<20 {
-                        if hasTargetDisplay() { exit(0) }
-                        Thread.sleep(forTimeInterval: 0.5)
-                    }
-                    exit(1)
-                }
+                if missing > 0 { log("watchdog: display healthy again") }
                 missing = 0
             }
             if once { exit(ok ? 0 : 1) }
+            if missing >= 2 {
+                if now - lastRestart >= 60 {
+                    restartDisplay()
+                    lastRestart = Date().timeIntervalSince1970
+                } else {
+                    log("watchdog: restart suppressed (cooldown)")
+                }
+                missing = 0
+            }
             Thread.sleep(forTimeInterval: Double(interval))
         }
     }

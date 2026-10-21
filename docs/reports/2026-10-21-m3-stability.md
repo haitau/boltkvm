@@ -142,3 +142,36 @@ received frames=... lastType=heartbeat
 - 睡眠/唤醒、拔插雷雳线、网络切换的恢复；
 - VNC 预登录救援（FileVault 已关闭、自动登录开启，重启链路尚未复测）；
 - macOS 升级后的 TCC 重新授权演练。
+
+## 10. watchdog v1 误判与修复（2026-10-21）
+
+实际部署后发现 v1 watchdog 在 LaunchAgent 上下文里 **误判虚拟显示丢失**：
+
+```text
+watchdog: target display missing (1)
+watchdog: target display missing (2)
+watchdog: vdscreen on ... displayID=196
+（约 10 秒后重复，displayID=198、200 …）
+```
+
+- 根因：健康检查只用 `CGGetActiveDisplayList`，在 LaunchAgent 里对 `CGVirtualDisplay` 返回了假阴性；
+- 现象：每约 10 秒重建一次 vdscreen，用户在主控端看到 mini “不停操作”；
+- 影响：显示 ID 和 vdscreen 进程不断变化，无法稳定采集。
+
+修复：
+
+- 健康检查优先执行 `vdscreen status`，只要输出包含 `6016 x 3384` 即视为健康；
+- `CGGetActiveDisplayList` 仅作为 CLI 状态不可用时的回退；
+- 连续 2 次不健康才重启，并加 **60 秒重启冷却**，即使再次误判也不会形成风暴；
+- `watchdog --once` 只做体检，不自动重建。
+
+验证：
+
+```text
+watchdog --once → exit=0，vdscreen PID 不变
+重装后 60s  → vdscreen PID 83581 不变
+             watchdog PID 84185 不变
+             watchdog 日志无 unhealthy 记录
+```
+
+v1 日志保留在 `~/Library/Logs/boltkvm-watchdog.log.old` 作为证据；当前运行的是修复后的 v2。
