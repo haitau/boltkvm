@@ -40,6 +40,10 @@ final class Server: NSObject, SCStreamOutput {
     private var displayBounds = CGRect.zero
     private var inputCount = 0
     private var scrollCount = 0
+    private var heartbeatTimer: DispatchSourceTimer?
+    private var activity: NSObjectProtocol?
+    private let lockState = NSLock()
+    private var disconnectedFlag = false
     private var startTime = DispatchTime.now().uptimeNanoseconds
 
     init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?) {
@@ -57,7 +61,18 @@ final class Server: NSObject, SCStreamOutput {
 
     func start() async throws {
         signal(SIGPIPE, SIG_IGN)
+        activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .idleDisplaySleepDisabled, .latencyCritical],
+            reason: "boltkvm server capture/encode"
+        )
+        if !CGPreflightScreenCaptureAccess() {
+            throw NSError(domain: "boltkvm", code: 1001, userInfo: [NSLocalizedDescriptionKey: "Screen Recording permission missing; launch the server from the authorized GUI app (or grant it in System Settings > Privacy & Security > Screen Recording)"])
+        }
+        if !CGPreflightPostEventAccess() {
+            log("warning: Accessibility/post-event permission missing; input injection will fail")
+        }
         startClockResponder()
+        startHeartbeat()
 
         var s: VTCompressionSession?
         // M1 measurement: hardware HEVC without low-latency rate control gave
@@ -150,6 +165,23 @@ final class Server: NSObject, SCStreamOutput {
         log("dump: \(path) \(cg.width)x\(cg.height) ok=\(CGImageDestinationFinalize(dest))")
     }
 
+    private func startHeartbeat() {
+        let t = DispatchSource.makeTimerSource(queue: sendQueue)
+        t.schedule(deadline: .now() + 1, repeating: 1)
+        t.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.lock.lock(); let gone = self.closed; self.lock.unlock()
+            if gone { return }
+            do {
+                try self.connection.send(packet(type: .heartbeat, ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000), payload: Data()))
+            } catch {
+                self.signalDisconnect()
+            }
+        }
+        t.resume()
+        heartbeatTimer = t
+    }
+
     private func startClockResponder() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
@@ -171,10 +203,23 @@ final class Server: NSObject, SCStreamOutput {
                         }
                     }
                 } catch {
+                    self.signalDisconnect()
                     break
                 }
             }
         }
+    }
+
+    var isDisconnected: Bool {
+        lockState.lock(); let v = disconnectedFlag; lockState.unlock(); return v
+    }
+
+    private func signalDisconnect() {
+        lockState.lock()
+        let first = !disconnectedFlag
+        disconnectedFlag = true
+        lockState.unlock()
+        if first { log("session: client disconnected") }
     }
 
     private func inject(_ ev: InputEvent) {
@@ -243,6 +288,12 @@ final class Server: NSObject, SCStreamOutput {
         }
         stream = nil
         session = nil
+        heartbeatTimer?.cancel()
+        heartbeatTimer = nil
+        if let activity {
+            ProcessInfo.processInfo.endActivity(activity)
+            self.activity = nil
+        }
     }
 
     // MARK: SCStreamOutput
@@ -299,7 +350,7 @@ final class Server: NSObject, SCStreamOutput {
                             log("sent format \(self.captureWidth)x\(self.captureHeight) params=\(sets.count)")
                         } catch {
                             self.lock.lock(); self.closed = true; self.lock.unlock()
-                            log("client gone on format")
+                            self.signalDisconnect()
                         }
                     }
                 }
@@ -337,7 +388,7 @@ final class Server: NSObject, SCStreamOutput {
                                 self.lock.lock(); self.sent += 1; self.pending -= 1; self.lock.unlock()
                             } catch {
                                 self.lock.lock(); self.pending -= 1; self.closed = true; self.lock.unlock()
-                                log("client gone; stopping send")
+                                self.signalDisconnect()
                             }
                         }
                     }
@@ -385,5 +436,7 @@ final class Server: NSObject, SCStreamOutput {
         let fps = elapsed > 0 ? Double(e) / elapsed : 0
         let mbps = elapsed > 0 ? Double(b) * 8 / elapsed / 1e6 : 0
         log(String(format: "stats captured=%d encoded=%d sent=%d dropped=%d key=%d fps=%.1f bitrate=%.1fMbps encLat=%.2fms", c, e, s, d, k, fps, mbps, lat))
+        if lat > 12 { log("WARNING: encode latency \(String(format: "%.1f", lat))ms exceeds 12ms budget") }
+        if e > 0 && Double(d) / Double(e + d) > 0.01 { log("WARNING: drop ratio exceeds 1%") }
     }
 }

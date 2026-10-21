@@ -24,6 +24,8 @@ final class VideoDecoder {
 
     var renderer: Renderer?
     private var serverToLocalOffsetMicros: Int64 = 0
+    private var clockSyncRTTms: Double = .infinity
+    private var warnedClock = false
     var latencies: [Double] = []
     var recvLatencies: [Double] = []
     var decoded = 0
@@ -33,8 +35,12 @@ final class VideoDecoder {
     var lastDecodedAt: UInt64 = 0
     private var loggedPixelFormat = false
 
-    func setClockOffset(_ offset: Int64) {
-        lock.lock(); serverToLocalOffsetMicros = offset; lock.unlock()
+    func setClockOffset(_ offset: Int64, rttMs: Double) {
+        lock.lock(); serverToLocalOffsetMicros = offset; clockSyncRTTms = rttMs; lock.unlock()
+        if rttMs > 20 && !warnedClock {
+            warnedClock = true
+            log("time sync RTT \(String(format: "%.1f", rttMs))ms is high; latency metrics suppressed until a stable sample")
+        }
     }
 
     func configure(_ f: StreamFormat) throws {
@@ -123,8 +129,11 @@ final class VideoDecoder {
     func decode(_ data: Data, ptsMicros: Int64) {
         guard let session, let format else { return }
         let offset = serverToLocalOffsetMicros
-        let recvLatency = Double(Int64(Date().timeIntervalSince1970 * 1_000_000) - (ptsMicros - offset)) / 1000.0
-        if recvLatency > 0 && recvLatency < 10_000 { recvLatencies.append(recvLatency) }
+        lock.lock(); let syncRTT = clockSyncRTTms; lock.unlock()
+        if syncRTT < 20 {
+            let recvLatency = Double(Int64(Date().timeIntervalSince1970 * 1_000_000) - (ptsMicros - offset)) / 1000.0
+            if recvLatency > 0 && recvLatency < 10_000 { recvLatencies.append(recvLatency) }
+        }
         var bb: CMBlockBuffer?
         let bst = CMBlockBufferCreateWithMemoryBlock(
             allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: data.count,
@@ -162,6 +171,7 @@ final class VideoDecoder {
         let now = DispatchTime.now().uptimeNanoseconds
         let offset = serverToLocalOffsetMicros
         lock.lock()
+        let syncRTT = clockSyncRTTms
         if status == noErr, let imageBuffer {
             if !loggedPixelFormat {
                 loggedPixelFormat = true
@@ -175,7 +185,7 @@ final class VideoDecoder {
             if serverMicros > 0 {
                 let localMicros = Int64(Date().timeIntervalSince1970 * 1_000_000)
                 let latency = Double(localMicros - (serverMicros - offset)) / 1000.0
-                if latency > 0 && latency < 10_000 { latencies.append(latency) }
+                if syncRTT < 20 && latency > 0 && latency < 10_000 { latencies.append(latency) }
             }
             let captureLocal = serverMicros - offset
             renderer?.submit(imageBuffer, captureLocalMicros: captureLocal)
@@ -204,5 +214,7 @@ final class VideoDecoder {
         let rp50 = rsorted.isEmpty ? 0 : rsorted[rsorted.count / 2]
         let rp95 = rsorted.isEmpty ? 0 : rsorted[min(rsorted.count - 1, Int(Double(rsorted.count) * 0.95))]
         log(String(format: "decode decoded=%d failed=%d elapsed=%.3fs fps=%.1f recv p50=%.1fms p95=%.1fms decodeLatency p50=%.1fms p95=%.1fms max=%.1fms", d, dr, e, fps, rp50, rp95, p50, p95, maxv))
+        if p95 > 33 { log("WARNING: decode latency P95 \(String(format: "%.1f", p95))ms exceeds 33ms budget") }
+        if dr > 0 { log("WARNING: \(dr) decode failures") }
     }
 }

@@ -320,8 +320,11 @@ func tcpConnect(host: String, port: UInt16, timeoutSeconds: Int = 5) throws -> T
         let fd = socket(ai.pointee.ai_family, ai.pointee.ai_socktype, ai.pointee.ai_protocol)
         if fd >= 0 {
             var tv = timeval(tv_sec: timeoutSeconds, tv_usec: 0)
-            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
             setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+            // The server sends a 1s heartbeat even when the desktop is static,
+            // so a 10s receive timeout only trips on a real network failure.
+            var recvTV = timeval(tv_sec: max(10, timeoutSeconds), tv_usec: 0)
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &recvTV, socklen_t(MemoryLayout<timeval>.size))
             if Darwin.connect(fd, ai.pointee.ai_addr, ai.pointee.ai_addrlen) == 0 {
                 return TCPConnection(fd: fd)
             }

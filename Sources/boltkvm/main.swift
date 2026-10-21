@@ -3,6 +3,7 @@ import CoreMedia
 import CoreVideo
 import Darwin
 import AppKit
+import ApplicationServices
 
 func usage() -> Never {
     print("""
@@ -12,9 +13,11 @@ func usage() -> Never {
       boltkvm server [--width 3840] [--height 2160] [--port 7474] [--seconds 20]
 
     client:
-      boltkvm client [--host <mini>] [--port 7474] [--seconds 20] [--render] [--switch-mode] [--input]
+      boltkvm client [--host <mini>] [--port 7474] [--seconds 20] [--render] [--switch-mode] [--input] [--reconnect]
 
     utilities:
+      boltkvm doctor [--role server|client]
+      boltkvm watchdog [--once] [--install] [--uninstall] [--interval 5]
       boltkvm selftest
       boltkvm pattern <png> [seconds]
     """)
@@ -40,8 +43,9 @@ func handleTimeSync(_ header: PacketHeader, _ payload: Data, decoder: VideoDecod
     let t2 = header.ptsMicros
     let t3 = Int64(Date().timeIntervalSince1970 * 1_000_000)
     let offset = ((t2 - t1) + (t2 - t3)) / 2
-    decoder.setClockOffset(offset)
-    log("time sync rtt=\(Double(t3 - t1) / 1000.0)ms server-local offset=\(Double(offset) / 1000.0)ms")
+    let rttMs = Double(t3 - t1) / 1000.0
+    decoder.setClockOffset(offset, rttMs: rttMs)
+    log("time sync rtt=\(rttMs)ms server-local offset=\(Double(offset) / 1000.0)ms")
 }
 
 func acceptAsync(_ listener: TCPListener) async throws -> TCPConnection {
@@ -62,6 +66,10 @@ struct BoltKVM {
         switch args[1] {
         case "server":
             await runServer(args)
+        case "doctor":
+            runDoctor(args)
+        case "watchdog":
+            Watchdog.run(args)
         case "selftest":
             runSelftest()
         case "pattern":
@@ -87,31 +95,68 @@ struct BoltKVM {
         let codec: VideoCodec = codecName == "prores" ? .prores422 : .hevc
         do {
             let listener = try TCPListener(port: port)
-            log("listening on :\(port); waiting for client")
-            let conn = try await acceptAsync(listener)
-            log("client connected")
-            let server = Server(width: width, height: height, codec: codec, connection: conn, dumpPath: dump.isEmpty ? nil : dump)
-            try await server.start()
-            if seconds > 0 {
-                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            let deadline: UInt64? = seconds > 0
+                ? DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
+                : nil
+            log("listening on :\(port) (\(seconds > 0 ? "\(Int(seconds))s total" : "forever")); waiting for client")
+            while true {
+                if let d = deadline, DispatchTime.now().uptimeNanoseconds >= d { break }
+                let conn = try await acceptAsync(listener)
+                log("client connected")
+                let server = Server(width: width, height: height, codec: codec, connection: conn, dumpPath: dump.isEmpty ? nil : dump)
+                do {
+                    try await server.start()
+                } catch {
+                    log("session start failed: \(error)")
+                    conn.close()
+                    continue
+                }
+                while !server.isDisconnected {
+                    if let d = deadline, DispatchTime.now().uptimeNanoseconds >= d { break }
+                    try await Task.sleep(nanoseconds: 500_000_000)
+                }
                 await server.stop()
                 server.reportLine()
                 conn.close()
-                listener.close()
-                exit(0)
-            } else {
-                while true {
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
-                    server.reportLine()
-                }
+                log("session ended; accepting next client")
+                if let d = deadline, DispatchTime.now().uptimeNanoseconds >= d { break }
             }
+            listener.close()
+            exit(0)
         } catch {
             log("server error: \(error)")
             exit(1)
         }
     }
 
+    static func runDoctor(_ args: [String]) {
+        let role = argValue(args, "--role", "all")
+        let screen = CGPreflightScreenCaptureAccess()
+        let listen = CGPreflightListenEventAccess()
+        let post = CGPreflightPostEventAccess()
+        let ax = AXIsProcessTrusted()
+        func mark(_ ok: Bool) -> String { ok ? "PASS" : "FAIL" }
+        print("boltkvm doctor role=\(role)")
+        print("\(mark(screen)) Screen Recording (CGPreflightScreenCaptureAccess)")
+        print("\(mark(listen)) Input Monitoring / listen events (CGPreflightListenEventAccess)")
+        print("\(mark(post)) Accessibility / post events (CGPreflightPostEventAccess)")
+        print("\(mark(ax)) Accessibility trust (AXIsProcessTrusted)")
+        var requiredOK = true
+        if role == "server" || role == "all" {
+            requiredOK = requiredOK && screen
+            if !post { print("note: server input injection needs Accessibility") }
+        }
+        if role == "client" || role == "all" {
+            requiredOK = requiredOK && listen
+        }
+        if !requiredOK {
+            print("hint: System Settings > Privacy & Security > Screen Recording / Accessibility / Input Monitoring; grant to the app that launches boltkvm, then restart it.")
+        }
+        exit(requiredOK ? 0 : 1)
+    }
+
     nonisolated(unsafe) static var patternTimer: Timer?
+    nonisolated(unsafe) static var patternActivity: NSObjectProtocol?
 
     static func runSelftest() {
         var failures = 0
@@ -174,6 +219,10 @@ struct BoltKVM {
         w.backgroundColor = .black
         w.level = .floating
         w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        patternActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .idleDisplaySleepDisabled, .latencyCritical],
+            reason: "boltkvm test pattern"
+        )
         let iv = NSImageView(frame: screen)
         iv.imageScaling = .scaleAxesIndependently
         iv.image = NSImage(contentsOfFile: path)
@@ -210,45 +259,56 @@ struct BoltKVM {
         let seconds = Double(argInt(args, "--seconds", 20))
         let switchMode = args.contains("--switch-mode")
         let wantsInput = args.contains("--input")
+        let reconnect = args.contains("--reconnect")
 
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.delegate = RenderSession.shared
         RenderSession.shared.start(switchMode: switchMode)
 
-        let decoder = VideoDecoder()
-        decoder.renderer = RenderSession.shared.renderer
-
         DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let conn = try tcpConnect(host: host, port: port)
-                log("connected to \(host):\(port)")
-                try conn.send(timeSyncRequest())
-                let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
-                var inputStarted = false
-                while DispatchTime.now().uptimeNanoseconds < deadline {
-                    let hd = try conn.recvExact(HEADER_SIZE)
-                    guard let header = PacketHeader.decode(hd) else { throw POSIXError(.EBADMSG) }
-                    let payload = try conn.recvExact(Int(header.payloadLength))
-                    if header.type == .format, let f = StreamFormat.decode(payload) {
-                        try decoder.configure(f)
-                        if wantsInput && !inputStarted {
-                            inputStarted = true
-                            DispatchQueue.main.async {
-                                RenderSession.shared.startInput(conn: conn)
+            let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
+            var lastDecoder: VideoDecoder?
+            while DispatchTime.now().uptimeNanoseconds < deadline {
+                var conn: TCPConnection?
+                do {
+                    let c = try tcpConnect(host: host, port: port)
+                    conn = c
+                    log("connected to \(host):\(port)")
+                    try c.send(timeSyncRequest())
+                    let decoder = VideoDecoder()
+                    decoder.renderer = RenderSession.shared.renderer
+                    lastDecoder = decoder
+                    var inputStarted = false
+                    while DispatchTime.now().uptimeNanoseconds < deadline {
+                        let hd = try c.recvExact(HEADER_SIZE)
+                        guard let header = PacketHeader.decode(hd) else { throw POSIXError(.EBADMSG) }
+                        let payload = try c.recvExact(Int(header.payloadLength))
+                        if header.type == .format, let f = StreamFormat.decode(payload) {
+                            try decoder.configure(f)
+                            if wantsInput && !inputStarted {
+                                inputStarted = true
+                                DispatchQueue.main.async {
+                                    RenderSession.shared.restartInput(conn: c)
+                                }
                             }
+                        } else if header.type == .frame {
+                            decoder.decode(payload, ptsMicros: header.ptsMicros)
+                        } else if header.type == .timeSync {
+                            handleTimeSync(header, payload, decoder: decoder)
                         }
-                    } else if header.type == .frame {
-                        decoder.decode(payload, ptsMicros: header.ptsMicros)
-                    } else if header.type == .timeSync {
-                        handleTimeSync(header, payload, decoder: decoder)
                     }
+                    c.close()
+                    break
+                } catch {
+                    log("client render error: \(error)")
+                    conn?.close()
+                    DispatchQueue.main.async { RenderSession.shared.stopInput() }
+                    if !reconnect { break }
+                    Thread.sleep(forTimeInterval: 1.0)
                 }
-                sleep(1)
-                decoder.report()
-                conn.close()
-            } catch {
-                log("client render error: \(error)")
             }
+            sleep(1)
+            lastDecoder?.report()
             DispatchQueue.main.async {
                 NSApplication.shared.terminate(nil)
             }

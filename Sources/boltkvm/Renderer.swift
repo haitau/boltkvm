@@ -222,6 +222,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         log(String(format: "render frames=%d elapsed=%.2fs fps=%.1f drawable=%.0fx%.0f latency p50=%.1fms p95=%.1fms max=%.1fms",
                    f, e, e > 0 ? Double(f) / e : 0,
                    view.drawableSize.width, view.drawableSize.height, p50, p95, maxv))
+        if p95 > 33 { log("WARNING: capture→present P95 \(String(format: "%.1f", p95))ms exceeds 33ms budget") }
     }
 }
 
@@ -233,6 +234,16 @@ final class RenderSession: NSObject, NSApplicationDelegate {
     private var switchedMode = false
     var decoder: VideoDecoder?
     private(set) var inputCapture: InputCapture?
+
+    func stopInput() {
+        inputCapture?.stop()
+        inputCapture = nil
+    }
+
+    func restartInput(conn: TCPConnection) {
+        stopInput()
+        startInput(conn: conn)
+    }
 
     func startInput(conn: TCPConnection) {
         guard inputCapture == nil else { return }
