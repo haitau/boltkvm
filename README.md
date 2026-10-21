@@ -26,8 +26,8 @@ CGEvent 输入注入             ◄── 输入事件流 ───────
 
 项目按阶段门控推进，详细背景、技术边界与验收指标见 [设计文档](docs/design/project-charter.md)：
 
-- [ ] **M0 前置验证**：无头 `3008×1692 HiDPI` 虚拟显示稳定性、雷雳网桥吞吐/RTT 基线、现成方案最后排除
-- [ ] **M1 视觉等价 Spike**：采集 → HEVC 硬编 → 雷雳直传 → 硬解 → Metal 1:1 上屏（并排截图对比与慢动作延迟实测）
+- [ ] **M0 前置验证**：无头 `3008×1692 HiDPI` 虚拟显示稳定性、雷雳网桥吞吐/RTT 基线、现成方案最后排除（显示层与链路已验证，见 [报告](docs/reports/2026-10-21-m0-display.md)；真无头/重启/音频待亲验）
+- [x] **M1 视觉等价 Spike**：采集 → 硬编 → 雷雳直传 → 硬解 → Metal 1:1 上屏（α′ + ProRes 422：60fps、capture→present P95 27.6ms、SSIM 0.984；glass-to-glass 相机作为后续验证）
 - [ ] **M2 输入链路**：全屏系统级快捷键截获（`CGEventTap`）、修饰键与连续滚动相位（`CGEvent`）注入
 - [ ] **M3 稳定性加固**：虚拟显示看门狗、TCC 权限自检、睡眠唤醒与断线自愈（连续 8 小时稳定运行）
 
@@ -35,6 +35,9 @@ CGEvent 输入注入             ◄── 输入事件流 ───────
 
 - [设计文档](docs/design/project-charter.md)：目标、约束、已验证事实、方案空间与里程碑
 - [M0 前置验证计划](docs/plans/m0-verification.md)
+- [M0 显示层验证报告](docs/reports/2026-10-21-m0-display.md)
+- [M1 编码可行性探针](docs/reports/2026-10-21-m1-encoder-probe.md)
+- [M1 α′ 管线报告](docs/reports/2026-10-21-m1-pipeline.md)
 - [架构决策记录](docs/adr/)
 - [验证报告](docs/reports/)
 
