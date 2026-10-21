@@ -1,6 +1,7 @@
 import Foundation
 import CoreMedia
 import CoreVideo
+import CoreGraphics
 import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
@@ -36,6 +37,9 @@ final class Server: NSObject, SCStreamOutput {
     private var pending = 0
     private var formatKey: String?
     private var closed = false
+    private var displayBounds = CGRect.zero
+    private var inputCount = 0
+    private var scrollCount = 0
     private var startTime = DispatchTime.now().uptimeNanoseconds
 
     init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?) {
@@ -108,7 +112,8 @@ final class Server: NSObject, SCStreamOutput {
             throw NSError(domain: "boltkvm", code: 1, userInfo: [NSLocalizedDescriptionKey: "no display"])
         }
         let mode = CGDisplayCopyDisplayMode(display.displayID)
-        log("capture display id=\(display.displayID) points=\(display.width)x\(display.height) pixel=\(mode?.pixelWidth ?? -1)x\(mode?.pixelHeight ?? -1) -> \(captureWidth)x\(captureHeight)")
+        displayBounds = CGDisplayBounds(display.displayID)
+        log("capture display id=\(display.displayID) points=\(display.width)x\(display.height) pixel=\(mode?.pixelWidth ?? -1)x\(mode?.pixelHeight ?? -1) -> \(captureWidth)x\(captureHeight) bounds=\(displayBounds)")
 
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let config = SCStreamConfiguration()
@@ -160,11 +165,71 @@ final class Server: NSObject, SCStreamOutput {
                         echo.appendInt64BE(t1)
                         try self.connection.send(packet(type: .timeSync, ptsMicros: t2, payload: echo))
                         _ = payload
+                    } else if h.type == .input {
+                        if let ev = InputEvent.decode(payload) {
+                            self.inject(ev)
+                        }
                     }
                 } catch {
                     break
                 }
             }
+        }
+    }
+
+    private func inject(_ ev: InputEvent) {
+        let p = CGPoint(
+            x: displayBounds.minX + ev.x * displayBounds.width,
+            y: displayBounds.minY + ev.y * displayBounds.height
+        )
+        inputCount += 1
+        if inputCount % 120 == 0 { log("input events=\(inputCount)") }
+
+        switch ev.type {
+        case .keyDown, .keyUp:
+            guard let e = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(ev.keyCode), keyDown: ev.type == .keyDown) else { return }
+            e.flags = CGEventFlags(rawValue: ev.flags)
+            if ev.isRepeat { e.setIntegerValueField(.keyboardEventAutorepeat, value: 1) }
+            e.post(tap: .cghidEventTap)
+        case .flagsChanged:
+            guard let e = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(ev.keyCode), keyDown: true) else { return }
+            e.type = .flagsChanged
+            e.flags = CGEventFlags(rawValue: ev.flags)
+            e.post(tap: .cghidEventTap)
+        case .mouseMoved, .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+             .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+             .otherMouseDown, .otherMouseUp, .otherMouseDragged:
+            let type: CGEventType
+            let button: CGMouseButton
+            switch ev.type {
+            case .mouseMoved: type = .mouseMoved; button = .left
+            case .leftMouseDown: type = .leftMouseDown; button = .left
+            case .leftMouseUp: type = .leftMouseUp; button = .left
+            case .leftMouseDragged: type = .leftMouseDragged; button = .left
+            case .rightMouseDown: type = .rightMouseDown; button = .right
+            case .rightMouseUp: type = .rightMouseUp; button = .right
+            case .rightMouseDragged: type = .rightMouseDragged; button = .right
+            case .otherMouseDown: type = .otherMouseDown; button = .center
+            case .otherMouseUp: type = .otherMouseUp; button = .center
+            case .otherMouseDragged: type = .otherMouseDragged; button = .center
+            default: return
+            }
+            guard let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: button) else { return }
+            e.setIntegerValueField(.mouseEventButtonNumber, value: Int64(ev.button))
+            if ev.type != .mouseMoved && ev.type != .leftMouseDragged && ev.type != .rightMouseDragged && ev.type != .otherMouseDragged {
+                e.setIntegerValueField(.mouseEventClickState, value: 1)
+            }
+            e.post(tap: .cghidEventTap)
+        case .scroll:
+            scrollCount += 1
+            if scrollCount <= 10 { log("scroll \(scrollCount) phase=\(ev.phase) momentum=\(ev.momentum) dx=\(ev.scrollX) dy=\(ev.scrollY)") }
+            let dy = Int32(max(-1_000_000, min(1_000_000, ev.scrollY)))
+            let dx = Int32(max(-1_000_000, min(1_000_000, ev.scrollX)))
+            guard let e = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0) else { return }
+            e.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            e.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(ev.phase))
+            e.setIntegerValueField(.scrollWheelEventMomentumPhase, value: Int64(ev.momentum))
+            e.post(tap: .cghidEventTap)
         }
     }
 

@@ -21,6 +21,7 @@ enum PacketType: UInt8 {
     case frame = 2
     case heartbeat = 3
     case timeSync = 4
+    case input = 5
 }
 
 struct PacketHeader {
@@ -98,6 +99,72 @@ struct StreamFormat {
     }
 }
 
+enum InputEventType: UInt8 {
+    case keyDown = 1
+    case keyUp = 2
+    case flagsChanged = 3
+    case mouseMoved = 4
+    case leftMouseDown = 5
+    case leftMouseUp = 6
+    case rightMouseDown = 7
+    case rightMouseUp = 8
+    case otherMouseDown = 9
+    case otherMouseUp = 10
+    case leftMouseDragged = 11
+    case rightMouseDragged = 12
+    case otherMouseDragged = 13
+    case scroll = 14
+}
+
+struct InputEvent {
+    var type: InputEventType
+    var keyCode: UInt16 = 0
+    var flags: UInt64 = 0
+    var x: Double = 0        // normalized 0...1 in the client content
+    var y: Double = 0
+    var button: UInt8 = 0
+    var scrollX: Double = 0
+    var scrollY: Double = 0
+    var phase: UInt8 = 0
+    var momentum: UInt8 = 0
+    var isRepeat: Bool = false
+
+    func encode() -> Data {
+        var d = Data(capacity: 48)
+        d.append(type.rawValue)
+        d.appendUInt16BE(keyCode)
+        d.appendUInt64BE(flags)
+        d.appendDoubleBE(x)
+        d.appendDoubleBE(y)
+        d.append(button)
+        d.appendDoubleBE(scrollX)
+        d.appendDoubleBE(scrollY)
+        d.append(phase)
+        d.append(momentum)
+        d.append(isRepeat ? 1 : 0)
+        d.append(0) // pad to 48
+        return d
+    }
+
+    static func decode(_ d: Data) -> InputEvent? {
+        guard d.count >= 48, let type = InputEventType(rawValue: d[d.startIndex]) else { return nil }
+        let b = d.startIndex
+        return InputEvent(
+            type: type,
+            keyCode: d.readUInt16BE(b + 1),
+            flags: d.readUInt64BE(b + 3),
+            x: d.readDoubleBE(b + 11),
+            y: d.readDoubleBE(b + 19),
+            button: d[b + 27],
+            scrollX: d.readDoubleBE(b + 28),
+            scrollY: d.readDoubleBE(b + 36),
+            phase: d[b + 44],
+            momentum: d[b + 45],
+            isRepeat: d[b + 46] != 0
+        )
+    }
+}
+
 extension Data {
     mutating func appendUInt16BE(_ v: UInt16) {
         var b = v.bigEndian
@@ -110,6 +177,21 @@ extension Data {
     mutating func appendInt64BE(_ v: Int64) {
         var b = v.bigEndian
         Swift.withUnsafeBytes(of: &b) { append(contentsOf: $0) }
+    }
+    mutating func appendUInt64BE(_ v: UInt64) {
+        var b = v.bigEndian
+        Swift.withUnsafeBytes(of: &b) { append(contentsOf: $0) }
+    }
+    mutating func appendDoubleBE(_ v: Double) {
+        appendUInt64BE(v.bitPattern)
+    }
+    func readUInt64BE(_ i: Int) -> UInt64 {
+        var v: UInt64 = 0
+        for j in 0..<8 { v = (v << 8) | UInt64(self[i + j]) }
+        return v
+    }
+    func readDoubleBE(_ i: Int) -> Double {
+        Double(bitPattern: readUInt64BE(i))
     }
     func readUInt32BE(_ i: Int) -> UInt32 {
         let b = self[i..<(i + 4)]

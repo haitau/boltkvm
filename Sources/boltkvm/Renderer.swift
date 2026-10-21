@@ -232,6 +232,17 @@ final class RenderSession: NSObject, NSApplicationDelegate {
     private var modeSwitcher = DisplayModeSwitcher()
     private var switchedMode = false
     var decoder: VideoDecoder?
+    private(set) var inputCapture: InputCapture?
+
+    func startInput(conn: TCPConnection) {
+        guard inputCapture == nil else { return }
+        let cap = InputCapture(conn: conn)
+        if cap.start() {
+            inputCapture = cap
+        } else {
+            log("input: not started")
+        }
+    }
 
     func start(switchMode: Bool) {
         guard let device = MTLCreateSystemDefaultDevice() else { fatalError("no Metal device") }
@@ -267,6 +278,7 @@ final class RenderSession: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        inputCapture?.stop()
         if switchedMode { modeSwitcher.restore() }
         renderer?.report()
     }

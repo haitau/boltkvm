@@ -12,7 +12,7 @@ func usage() -> Never {
       boltkvm server [--width 3840] [--height 2160] [--port 7474] [--seconds 20]
 
     client:
-      boltkvm client [--host <mini>] [--port 7474] [--seconds 20]
+      boltkvm client [--host <mini>] [--port 7474] [--seconds 20] [--render] [--switch-mode] [--input]
 
     utilities:
       boltkvm selftest
@@ -140,6 +140,14 @@ struct BoltKVM {
             check(pkt.suffix(1000) == payload, "packet payload")
         } else { check(false, "packet header decode") }
 
+        let ie = InputEvent(type: .scroll, keyCode: 12, flags: 0x1234, x: 0.25, y: 0.75,
+                            button: 2, scrollX: -3.5, scrollY: 4.25, phase: 2, momentum: 1, isRepeat: true)
+        if let back = InputEvent.decode(ie.encode()) {
+            check(back.type == .scroll && back.keyCode == 12 && back.flags == 0x1234, "input type/key/flags")
+            check(back.x == 0.25 && back.y == 0.75 && back.button == 2, "input position/button")
+            check(back.scrollX == -3.5 && back.scrollY == 4.25 && back.phase == 2 && back.momentum == 1 && back.isRepeat, "input scroll/phase")
+        } else { check(false, "input event decode") }
+
         for n in [0, 1, 7, 8, 9, 12, 13, 100] {
             var d = Data(count: n)
             for i in 0..<n { d[i] = UInt8(i & 0xff) }
@@ -201,6 +209,7 @@ struct BoltKVM {
         let port = UInt16(argInt(args, "--port", 7474))
         let seconds = Double(argInt(args, "--seconds", 20))
         let switchMode = args.contains("--switch-mode")
+        let wantsInput = args.contains("--input")
 
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.delegate = RenderSession.shared
@@ -215,12 +224,19 @@ struct BoltKVM {
                 log("connected to \(host):\(port)")
                 try conn.send(timeSyncRequest())
                 let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
+                var inputStarted = false
                 while DispatchTime.now().uptimeNanoseconds < deadline {
                     let hd = try conn.recvExact(HEADER_SIZE)
                     guard let header = PacketHeader.decode(hd) else { throw POSIXError(.EBADMSG) }
                     let payload = try conn.recvExact(Int(header.payloadLength))
                     if header.type == .format, let f = StreamFormat.decode(payload) {
                         try decoder.configure(f)
+                        if wantsInput && !inputStarted {
+                            inputStarted = true
+                            DispatchQueue.main.async {
+                                RenderSession.shared.startInput(conn: conn)
+                            }
+                        }
                     } else if header.type == .frame {
                         decoder.decode(payload, ptsMicros: header.ptsMicros)
                     } else if header.type == .timeSync {
@@ -270,6 +286,8 @@ struct BoltKVM {
                         break
                     case .timeSync:
                         handleTimeSync(header, payload, decoder: decoder)
+                    case .input:
+                        break
                     }
                 } catch {
                     log("client read error: \(error)")
