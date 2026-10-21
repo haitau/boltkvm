@@ -1,0 +1,44 @@
+# 默认自动识别文本文件并统一为 LF 换行
+* text=auto eol=lf
+
+# Swift / Objective-C / Metal 源码与语法高亮语义
+*.swift text diff=swift
+*.metal text diff=cpp
+*.h text diff=objc
+*.m text diff=objc
+*.mm text diff=objc
+
+# Xcode 与 Apple 配置文件
+*.pbxproj binary merge=union
+*.plist text
+*.entitlements text
+*.xcconfig text
+*.xcworkspacedata text
+*.xcscheme text
+*.storyboard text
+*.xib text
+
+# 文档与脚本
+*.md text diff=markdown
+*.sh text eol=lf
+*.zsh text eol=lf
+*.json text
+*.jsonc text
+*.yml text
+*.yaml text
+*.toml text
+
+# 二进制资产
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.icns binary
+*.ico binary
+*.pdf binary
+*.gz binary
+*.zip binary
+*.dmg binary
+
+# GitHub Linguist 统计排除（文档与配置不计入语言占比）
+docs/** linguist-documentation
+.agents/** linguist-ignore
