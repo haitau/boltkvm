@@ -183,3 +183,46 @@ taskgated 杀掉正在运行的旧 CLI 进程，不是代码问题。
 - app 部署下 >10 分钟的稳定性（今天只做了分钟级）；
 - 音频在 app 里未实测（CLI 下已验）；
 - 8 小时输入连续性测试仍按用户要求搁置。
+
+## 远程动作的 TCC 身份问题（2026-10-22 17:50）
+
+`桌面` / `App` 一直返回 `-1743 未获得授权将Apple事件发送给 System Events`。
+原因不在脚本本身：**helper 是裸可执行文件，没有 bundle 身份**，TCC 把它的
+Automation 请求直接判死，连授权弹窗都不会出。
+
+改法：helper 收到 `PacketType.command` 后不自己执行，往 stdout 打
+`@@REMOTE:<raw>`（`BOLTKVM_RELAY_REMOTE=1` 时），由 app 进程解析后调用
+`performRemoteAction`——只有 app 有 bundle id，才有资格被弹窗询问。
+`performRemoteAction` 抽到 `RemoteActionPerformer.swift`，CLI 角色仍然本地执行。
+
+实测：`command: relayed showDesktop to the app` 已经走到，但**仍然 -1743**，
+说明 TCC 里已经有一条拒绝记录（之前 helper 反复请求留下的）。已在 mini 上
+`tccutil reset AppleEvents io.github.boltkvm` 清掉，等客户端能连上后再点一次
+`桌面` 应该就会弹授权框。
+
+## SCShareableContent 卡死（2026-10-22 17:48）
+
+现象：helper 刚启动后的**第一次**连接经常停在"正在连接…"，服务端日志只有
+`client connected` / `auth ok`，没有 `capture started`，只能重启 helper 才好——
+而且重启后又要再连一次。
+
+原因：`SCShareableContent.excludingDesktopWindows` 在虚拟屏刚建好时会**永远不
+回调**（不是返回空，是不返回），`start()` 就卡在 await 上。原来的 5 次重试只在
+"返回了但 displays 为空"时有用。
+
+改成用 `withThrowingTaskGroup` 给这次调用套 5s 超时，超时算一次失败并重试。
+验证：重启 helper 后立刻用 CLI 客户端连，`fps=61.1`、348 帧，`capture started`
+立即出现。
+
+## 待查：GUI 客户端连不上（2026-10-22 17:58）
+
+同一台 Pro 上：
+
+- CLI 客户端 `--host 10.0.20.2 --port 7474` → 61.1 fps、348 帧，正常；
+- GUI 客户端同一地址同一端口 → `失败：未能完成该操作。无到主机的路由`，
+  而服务端日志里能看到 `client connected` 之后紧接 `auth failed: ... Connection
+  reset by peer`。
+
+`nc -z 10.0.20.2 7474` 通，ping 0.4ms，两端 `~/.boltkvm-key` sha256 一致，app 无
+sandbox entitlement。反复重建签名（Local Network / 本地网络 TCC）是头号嫌疑，
+但 `tccutil reset LocalNetwork` 报不支持，没验成。

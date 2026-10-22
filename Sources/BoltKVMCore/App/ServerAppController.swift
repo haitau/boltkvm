@@ -384,6 +384,7 @@ final class ServerAppController: NSObject {
         proc.standardInput = Pipe()
         var env = ProcessInfo.processInfo.environment
         env["BOLTKVM_EXIT_ON_STDIN_EOF"] = "1"
+        env["BOLTKVM_RELAY_REMOTE"] = "1"
         proc.environment = env
         // Keep the child's output in the app log as well as parsing it: the menu
         // bar only has room for one line.
@@ -448,6 +449,15 @@ final class ServerAppController: NSObject {
         guard !line.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            if line.hasPrefix("@@REMOTE:"),
+               let raw = UInt8(line.dropFirst("@@REMOTE:".count)),
+               let action = RemoteAction(rawValue: raw) {
+                // Run the AppleScript here, not in the helper: only the app has a
+                // bundle identity TCC will prompt for.
+                performRemoteAction(action)
+                self.setState(L.t("server.status.connected"), detail: "command: \(action)")
+                return
+            }
             if line.contains("listening on") {
                 self.setState(L.t("server.status.listening"), detail: L.f("server.status.port", Prefs.serverPort))
                 self.lastStats = ""

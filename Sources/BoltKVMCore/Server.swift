@@ -147,9 +147,10 @@ final class Server: NSObject, SCStreamOutput {
                 kIOPMUserActiveLocal, &assertionID)
             if attempt > 0 { log("no display yet; waking display and retrying (\(attempt))") }
             do {
-                let c = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                let c = try await shareableContentWithTimeout()
                 if !c.displays.isEmpty { content = c; break }
             } catch {
+                log("shareable content attempt \(attempt) failed: \(error.localizedDescription)")
                 if attempt == 4 { throw error }
             }
             try? await Task.sleep(nanoseconds: 700_000_000)
@@ -236,6 +237,29 @@ final class Server: NSObject, SCStreamOutput {
         heartbeatTimer = t
     }
 
+    /// ScreenCaptureKit's first enumeration after a fresh virtual display can
+    /// simply never call back: the client then sits at "connecting" forever and
+    /// only a helper restart helps. Race it against a timeout so a stuck call
+    /// becomes a retry instead of a hung session.
+    private func shareableContentWithTimeout(seconds: Double = 5) async throws -> SCShareableContent {
+        try await withThrowingTaskGroup(of: SCShareableContent.self) { group in
+            group.addTask {
+                try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw NSError(domain: "boltkvm", code: 7,
+                              userInfo: [NSLocalizedDescriptionKey: "shareable content timed out after \(Int(seconds))s"])
+            }
+            guard let first = try await group.next() else {
+                throw NSError(domain: "boltkvm", code: 7,
+                              userInfo: [NSLocalizedDescriptionKey: "shareable content produced nothing"])
+            }
+            group.cancelAll()
+            return first
+        }
+    }
+
     private func startClockResponder() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
@@ -284,29 +308,17 @@ final class Server: NSObject, SCStreamOutput {
     /// which is a trusted sender (the first use asks for Automation permission).
     private func performRemote(_ action: RemoteAction) {
         log("command: \(action)")
-        DispatchQueue.main.async {
-            switch action {
-            case .missionControl:
-                NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Mission Control.app"))
-            case .showDesktop:
-                Self.keyViaSystemEvents("key code 103")
-            case .appWindows:
-                Self.keyViaSystemEvents("key code 125 using control down")
-            case .spaceLeft:
-                Self.keyViaSystemEvents("key code 123 using control down")
-            case .spaceRight:
-                Self.keyViaSystemEvents("key code 124 using control down")
-            }
+        // The helper is a bare executable: TCC attributes Automation prompts to it
+        // and silently denies (-1743). The app that spawned it is a real app with
+        // a bundle identity, so hand the action up and let it run the AppleScript.
+        if ProcessInfo.processInfo.environment["BOLTKVM_RELAY_REMOTE"] == "1" {
+            print("@@REMOTE:\(action.rawValue)")
+            fflush(stdout)
+            log("command: relayed \(action) to the app")
+            return
         }
-    }
-
-    private static func keyViaSystemEvents(_ body: String) {
-        let source = "tell application \"System Events\" to \(body)"
-        guard let script = NSAppleScript(source: source) else { return }
-        var error: NSDictionary?
-        script.executeAndReturnError(&error)
-        if let error {
-            log("command: AppleScript failed: \(error[NSAppleScript.errorNumber] ?? "?") \(error[NSAppleScript.errorMessage] ?? "")")
+        DispatchQueue.main.async {
+            performRemoteAction(action)
         }
     }
 
