@@ -3,7 +3,7 @@
 # BoltKVM.app in server role: builds, installs to /Applications, stops the CLI
 # loop, starts the app.
 #
-#   scripts/deploy-app.sh 10.0.20.2
+#   scripts/deploy-app.sh <被控端地址>
 #
 # Precondition: BoltKVM.app must have Screen Recording permission on the target.
 # TCC cannot be scripted; grant it once in System Settings → Privacy & Security →

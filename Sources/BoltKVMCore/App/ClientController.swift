@@ -41,7 +41,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private func build(in window: NSWindow) {
         let hostLabel = label("主机")
         hostField = NSTextField(string: Prefs.host)
-        hostField.placeholderString = "10.0.20.2"
+        hostField.placeholderString = "例如 10.0.0.2"
         hostField.widthAnchor.constraint(equalToConstant: 150).isActive = true
 
         let portLabel = label("端口")
