@@ -143,6 +143,7 @@ reboot ──25s──► ssh 可用 ──► 自动登录进桌面会话
 - [M0 前置验证计划](docs/plans/m0-verification.md)
 - [输入连续性长跑计划](docs/plans/input-continuity.md)
 - [未完成事项（P0/P1/P2）](docs/plans/open-items.md)
+- [内建虚拟显示与应用化方案](docs/plans/2026-10-22-app-and-vdscreen-integration.md)
 - [音频可选与默认隔离](docs/reports/2026-10-22-audio-option.md)
 - [上屏 51 fps 的真因](docs/reports/2026-10-22-present-sync-fix.md)
 - [传输加密（ChaCha20-Poly1305）](docs/reports/2026-10-22-transport-encryption.md)
