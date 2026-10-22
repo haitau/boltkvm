@@ -156,6 +156,23 @@ final class ClientSession {
         }
     }
 
+    /// Turn pointer/keyboard forwarding on or off mid-session (toolbar 控制).
+    func setInputEnabled(_ enabled: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let conn = self.conn, self.isActive else { return }
+            if enabled {
+                self.startInput(conn: conn)
+            } else {
+                self.windowInput?.stop()
+                self.windowInput = nil
+                self.input?.stop()
+                self.input = nil
+            }
+        }
+    }
+
+    var isForwardingInput: Bool { windowInput != nil || input != nil }
+
     /// Ask the remote to perform a system-UI action (Mission Control, …).
     /// Keystrokes cannot do this: macOS ignores synthetic events for its own
     /// hotkeys, so the server performs the action itself.

@@ -102,6 +102,34 @@ id=25  inactive online ASLEEP main 3008x1692
 
 清晰模式的 1.38 Gbps 只在雷雳桥（10Gbps）上验证过；Wi-Fi 下应该退回「标准」。默认值已改成「清晰」，清掉 preferences 后验证：helper 参数 `--width 6016 --height 3384`，客户端 60 fps / 1381 Mbps / dropped=0。
 
+## 客户端工具栏（仿屏幕共享）
+
+按 macOS「屏幕共享」的布局给客户端窗口加了 `NSToolbar`：
+
+```
+[控制]   [App] [调度中心] [桌面]   [全屏]
+```
+
+- 三个远程动作从菜单搬到工具栏（菜单里的三项保留）；
+- 「控制」是键鼠转发开关，图标随状态在 `cursorarrow.rays` / `hand.raised.slash` 之间切换；
+- 连接栏里重复的「全屏」按钮删掉，全屏入口只在工具栏；
+- 全屏时连接栏隐藏（`windowWillEnterFullScreen` 里换约束），窗口进入标准 AppKit
+  全屏后工具栏由系统在指针移到顶边时浮现。
+
+验证：窗口态截图确认工具栏五项齐全、图标正确。
+
+全屏态（实测 2026-10-22 17:40 前后，Pro 本机）：
+
+- 工具栏「全屏」按钮能进全屏（`AXFullScreen=true`，drawable 6016x3280），
+  指针移到顶边时工具栏连标题一起浮现，截图里能看到五项；
+- 但 `windowWillEnterFullScreen` / `windowWillExitFullScreen` **没有触发**
+  （临时加的日志一次都没打印），所以"全屏隐藏连接栏"那段代码实际没生效，
+  现在靠系统工具栏覆盖，属于待修；
+- 退出全屏：⌃⌘F 和「视图 → 全屏」在这次测试里都没生效，最后用
+  `set value of attribute "AXFullScreen" ... to false` 才退出来；
+- 早前两次退全屏时窗口直接消失、连接中断（日志停在 65.8s），之后没能复现，
+  但也没找到原因。
+
 ## 远程系统操作（调度中心 / 显示桌面 / App 窗口）
 
 参照屏幕共享加了「远程」菜单：调度中心（多桌面）、显示 App 窗口、显示桌面。

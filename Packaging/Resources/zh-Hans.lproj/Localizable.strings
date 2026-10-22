@@ -84,3 +84,12 @@
 "menu.remote.missionControl" = "调度中心";
 "menu.remote.appWindows" = "App";
 "menu.remote.showDesktop" = "桌面";
+
+"client.toolbar.control" = "控制";
+"client.toolbar.control.tip" = "转发本机键鼠（关闭后只看不动）";
+"client.toolbar.app" = "App";
+"client.toolbar.app.tip" = "显示远端当前 App 的所有窗口";
+"client.toolbar.missionControl" = "调度中心";
+"client.toolbar.missionControl.tip" = "显示远端调度中心（多桌面）";
+"client.toolbar.desktop" = "桌面";
+"client.toolbar.desktop.tip" = "让远端显示桌面";

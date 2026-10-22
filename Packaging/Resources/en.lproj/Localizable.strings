@@ -83,3 +83,12 @@
 "menu.remote.missionControl" = "Mission Control";
 "menu.remote.appWindows" = "App";
 "menu.remote.showDesktop" = "Desktop";
+
+"client.toolbar.control" = "Control";
+"client.toolbar.control.tip" = "Forward this Mac's pointer and keyboard (off = view only)";
+"client.toolbar.app" = "App";
+"client.toolbar.app.tip" = "Show all windows of the remote app";
+"client.toolbar.missionControl" = "Mission Control";
+"client.toolbar.missionControl.tip" = "Show the remote Mission Control";
+"client.toolbar.desktop" = "Desktop";
+"client.toolbar.desktop.tip" = "Show the remote desktop";
