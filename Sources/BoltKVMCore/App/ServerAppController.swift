@@ -38,7 +38,7 @@ final class ServerAppController: NSObject {
         guard CGPreflightScreenCaptureAccess() else {
             // A server has no window, so the permission lives in the menu bar
             // instead of a modal dialog that would block launch.
-            setState("需要屏幕录制权限", detail: "点「授权…」")
+            setState(L.t("server.status.needsPermission"), detail: L.t("server.permission.hint"))
             permissionItem?.isHidden = false
             return
         }
@@ -59,14 +59,30 @@ final class ServerAppController: NSObject {
         guard !wanted else { return }
         wanted = true
         permissionItem?.isHidden = true
+        reapOrphanHelpers()
         launch()
+    }
+
+    /// A helper outlives the app that spawned it if the app is killed outright
+    /// (SIGKILL, crash). Left alone it keeps the port bound and the virtual
+    /// display alive, so a fresh app would fail to bind. Reap them before launch.
+    private func reapOrphanHelpers() {
+        guard let id = Bundle.main.bundleIdentifier else { return }
+        let mine = ProcessInfo.processInfo.processIdentifier
+        let current = process?.processIdentifier
+        for app in NSRunningApplication.runningApplications(withBundleIdentifier: id)
+        where app.processIdentifier != mine && app.processIdentifier != current
+            && app.executableURL?.lastPathComponent == "boltkvm-server" {
+            log("app: terminating orphan helper pid \(app.processIdentifier)")
+            app.terminate()
+        }
     }
 
     func stop() {
         wanted = false
         restartWork?.cancel()
         stopProcess()
-        setState("已停止")
+        setState(L.t("server.status.stopped"))
     }
 
     // MARK: - Menu
@@ -76,11 +92,11 @@ final class ServerAppController: NSObject {
         if let button = item.button {
             button.image = NSImage(systemSymbolName: "display", accessibilityDescription: "BoltKVM")
             button.image?.isTemplate = true
-            button.toolTip = "BoltKVM 被控端"
+            button.toolTip = L.t("server.tooltip")
         }
         let menu = NSMenu()
 
-        stateItem = NSMenuItem(title: "已停止", action: nil, keyEquivalent: "")
+        stateItem = NSMenuItem(title: L.t("server.status.stopped"), action: nil, keyEquivalent: "")
         stateItem?.isEnabled = false
         menu.addItem(stateItem!)
         detailItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -88,29 +104,29 @@ final class ServerAppController: NSObject {
         menu.addItem(detailItem!)
         menu.addItem(.separator())
 
-        let permission = NSMenuItem(title: "授权…（屏幕录制）", action: #selector(openPermissions), keyEquivalent: "")
+        let permission = NSMenuItem(title: L.t("server.menu.permission"), action: #selector(openPermissions), keyEquivalent: "")
         permission.target = self
         permission.isHidden = true
         menu.addItem(permission)
         permissionItem = permission
 
-        let toggle = NSMenuItem(title: "启动服务", action: #selector(toggleService), keyEquivalent: "")
+        let toggle = NSMenuItem(title: L.t("server.menu.start"), action: #selector(toggleService), keyEquivalent: "")
         toggle.target = self
         menu.addItem(toggle)
         startStopItem = toggle
 
-        let login = NSMenuItem(title: "开机自动启动", action: #selector(toggleLoginItem), keyEquivalent: "")
+        let login = NSMenuItem(title: L.t("server.menu.login"), action: #selector(toggleLoginItem), keyEquivalent: "")
         login.target = self
         menu.addItem(login)
         loginItem = login
         updateLoginItem()
 
-        let logItem = NSMenuItem(title: "打开日志", action: #selector(openLog), keyEquivalent: "")
+        let logItem = NSMenuItem(title: L.t("server.menu.log"), action: #selector(openLog), keyEquivalent: "")
         logItem.target = self
         menu.addItem(logItem)
         menu.addItem(.separator())
 
-        let quit = NSMenuItem(title: "退出 BoltKVM", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: L.t("server.menu.quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
 
         item.menu = menu
@@ -119,7 +135,7 @@ final class ServerAppController: NSObject {
     }
 
     private func updateMenu() {
-        startStopItem?.title = wanted ? "停止服务" : "启动服务"
+        startStopItem?.title = wanted ? L.t("server.menu.stop") : L.t("server.menu.start")
         if let button = statusItem?.button {
             button.appearsDisabled = !running
         }
@@ -156,8 +172,8 @@ final class ServerAppController: NSObject {
         } catch {
             log("login item: \(error)")
             let alert = NSAlert()
-            alert.messageText = "设置开机自启失败"
-            alert.informativeText = "\(error.localizedDescription)\n\n用自签名证书签名后再试（./scripts/make-signing-identity.sh）。"
+            alert.messageText = L.t("server.login.failed.title")
+            alert.informativeText = L.f("server.login.failed.detail", error.localizedDescription)
             alert.runModal()
         }
         updateLoginItem()
@@ -191,18 +207,23 @@ final class ServerAppController: NSObject {
 
     private func launch() {
         guard FileManager.default.isExecutableFile(atPath: helperPath) else {
-            setState("缺少采集子进程", detail: helperPath)
+            setState(L.t("server.helper.missing"), detail: helperPath)
             log("app: helper missing at \(helperPath); rebuild with Packaging/build-app.sh")
             return
         }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: helperPath)
         proc.arguments = serverArguments
-        proc.environment = ProcessInfo.processInfo.environment
 
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = pipe
+        // Held open for the app's lifetime and never written: EOF tells the
+        // helper we are gone, so it exits and releases the display.
+        proc.standardInput = Pipe()
+        var env = ProcessInfo.processInfo.environment
+        env["BOLTKVM_EXIT_ON_STDIN_EOF"] = "1"
+        proc.environment = env
         // Keep the child's output in the app log as well as parsing it: the menu
         // bar only has room for one line.
         if logHandle == nil {
@@ -225,13 +246,13 @@ final class ServerAppController: NSObject {
         do {
             try proc.run()
         } catch {
-            setState("子进程启动失败", detail: error.localizedDescription)
+            setState(L.t("server.helper.failed"), detail: error.localizedDescription)
             log("app: helper launch failed: \(error)")
             return
         }
         process = proc
         self.pipe = pipe
-        setState("启动中…", detail: "端口 \(Prefs.serverPort)")
+        setState(L.t("server.status.starting"), detail: L.f("server.status.port", Prefs.serverPort))
     }
 
     private func stopProcess() {
@@ -251,7 +272,7 @@ final class ServerAppController: NSObject {
         guard wanted else { return }
         // The CLI relies on the supervisor loop; in the app role restarts are the
         // app's job. A small delay keeps a crash loop from spinning.
-        setState("已退出，3 秒后重启", detail: "code \(status)")
+        setState(L.t("server.status.restarting"), detail: "code \(status)")
         log("app: helper exited with \(status); restarting in 3s")
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.wanted else { return }
@@ -266,17 +287,17 @@ final class ServerAppController: NSObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             if line.contains("listening on") {
-                self.setState("监听中", detail: "端口 \(Prefs.serverPort)")
+                self.setState(L.t("server.status.listening"), detail: L.f("server.status.port", Prefs.serverPort))
                 self.lastStats = ""
             } else if line.contains("client connected") {
-                self.setState("已连接", detail: "端口 \(Prefs.serverPort)")
+                self.setState(L.t("server.status.connected"), detail: L.f("server.status.port", Prefs.serverPort))
             } else if line.contains("session ended") {
-                self.setState("监听中", detail: self.lastStats.isEmpty ? "端口 \(Prefs.serverPort)" : self.lastStats)
+                self.setState(L.t("server.status.listening"), detail: self.lastStats.isEmpty ? L.f("server.status.port", Prefs.serverPort) : self.lastStats)
             } else if let range = line.range(of: "fps=") {
                 let fps = line[range.upperBound...].prefix { $0.isNumber || $0 == "." }
                 if !fps.isEmpty {
-                    self.lastStats = "\(fps) fps"
-                    self.detailItem?.title = "\(fps) fps · 端口 \(Prefs.serverPort)"
+                    self.lastStats = L.f("server.status.stats", String(fps), Prefs.serverPort)
+                    self.detailItem?.title = L.f("server.status.stats", String(fps), Prefs.serverPort)
                 }
             } else if line.contains("virtual display: id=") {
                 self.detailItem?.title = line.replacingOccurrences(of: "virtual display: ", with: "")

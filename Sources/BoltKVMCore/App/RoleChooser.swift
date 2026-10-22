@@ -1,6 +1,6 @@
 import AppKit
 
-/// First run (and "重新选择角色") lands here. Two buttons, one decision: this
+/// First run (and "Choose Role Again") lands here. Two buttons, one decision: this
 /// machine is either the one being driven or the one driving.
 final class RoleChooserController: NSWindowController {
     private let onPick: (Role) -> Void
@@ -24,27 +24,27 @@ final class RoleChooserController: NSWindowController {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     private func build(in window: NSWindow) {
-        let title = NSTextField(labelWithString: "这台机器要做什么？")
+        let title = NSTextField(labelWithString: L.t("chooser.title"))
         title.font = .systemFont(ofSize: 22, weight: .semibold)
 
-        let subtitle = NSTextField(labelWithString: "一个 app，两种角色。服务端创建一块虚拟屏并共享它，客户端连接过去显示画面、转发键鼠。")
+        let subtitle = NSTextField(labelWithString: L.t("chooser.subtitle"))
         subtitle.font = .systemFont(ofSize: 13)
         subtitle.textColor = .secondaryLabelColor
         subtitle.lineBreakMode = .byWordWrapping
         subtitle.maximumNumberOfLines = 3
 
         let server = makeButton(
-            title: "作为被控端",
-            detail: "这台机器被连接（无头 Mac mini 那种用法）",
+            title: L.t("chooser.server"),
+            detail: L.t("chooser.server.detail"),
             action: #selector(pickServer)
         )
         let client = makeButton(
-            title: "作为主控端",
-            detail: "连接另一台机器，把它的画面显示在这里",
+            title: L.t("chooser.client"),
+            detail: L.t("chooser.client.detail"),
             action: #selector(pickClient)
         )
 
-        let hint = NSTextField(labelWithString: "角色随时可以在菜单里切换，选择会记住。")
+        let hint = NSTextField(labelWithString: L.t("chooser.hint"))
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .tertiaryLabelColor
 

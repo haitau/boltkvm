@@ -31,12 +31,21 @@ public enum AppMain {
         // One instance per bundle: a second copy (login item + manual launch, or
         // a stale helper) would fight over the port. Server role has no window,
         // so the duplicate exits and just activates the running one.
-        if let id = Bundle.main.bundleIdentifier,
-           let other = NSRunningApplication.runningApplications(withBundleIdentifier: id)
-               .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
-            other.activate(options: [])
-            FileHandle.standardError.write(Data("another BoltKVM is already running (pid \(other.processIdentifier)); exiting\n".utf8))
-            exit(0)
+        // Only the main executable counts: the capture helper lives inside the
+        // bundle and reports the same bundle id, so matching on the id alone
+        // would make the app refuse to start after an orphaned helper survives.
+        if let id = Bundle.main.bundleIdentifier {
+            let mine = Bundle.main.executableURL?.resolvingSymlinksInPath()
+            let twin = NSRunningApplication.runningApplications(withBundleIdentifier: id)
+                .first { app in
+                    app.processIdentifier != ProcessInfo.processInfo.processIdentifier
+                        && app.executableURL?.resolvingSymlinksInPath() == mine
+                }
+            if let twin {
+                twin.activate(options: [])
+                FileHandle.standardError.write(Data("another BoltKVM is already running (pid \(twin.processIdentifier)); exiting\n".utf8))
+                exit(0)
+            }
         }
         let app = NSApplication.shared
         let delegate = AppDelegate()
@@ -142,16 +151,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "关于 BoltKVM",
+        appMenu.addItem(withTitle: L.t("menu.about"),
                         action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
                         keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "作为被控端运行", action: #selector(useServerRole), keyEquivalent: "")
-        appMenu.addItem(withTitle: "作为主控端运行", action: #selector(useClientRole), keyEquivalent: "")
-        appMenu.addItem(withTitle: "重新选择角色…", action: #selector(switchRole), keyEquivalent: "")
+        appMenu.addItem(withTitle: L.t("menu.role.server"), action: #selector(useServerRole), keyEquivalent: "")
+        appMenu.addItem(withTitle: L.t("menu.role.client"), action: #selector(useClientRole), keyEquivalent: "")
+        appMenu.addItem(withTitle: L.t("menu.role.switch"), action: #selector(switchRole), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "隐藏 BoltKVM", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(withTitle: "退出 BoltKVM", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: L.t("menu.hide"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: L.t("menu.quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         for item in appMenu.items { item.target = item.action == #selector(NSApplication.terminate(_:))
             || item.action == #selector(NSApplication.hide(_:))
             || item.action == #selector(NSApplication.orderFrontStandardAboutPanel(_:)) ? nil : self }
@@ -159,8 +168,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(appItem)
 
         let viewItem = NSMenuItem()
-        let viewMenu = NSMenu(title: "视图")
-        let full = NSMenuItem(title: "全屏", action: #selector(toggleFullScreen), keyEquivalent: "f")
+        let viewMenu = NSMenu(title: L.t("menu.view"))
+        let full = NSMenuItem(title: L.t("menu.fullscreen"), action: #selector(toggleFullScreen), keyEquivalent: "f")
         full.keyEquivalentModifierMask = [.control, .command]
         full.target = self
         viewMenu.addItem(full)
@@ -168,10 +177,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(viewItem)
 
         let roleItem = NSMenuItem()
-        let menu = NSMenu(title: "角色")
-        menu.addItem(withTitle: "作为被控端运行", action: #selector(useServerRole), keyEquivalent: "")
-        menu.addItem(withTitle: "作为主控端运行", action: #selector(useClientRole), keyEquivalent: "")
-        menu.addItem(withTitle: "重新选择角色…", action: #selector(switchRole), keyEquivalent: "")
+        let menu = NSMenu(title: L.t("menu.role"))
+        menu.addItem(withTitle: L.t("menu.role.server"), action: #selector(useServerRole), keyEquivalent: "")
+        menu.addItem(withTitle: L.t("menu.role.client"), action: #selector(useClientRole), keyEquivalent: "")
+        menu.addItem(withTitle: L.t("menu.role.switch"), action: #selector(switchRole), keyEquivalent: "")
         for item in menu.items { item.target = self }
         roleItem.submenu = menu
         roleMenu = menu

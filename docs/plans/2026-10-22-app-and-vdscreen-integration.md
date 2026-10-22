@@ -233,6 +233,8 @@ app 直接在自己进程里调 `BKVVirtualDisplayCreate` 时，同样的代码�
 
 还有个小坑：helper 不能叫 `boltkvm`——APFS 默认大小写不敏感，`cp` 到 `Contents/MacOS/boltkvm` 会直接覆盖主程序 `BoltKVM`，签名后表现为 app 打不开。
 
+| 7 | 界面本地化：中英双语，按系统语言自动选，非中文回退英文 | **已完成并实测 2026-10-22**：`Localization.swift` + `{en,zh-Hans}.lproj/Localizable.strings`（56 键，覆盖全部界面文案），Info.plist 声明开发语言 en 与支持语言列表；实测英文下窗口为 `BoltKVM — Controller / Host / Port / Key / Not connected`、菜单 `View / Role`、首启页 `What should this Mac do?`，中文下为 `BoltKVM — 主控端 / 主机 / 端口 / 密钥 / 未连接` | 0.5 天 |
+
 ## 5. 收益量化
 
 | 指标 | 现在 | 之后 |

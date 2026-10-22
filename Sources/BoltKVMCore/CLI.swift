@@ -8,6 +8,7 @@ import ApplicationServices
 public enum CLI {
 
     public static func runServer(_ args: [String]) async {
+        exitWhenParentGoesAway()
         // Creation must happen on the main thread, so hop there before the
         // async server loop starts.
         let virtualDisplay = await MainActor.run { prepareVirtualDisplay(args: args) }

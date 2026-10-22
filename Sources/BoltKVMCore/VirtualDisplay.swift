@@ -80,9 +80,20 @@ func prepareVirtualDisplay(args: [String]) -> BuiltinVirtualDisplay? {
     let hiDPI = !args.contains("--virtual-display-lodpi")
 
     let started = Date()
-    guard let display = BuiltinVirtualDisplay(name: "boltKVM", width: logicalWidth, height: logicalHeight, hiDPI: hiDPI) else {
-        // A display with this identity is already up (previous run, or vdscreen):
-        // capture whatever exists rather than refusing to start.
+    var display = BuiltinVirtualDisplay(name: "boltKVM", width: logicalWidth, height: logicalHeight, hiDPI: hiDPI)
+    if display == nil {
+        // A display with this identity is usually still being torn down by the
+        // previous helper. Give it a moment before giving up.
+        for attempt in 1...2 {
+            Thread.sleep(forTimeInterval: 1.5)
+            log("virtual display: creation refused, retry \(attempt)/2")
+            display = BuiltinVirtualDisplay(name: "boltKVM", width: logicalWidth, height: logicalHeight, hiDPI: hiDPI)
+            if display != nil { break }
+        }
+    }
+    guard let display else {
+        // Capture whatever exists rather than refusing to start; the CLI logs the
+        // reason (identity conflict) from the C layer.
         log("virtual display: system refused \(logicalWidth)x\(logicalHeight) (logical); capturing the existing display instead")
         return nil
     }

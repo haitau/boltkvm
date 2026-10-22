@@ -13,10 +13,10 @@ final class ClientSession {
 
         var text: String {
             switch self {
-            case .idle: return "未连接"
-            case .connecting: return "正在连接…"
-            case .streaming: return "已连接"
-            case .failed(let why): return "失败：\(why)"
+            case .idle: return L.t("client.state.idle")
+            case .connecting: return L.t("client.state.connecting")
+            case .streaming: return L.t("client.state.streaming")
+            case .failed(let why): return L.f("client.state.failed", why)
             }
         }
     }
@@ -42,7 +42,7 @@ final class ClientSession {
         // --key on the CLI, $BOLTKVM_KEY, then ~/.boltkvm-key; the app never exits
         // when the key is missing, it just reports it in the status line.
         guard let sessionKey = key ?? resolveAuthKey([]) else {
-            setState(.failed("缺少预共享密钥（~/.boltkvm-key）"))
+            setState(.failed(L.t("client.key.missing")))
             return
         }
         if playAudio {

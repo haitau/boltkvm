@@ -1,0 +1,65 @@
+/* 角色 */
+"role.server" = "被控端（服务）";
+"role.client" = "主控端（连接）";
+
+/* 应用菜单 */
+"menu.about" = "关于 BoltKVM";
+"menu.role.server" = "作为被控端运行";
+"menu.role.client" = "作为主控端运行";
+"menu.role.switch" = "重新选择角色…";
+"menu.hide" = "隐藏 BoltKVM";
+"menu.quit" = "退出 BoltKVM";
+"menu.view" = "视图";
+"menu.fullscreen" = "全屏";
+"menu.role" = "角色";
+
+/* 首次启动选角色 */
+"chooser.title" = "这台机器要做什么？";
+"chooser.subtitle" = "一个 app，两种角色。被控端创建一块虚拟屏并共享它，主控端连接过去显示画面、转发键鼠。";
+"chooser.server" = "作为被控端";
+"chooser.server.detail" = "这台机器被连接（无头 Mac mini 那种用法）";
+"chooser.client" = "作为主控端";
+"chooser.client.detail" = "连接另一台机器，把它的画面显示在这里";
+"chooser.hint" = "角色随时可以在菜单里切换，选择会记住。";
+
+/* 主控端窗口 */
+"client.window.title" = "BoltKVM — 主控端";
+"client.label.host" = "主机";
+"client.label.port" = "端口";
+"client.label.key" = "密钥";
+"client.placeholder.host" = "例如 10.0.0.2";
+"client.placeholder.key" = "留空用 ~/.boltkvm-key";
+"client.check.input" = "转发键鼠";
+"client.check.audio" = "音频";
+"client.button.connect" = "连接";
+"client.button.disconnect" = "断开";
+"client.state.idle" = "未连接";
+"client.state.connecting" = "正在连接…";
+"client.state.streaming" = "已连接";
+"client.state.failed" = "失败：%@";
+"client.host.required" = "先填主机地址";
+"client.renderer.failed" = "渲染器初始化失败：%@";
+"client.no.metal" = "没有可用的 Metal 设备";
+"client.key.missing" = "缺少预共享密钥（~/.boltkvm-key）";
+
+/* 被控端菜单栏 */
+"server.tooltip" = "BoltKVM 被控端";
+"server.status.stopped" = "已停止";
+"server.status.listening" = "监听中";
+"server.status.connected" = "已连接";
+"server.status.starting" = "启动中…";
+"server.status.restarting" = "已退出，3 秒后重启";
+"server.status.needsPermission" = "需要屏幕录制权限";
+"server.status.port" = "端口 %d";
+"server.status.stats" = "%@ fps · 端口 %d";
+"server.permission.hint" = "点「授权…」";
+"server.menu.permission" = "授权…（屏幕录制）";
+"server.menu.start" = "启动服务";
+"server.menu.stop" = "停止服务";
+"server.menu.login" = "开机自动启动";
+"server.menu.log" = "打开日志";
+"server.menu.quit" = "退出 BoltKVM";
+"server.helper.missing" = "缺少采集子进程";
+"server.helper.failed" = "子进程启动失败";
+"server.login.failed.title" = "设置开机自启失败";
+"server.login.failed.detail" = "%@\n\n用自签名证书签名后再试（./scripts/make-signing-identity.sh）。";

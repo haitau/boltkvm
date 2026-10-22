@@ -1,0 +1,65 @@
+/* Roles */
+"role.server" = "Controlled Mac";
+"role.client" = "Controller";
+
+/* App menu */
+"menu.about" = "About BoltKVM";
+"menu.role.server" = "Run as Controlled Mac";
+"menu.role.client" = "Run as Controller";
+"menu.role.switch" = "Choose Role Again…";
+"menu.hide" = "Hide BoltKVM";
+"menu.quit" = "Quit BoltKVM";
+"menu.view" = "View";
+"menu.fullscreen" = "Toggle Full Screen";
+"menu.role" = "Role";
+
+/* First-run role chooser */
+"chooser.title" = "What should this Mac do?";
+"chooser.subtitle" = "One app, two roles. The controlled Mac creates a virtual display and shares it; the controller connects, shows the picture and forwards keyboard and mouse.";
+"chooser.server" = "As the controlled Mac";
+"chooser.server.detail" = "This Mac gets connected to (the headless Mac mini case)";
+"chooser.client" = "As the controller";
+"chooser.client.detail" = "Connect to another Mac and show its screen here";
+"chooser.hint" = "You can switch roles from the menu at any time; the choice is remembered.";
+
+/* Controller window */
+"client.window.title" = "BoltKVM — Controller";
+"client.label.host" = "Host";
+"client.label.port" = "Port";
+"client.label.key" = "Key";
+"client.placeholder.host" = "e.g. 10.0.0.2";
+"client.placeholder.key" = "Empty uses ~/.boltkvm-key";
+"client.check.input" = "Forward input";
+"client.check.audio" = "Audio";
+"client.button.connect" = "Connect";
+"client.button.disconnect" = "Disconnect";
+"client.state.idle" = "Not connected";
+"client.state.connecting" = "Connecting…";
+"client.state.streaming" = "Connected";
+"client.state.failed" = "Failed: %@";
+"client.host.required" = "Enter a host first";
+"client.renderer.failed" = "Renderer failed to start: %@";
+"client.no.metal" = "No Metal device available";
+"client.key.missing" = "Missing pre-shared key (~/.boltkvm-key)";
+
+/* Controlled Mac menu bar */
+"server.tooltip" = "BoltKVM controlled Mac";
+"server.status.stopped" = "Stopped";
+"server.status.listening" = "Listening";
+"server.status.connected" = "Connected";
+"server.status.starting" = "Starting…";
+"server.status.restarting" = "Exited, restarting in 3s";
+"server.status.needsPermission" = "Screen Recording required";
+"server.status.port" = "Port %d";
+"server.status.stats" = "%@ fps · port %d";
+"server.permission.hint" = "Click “Grant Permission…”";
+"server.menu.permission" = "Grant Permission… (Screen Recording)";
+"server.menu.start" = "Start Server";
+"server.menu.stop" = "Stop Server";
+"server.menu.login" = "Launch at Login";
+"server.menu.log" = "Open Log";
+"server.menu.quit" = "Quit BoltKVM";
+"server.helper.missing" = "Capture helper missing";
+"server.helper.failed" = "Helper failed to start";
+"server.login.failed.title" = "Could not enable launch at login";
+"server.login.failed.detail" = "%@\n\nSign the app with the self-signed identity and try again (./scripts/make-signing-identity.sh).";

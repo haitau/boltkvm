@@ -25,6 +25,11 @@ cp Packaging/Info.plist "$APP/Contents/Info.plist"
 if [ -f Packaging/AppIcon.icns ]; then
   cp Packaging/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
+# Localization tables: macOS picks the .lproj by the user's preferred languages
+# and falls back to CFBundleDevelopmentRegion (en).
+for lproj in Packaging/Resources/*.lproj; do
+  [ -d "$lproj" ] && cp -R "$lproj" "$APP/Contents/Resources/"
+done
 
 # Hardened runtime is only needed for notarization, and it appears to break
 # CGVirtualDisplay creation inside a GUI bundle (measured 2026-10-22: the same

@@ -6,8 +6,8 @@ enum Role: String {
 
     var title: String {
         switch self {
-        case .server: return "被控端（服务）"
-        case .client: return "主控端（连接）"
+        case .server: return L.t("role.server")
+        case .client: return L.t("role.client")
         }
     }
 }

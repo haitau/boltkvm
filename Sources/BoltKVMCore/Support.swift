@@ -5,6 +5,28 @@ import Darwin
 import AppKit
 import ApplicationServices
 
+/// When the app spawns us it hands over a stdin pipe and never writes to it, so
+/// EOF means the app is gone (quit, crash, SIGKILL). Without this the helper
+/// outlives the app, keeps the port bound and leaves the virtual display behind —
+/// which then blocks the next launch from creating one with the same identity.
+func exitWhenParentGoesAway() {
+    guard ProcessInfo.processInfo.environment["BOLTKVM_EXIT_ON_STDIN_EOF"] == "1" else { return }
+    Thread.detachNewThread {
+        var byte: UInt8 = 0
+        while true {
+            let n = read(STDIN_FILENO, &byte, 1)
+            if n == 0 {
+                log("parent closed stdin; exiting so the virtual display goes with us")
+                exit(0)
+            }
+            if n < 0 {
+                if errno == EINTR { continue }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+        }
+    }
+}
+
 func usage() -> Never {
     print("""
     boltkvm — M1 alpha-prime spike

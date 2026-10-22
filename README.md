@@ -49,6 +49,8 @@ open dist/BoltKVM.app             # 首次启动选「被控端」还是「主�
 - **被控端**：无窗口，菜单栏常驻（监听中 / 已连接 / fps）；采集由 bundle 内的 `boltkvm-server` 子进程完成——GUI 进程自己建虚拟屏不稳定，会掉成 LoDPI；缺屏幕录制权限时在菜单栏给「授权…」入口；
 - **主控端**：一个窗口，顶部填主机/端口/密钥，连接后画面填满窗口，⌃⌘F 全屏，可勾选转发键鼠与音频。
 
+界面中英双语，跟随系统语言：中文系统显示中文，其他语言回退英文（`Packaging/Resources/{en,zh-Hans}.lproj/Localizable.strings`，56 个键，界面代码里没有硬编码文案）。
+
 `Info.plist` 里的 `NSLocalNetworkUsageDescription` 是硬要求：macOS 15 起连内网地址属于「本地网络」权限，缺了会直接 `No route to host`。
 
 ad-hoc 签名（默认 `-`）每次构建 cdhash 都会变，TCC 会当成新 app、权限要重给。一次性建立稳定身份：

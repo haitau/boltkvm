@@ -24,7 +24,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "BoltKVM — 主控端"
+        window.title = L.t("client.window.title")
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 720, height: 480)
         super.init(window: window)
@@ -39,30 +39,30 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     // MARK: - Layout
 
     private func build(in window: NSWindow) {
-        let hostLabel = label("主机")
+        let hostLabel = label(L.t("client.label.host"))
         hostField = NSTextField(string: Prefs.host)
-        hostField.placeholderString = "例如 10.0.0.2"
+        hostField.placeholderString = L.t("client.placeholder.host")
         hostField.widthAnchor.constraint(equalToConstant: 150).isActive = true
 
-        let portLabel = label("端口")
+        let portLabel = label(L.t("client.label.port"))
         portField = NSTextField(string: String(Prefs.port))
         portField.widthAnchor.constraint(equalToConstant: 60).isActive = true
 
-        let keyLabel = label("密钥")
+        let keyLabel = label(L.t("client.label.key"))
         keyField = NSSecureTextField(string: "")
-        keyField.placeholderString = "留空用 ~/.boltkvm-key"
+        keyField.placeholderString = L.t("client.placeholder.key")
         keyField.widthAnchor.constraint(equalToConstant: 170).isActive = true
 
-        inputCheck = NSButton(checkboxWithTitle: "转发键鼠", target: nil, action: nil)
+        inputCheck = NSButton(checkboxWithTitle: L.t("client.check.input"), target: nil, action: nil)
         inputCheck.state = Prefs.forwardInput ? .on : .off
-        audioCheck = NSButton(checkboxWithTitle: "音频", target: nil, action: nil)
+        audioCheck = NSButton(checkboxWithTitle: L.t("client.check.audio"), target: nil, action: nil)
         audioCheck.state = Prefs.audio ? .on : .off
 
-        connectButton = NSButton(title: "连接", target: self, action: #selector(connectPressed))
+        connectButton = NSButton(title: L.t("client.button.connect"), target: self, action: #selector(connectPressed))
         connectButton.bezelStyle = .rounded
         connectButton.keyEquivalent = "\r"
 
-        statusLabel = NSTextField(labelWithString: "未连接")
+        statusLabel = NSTextField(labelWithString: L.t("client.state.idle"))
         statusLabel.textColor = .secondaryLabelColor
         statsLabel = NSTextField(labelWithString: "")
         statsLabel.textColor = .secondaryLabelColor
@@ -99,7 +99,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         do {
             guard let device = MTLCreateSystemDefaultDevice() else {
                 throw NSError(domain: "boltkvm", code: 1,
-                              userInfo: [NSLocalizedDescriptionKey: "没有可用的 Metal 设备"])
+                              userInfo: [NSLocalizedDescriptionKey: L.t("client.no.metal")])
             }
             let renderer = try Renderer(device: device)
             self.renderer = renderer
@@ -108,7 +108,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             renderer.view.autoresizingMask = [.width, .height]
             videoView.addSubview(renderer.view)
         } catch {
-            statusLabel.stringValue = "渲染器初始化失败：\(error.localizedDescription)"
+            statusLabel.stringValue = L.f("client.renderer.failed", error.localizedDescription)
             statusLabel.textColor = .systemRed
         }
 
@@ -117,10 +117,10 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             guard let self else { return }
             self.statusLabel.stringValue = state.text
             self.statusLabel.textColor = state == .streaming ? .systemGreen : .secondaryLabelColor
-            self.connectButton.title = self.session?.isActive == true ? "断开" : "连接"
+            self.connectButton.title = self.session?.isActive == true ? L.t("client.button.disconnect") : L.t("client.button.connect")
             if case .failed = state {
                 self.statusLabel.textColor = .systemRed
-                self.connectButton.title = "连接"
+                self.connectButton.title = L.t("client.button.connect")
             }
         }
         session?.onStats = { [weak self] text in
@@ -144,7 +144,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         }
         let host = hostField.stringValue.trimmingCharacters(in: .whitespaces)
         guard !host.isEmpty else {
-            statusLabel.stringValue = "先填主机地址"
+            statusLabel.stringValue = L.t("client.host.required")
             statusLabel.textColor = .systemRed
             return
         }
