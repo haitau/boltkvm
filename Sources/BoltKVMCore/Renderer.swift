@@ -115,7 +115,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         struct VOut { float4 pos [[position]]; float2 uv; };
         struct ViewParams { float2 scale; };
         vertex VOut vmain(uint vid [[vertex_id]], constant ViewParams &vp [[buffer(0)]]) {
-            float2 p[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
+            // A 4-vertex triangle strip, not the usual oversized single triangle:
+            // scaling that triangle about the origin drags its hypotenuse
+            // (x + y = 2) to (x + y = 2 * scale), which cuts a black wedge out of
+            // the top-right corner whenever the picture is letterboxed.
+            float2 p[4] = { float2(-1.0, -1.0), float2(1.0, -1.0),
+                            float2(-1.0, 1.0), float2(1.0, 1.0) };
             // Scale keeps the picture at its own aspect ratio and leaves black
             // bars instead of stretching it to fill the window.
             float2 q = p[vid] * vp.scale;
@@ -246,7 +251,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         enc.setFragmentTexture(yTex, index: 0)
         enc.setFragmentTexture(cTex, index: 1)
         enc.setFragmentBytes(&params, length: MemoryLayout<ColorParams>.size, index: 0)
-        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         enc.endEncoding()
         cmd.present(drawable)
         cmd.commit()
