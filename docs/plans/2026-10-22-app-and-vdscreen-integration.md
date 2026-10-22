@@ -190,7 +190,7 @@ Packaging/
 | 0 | 核对上游 LICENSE 与 `vdscreen.m` 的抽取边界（只需创建 + 核对 + terminationHandler） | 确定 vendor 范围，写出 NOTICE | 0.5 天 |
 | 1 | `CVirtualDisplay` target + `--virtual-display=builtin` | **已完成 2026-10-22**：`id=7 logical=3008x1692 backing=6016x3384 hiDPI=true`（创建耗时 2.1 s），客户端 888 帧 / 60.4 fps / `failed=0`；恢复 external 后 469 帧无回归。未测：`onLost` 回调（需要系统主动移除显示器） | 2–3 天 |
 | 2 | 默认改成 builtin，服务端按 displayID 精确采集，mini 上移走 vdscreen.app 与它的 LaunchAgent | **已完成 2026-10-22**：单块内建屏 3008×1692/6016×3384 HiDPI，客户端 588 帧 / 10 s（59 fps），服务端 `captured=480 fps=59.8`；`boltkvm displays` 只剩一块 | 0.5 天 |
-| 3 | 抽出 `BoltKVMCore`（Protocol/Server/Renderer/Audio/VirtualDisplay 移入），CLI 变薄壳 | CLI 全功能不回退，`swift build` 通过，8h 冒烟 | 1–2 天 |
+| 3 | 抽出 `BoltKVMCore`（Protocol/Server/Renderer/Audio/VirtualDisplay/Client/InputCapture/Watchdog 移入），CLI 变成 40 行调度器 | **已完成 2026-10-22**：`swift build` 通过，`cryptotest` PASS，`doctor` 四项全 PASS，客户端 587 帧 / 10 s、服务端 `fps=59.8 dropped=0` | 1–2 天 |
 | 4 | 单 app 骨架：角色选择、菜单栏常驻、client 全屏窗口 + 输入 + 连接面板 | 首次启动能选角色；client 角色双击即连；TCC 弹的是 BoltKVM.app；输入延迟与 CLI 版一致 | 3–4 天 |
 | 5 | server 角色：无窗口菜单栏、状态项、权限引导、SMAppService 自启、单实例锁 | 冷启动到可连 < 10s；重启后无人工步骤；`doctor` 三项全绿 | 2–3 天 |
 | 6 | `Packaging/build-app.sh` + 图标 + 自签名证书 | 一条命令产出 BoltKVM.app；`codesign -dv` 身份稳定，重编译后 TCC 不丢 | 1–2 天 |

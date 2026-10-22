@@ -18,9 +18,17 @@ let package = Package(
                 .linkedFramework("CoreGraphics"),
             ]
         ),
+        // Everything reusable: wire protocol, server, client, renderer, audio,
+        // virtual display. Both the CLI and the app are thin shells over this.
+        .target(
+            name: "BoltKVMCore",
+            dependencies: ["CVirtualDisplay"],
+            path: "Sources/BoltKVMCore",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(
             name: "boltkvm",
-            dependencies: ["CVirtualDisplay"],
+            dependencies: ["BoltKVMCore"],
             path: "Sources/boltkvm",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
