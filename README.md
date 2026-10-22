@@ -14,13 +14,13 @@
 | 指标 | 目标 | 实测 | 结论 |
 |---|---|---|---|
 | 像素等价 | 1:1 4K、SSIM > 0.98 | SSIM 0.984 | 达标 |
-| 帧率 | 60 fps | 服务端编码 59.9 fps，客户端上屏 **51 fps** | 未达标（见下） |
-| 端到端延迟 | P95 < 33 ms | 4K ProRes 48.4 ms；低码率 30.5 ms | SLO 未达标，按帧大小分档后告警为 0 |
+| 帧率 | 60 fps | 服务端编码 59.9 fps，客户端上屏 **59.5 fps** | 达标（2026-10-22 修 displaySync） |
+| 端到端延迟 | P95 < 33 ms | P95 **17.0 ms**，P50 16.7 ms（60s 窗口） | 达标（同上修正） |
 | 稳定性 | 连续 8 小时无断连 | 8h00m01s：0 断连、0 解码失败、0 watchdog 重建 | 达标 |
 | 音频隔离 | 默认不传音频 | 默认链路零音频字节；`--audio` 可选转发，440 Hz 测试音频率无偏移 | 达标（默认），可选功能可用 |
 | 输入连续性 | 8 小时内持续可用 | 长稳期间无人操作，仅验证 tap 存活 | 未验证 |
 
-上屏 51 fps 是 4K present 表面的固定上限（1080p 源同样 51 fps，与带宽、`--input` 无关）；延迟随码率上升是发送队列排队的结果，因此告警线按帧大小分三档（33/40/55 ms），33 ms 仍作为产品 SLO 单独统计命中率。详见 [8 小时长稳结论](docs/reports/2026-10-22-m3-soak-8h.md)。
+上屏帧率此前的 51 fps 不是硬件上限，而是客户端 `CAMetalLayer.displaySyncEnabled=false` 导致合成器合并帧；2026-10-22 修正为开启同步后实测 59.5 fps、P95 17.0 ms（60 秒窗口，8 小时长稳待重跑确认）。延迟告警线仍按帧大小分三档（33/40/55 ms），33 ms 作为产品 SLO 单独统计命中率。详见 [present 同步修复](docs/reports/2026-10-22-present-sync-fix.md) 与 [8 小时长稳结论](docs/reports/2026-10-22-m3-soak-8h.md)。
 
 ## 架构概览（Swift 原生管线）
 
@@ -144,6 +144,7 @@ reboot ──25s──► ssh 可用 ──► 自动登录进桌面会话
 - [输入连续性长跑计划](docs/plans/input-continuity.md)
 - [未完成事项（P0/P1/P2）](docs/plans/open-items.md)
 - [音频可选与默认隔离](docs/reports/2026-10-22-audio-option.md)
+- [上屏 51 fps 的真因](docs/reports/2026-10-22-present-sync-fix.md)
 - [M0 显示层验证报告](docs/reports/2026-10-21-m0-display.md)
 - [M1 编码可行性探针](docs/reports/2026-10-21-m1-encoder-probe.md)
 - [M1 α′ 管线报告](docs/reports/2026-10-21-m1-pipeline.md)

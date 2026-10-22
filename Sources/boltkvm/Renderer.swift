@@ -85,10 +85,20 @@ final class Renderer: NSObject, MTKViewDelegate {
         view.framebufferOnly = true
         view.isPaused = false
         view.enableSetNeedsDisplay = false
-        view.preferredFramesPerSecond = 60
-        // Present as soon as a drawable is available instead of waiting for the
-        // next display refresh. Trades tearing for lower end-to-end latency.
-        (view.layer as? CAMetalLayer)?.displaySyncEnabled = false
+        // Experiment knobs for the 51 fps present ceiling; defaults keep the
+        // shipping behaviour (no vsync, 60 fps cap, system drawable count).
+        let env = ProcessInfo.processInfo.environment
+        let preferred = Int(env["BOLTKVM_PREFERRED_FPS"] ?? "") ?? 60
+        view.preferredFramesPerSecond = preferred
+        // Syncing to the display refresh is what keeps presentation at 60 fps.
+        // Turning it off (the old default) let the compositor coalesce frames:
+        // measured 48.8 fps vs 59.5 fps, and the extra queueing also pushed
+        // P95 up. Keep it on; BOLTKVM_DISPLAY_SYNC=0 restores the old behaviour.
+        let sync = (env["BOLTKVM_DISPLAY_SYNC"] ?? "1") != "0"
+        (view.layer as? CAMetalLayer)?.displaySyncEnabled = sync
+        if let n = Int(env["BOLTKVM_DRAWABLES"] ?? ""), n > 0 {
+            (view.layer as? CAMetalLayer)?.maximumDrawableCount = n
+        }
         view.presentsWithTransaction = false
 
         let src = """
@@ -366,7 +376,10 @@ final class RenderSession: NSObject, NSApplicationDelegate {
             }
             r.view.needsDisplay = true
             w.displayIfNeeded()
-            log("render window ready drawable=\(r.view.drawableSize.width)x\(r.view.drawableSize.height) switched=\(switchedMode)")
+            let mode = CGDisplayCopyDisplayMode(CGMainDisplayID())
+            let env = ProcessInfo.processInfo.environment
+            let syncEffective = (env["BOLTKVM_DISPLAY_SYNC"] ?? "1") != "0"
+            log("render window ready drawable=\(r.view.drawableSize.width)x\(r.view.drawableSize.height) switched=\(switchedMode) display=\(mode?.width ?? 0)x\(mode?.height ?? 0)@\(mode?.refreshRate ?? 0)Hz pref=\(env["BOLTKVM_PREFERRED_FPS"] ?? "60") sync=\(syncEffective ? 1 : 0)")
             // 60s cadence: one line per minute makes an 8h run a readable
             // series (fps/P95 drift, input liveness) instead of a single tail.
             let t = DispatchSource.makeTimerSource(queue: .main)
