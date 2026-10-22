@@ -192,7 +192,7 @@ Packaging/
 | 2 | 默认改成 builtin，服务端按 displayID 精确采集，mini 上移走 vdscreen.app 与它的 LaunchAgent | **已完成 2026-10-22**：单块内建屏 3008×1692/6016×3384 HiDPI，客户端 588 帧 / 10 s（59 fps），服务端 `captured=480 fps=59.8`；`boltkvm displays` 只剩一块 | 0.5 天 |
 | 3 | 抽出 `BoltKVMCore`（Protocol/Server/Renderer/Audio/VirtualDisplay/Client/InputCapture/Watchdog 移入），CLI 变成 40 行调度器 | **已完成 2026-10-22**：`swift build` 通过，`cryptotest` PASS，`doctor` 四项全 PASS，客户端 587 帧 / 10 s、服务端 `fps=59.8 dropped=0` | 1–2 天 |
 | 4 | 单 app 骨架：角色选择、菜单栏常驻、client 全屏窗口 + 输入 + 连接面板 | **客户端已完成 2026-10-22**：`dist/BoltKVM.app` 首启选角色，连接面板连上 mini 后 decode 60.5 fps / render 55.4 fps（窗口 2400×1448）；服务端角色已实现但未在 mini 实测；输入延迟与全屏未实测 | 3–4 天 |
-| 5 | server 角色：无窗口菜单栏、状态项、权限引导、SMAppService 自启、单实例锁 | **已完成 2026-10-22（待联调）**：状态项 + 非模态权限引导（不再用模态框卡启动）、`SMAppService.mainApp` 开机自启开关、单实例锁（第二个实例激活旧实例后退出）。真正起服务要人工授权屏幕录制一次 | 2–3 天 |
+| 5 | server 角色：无窗口菜单栏、状态项、权限引导、SMAppService 自启、单实例锁 | **已完成并实测 2026-10-22**：菜单栏状态项（监听中/已连接/失败）、非模态权限引导、`SMAppService.mainApp` 开机自启、单实例锁；采集循环改为 app 内 bundled 的 `boltkvm-server` 子进程（见 4.4）。实测：重启 mini 后无人干预自动拉起 → `virtual display: id=5 3008x1692 backing=6016x3384 hiDPI=true` → `listening`，客户端随即连上（434 帧 / 8 s，服务端 58.3 fps） | 2–3 天 |
 | 6 | `Packaging/build-app.sh` + 图标 + 自签名证书 | **已完成 2026-10-22**：`scripts/make-icon.swift` 代码画图标 → `AppIcon.icns`；`scripts/make-signing-identity.sh` 一键生成并信任 "BoltKVM Local"（无开发者账号、无 sudo）；`codesign -dvvv` 显示 CMS 签名 + hardened runtime（size=1678，非 adhoc） | 1–2 天 |
 
 合计约 **10–16 个工作日**。阶段 1–2 是纯收益（少一个进程、少一个 LaunchAgent），阶段 4–6 才是"像个 app"。
@@ -224,6 +224,14 @@ BOLTKVM_CODESIGN_IDENTITY="BoltKVM Local" ./Packaging/build-app.sh
 证书自签、没有 Team ID，但 TCC 认的是「bundle id + 证书叶」，同一张证书重复签名身份不变，授权就不再丢。`codesign -dvvv` 里的 `Signature size=1678` + `flags=0x10000(runtime)` 说明确实带上了签名。
 
 图标也是代码：`swift scripts/make-icon.swift Packaging/AppIcon.icns`，仓库里不放二进制素材。
+
+### 4.4 GUI 进程建不出可靠的虚拟屏
+
+app 直接在自己进程里调 `BKVVirtualDisplayCreate` 时，同样的代码会出现两种坏结果：被系统拒绝（`applySettings` 返回 NO），或者创建成功但掉成 LoDPI（3008×1692 而不是 6016×3384），同一台机器上 CLI 二进制却次次正常。换签名、去 hardened runtime、换 identity 都没用，问题在「GUI 进程上下文」本身。vdscreen 早就绕开了这件事——它的 app 也只是 UI，虚拟屏由其 `vdscreen-core` helper 持有。
+
+所以服务端角色改成：app 只做菜单栏、权限、自启、单实例和状态解析，采集/编码/监听交给 bundle 内的 `boltkvm-server`（就是原来的 CLI），由 app 用 `Process` 拉起并读它的 stdout/stderr 更新状态，异常退出 3 秒后重启。TCC 记在「责任进程」上，app 拿到的屏幕录制授权对子进程同样有效，用户只需要授权一次。
+
+还有个小坑：helper 不能叫 `boltkvm`——APFS 默认大小写不敏感，`cp` 到 `Contents/MacOS/boltkvm` 会直接覆盖主程序 `BoltKVM`，签名后表现为 app 打不开。
 
 ## 5. 收益量化
 

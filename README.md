@@ -46,7 +46,7 @@ open dist/BoltKVM.app             # 首次启动选「被控端」还是「主�
 
 同一个 app 两种角色，选择记在 UserDefaults 里，菜单「角色」可随时切换：
 
-- **被控端**：无窗口，菜单栏常驻；自己创建虚拟屏、监听端口，缺屏幕录制权限时弹窗引导；
+- **被控端**：无窗口，菜单栏常驻（监听中 / 已连接 / fps）；采集由 bundle 内的 `boltkvm-server` 子进程完成——GUI 进程自己建虚拟屏不稳定，会掉成 LoDPI；缺屏幕录制权限时在菜单栏给「授权…」入口；
 - **主控端**：一个窗口，顶部填主机/端口/密钥，连接后画面填满窗口，⌃⌘F 全屏，可勾选转发键鼠与音频。
 
 `Info.plist` 里的 `NSLocalNetworkUsageDescription` 是硬要求：macOS 15 起连内网地址属于「本地网络」权限，缺了会直接 `No route to host`。
@@ -131,13 +131,14 @@ scripts/rescue.sh --host <IP>                # 三条救援通道体检（ssh / 
 
 ```
 reboot ──25s──► ssh 可用 ──► 自动登录进桌面会话
-                                ├─ 服务端自己创建虚拟屏（不再需要 vdscreen）
-                                ├─ 登录项 soak-start.command → Terminal 里起服务端（守护循环）
+                                ├─ 登录项 BoltKVM.app（SMAppService）自动启动
+                                ├─ app 拉起 boltkvm-server 子进程，后者创建虚拟屏并监听
                                 └─ 若停在锁屏 → 屏幕共享 vnc://<ip> 输入密码解锁
 ```
 
 - 一条命令体检三条通道：`scripts/rescue.sh --host <ip>`（SSH banner / VNC banner / boltkvm 端口）
-- 服务端由 Terminal 里的 `while` 循环守护，被杀后 3 秒内自动重启；**不能用 launchd 直接托管**——Screen Recording 权限记在 Terminal 名下，LaunchAgent 启动会报 `permission missing`
+- 服务端由 app 守护：子进程异常退出 3 秒后重启；**不要再用 launchd 直接托管 boltkvm CLI**——Screen Recording 权限记在责任进程名下，LaunchAgent 启动会报 `permission missing`
+- 切换到 app 部署：`scripts/deploy-app.sh <ip>`（装 app、停掉老的 CLI 守护循环、启动 app）
 - 解锁走系统屏幕共享，不依赖 boltkvm 自身
 
 ## 已知限制与坑

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ServiceManagement
 
 /// Entry point for the app bundle. The CLI and the app share BoltKVMCore, so
 /// everything below is wiring, not protocol code.
@@ -8,6 +9,25 @@ public enum AppMain {
     private static var delegateStore: AppDelegate?
 
     public static func run() {
+        // Scriptable login-item setup: TCC and SMAppService cannot be driven from
+        // the CLI, but `--register-login-item` lets a deploy script flip it without
+        // a human clicking through the menu bar.
+        let args = CommandLine.arguments
+        if args.contains("--register-login-item") || args.contains("--unregister-login-item") {
+            let register = args.contains("--register-login-item")
+            do {
+                if register {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+                print("login item \(register ? "registered" : "unregistered"); status=\(SMAppService.mainApp.status.rawValue)")
+                exit(0)
+            } catch {
+                FileHandle.standardError.write(Data("login item: \(error)\n".utf8))
+                exit(1)
+            }
+        }
         // One instance per bundle: a second copy (login item + manual launch, or
         // a stale helper) would fight over the port. Server role has no window,
         // so the duplicate exits and just activates the running one.

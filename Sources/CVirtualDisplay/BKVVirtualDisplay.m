@@ -82,7 +82,16 @@ static CGVirtualDisplay *BKVMakeDisplay(NSString *name, int w, int h, BOOL hiDPI
         settings.modes = @[base];
     }
     CGVirtualDisplay *display = [[CGVirtualDisplay alloc] initWithDescriptor:desc];
-    return [display applySettings:settings] ? display : nil;
+    if (!display) {
+        fprintf(stderr, "virtual display: initWithDescriptor returned nil (class present: %d)\n",
+                NSClassFromString(@"CGVirtualDisplay") != nil);
+        return nil;
+    }
+    BOOL applied = [display applySettings:settings];
+    if (!applied) {
+        fprintf(stderr, "virtual display: applySettings refused %dx%d hiDPI=%d\n", w, h, hiDPI ? 1 : 0);
+    }
+    return applied ? display : nil;
 }
 
 /// Reads back the mode the system actually picked. CGDisplayModeGetPixelWidth is
@@ -135,7 +144,12 @@ BKVVirtualDisplay *BKVVirtualDisplayCreate(const char *nameC, int width, int hei
     NSString *name = nameC ? [NSString stringWithUTF8String:nameC] : @"boltKVM";
     // Fixed identity: same display across restarts, so the system's per-identity
     // mode cache and window positions survive a reboot.
-    NSString *identity = @"io.github.boltkvm.virtualdisplay";
+    // Configurable for diagnostics: two processes cannot own the same identity,
+    // and a stale display can hold it, which looks exactly like a system refusal.
+    const char *identityEnv = getenv("BOLTKVM_DISPLAY_IDENTITY");
+    NSString *identity = identityEnv && identityEnv[0]
+        ? [NSString stringWithUTF8String:identityEnv]
+        : @"io.github.boltkvm.virtualdisplay";
 
     BKVVirtualDisplay *handle = calloc(1, sizeof(BKVVirtualDisplay));
     if (!handle) return NULL;

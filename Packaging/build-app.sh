@@ -18,14 +18,25 @@ swift build -c release --product BoltKVMApp
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/BoltKVMApp "$APP/Contents/MacOS/BoltKVM"
+# The capture loop runs as this CLI: a GUI process cannot reliably create a
+# CGVirtualDisplay, a plain binary can (same reason vdscreen ships a helper).
+cp .build/release/boltkvm "$APP/Contents/MacOS/boltkvm-server"   # not "boltkvm": APFS is case-insensitive and would overwrite BoltKVM
 cp Packaging/Info.plist "$APP/Contents/Info.plist"
 if [ -f Packaging/AppIcon.icns ]; then
   cp Packaging/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-# Hardened runtime keeps Gatekeeper happy if this ever ships; --options runtime
-# is harmless for local ad-hoc builds too.
-codesign --force --options runtime --timestamp=none --sign "$IDENTITY" "$APP" >/dev/null
+# Hardened runtime is only needed for notarization, and it appears to break
+# CGVirtualDisplay creation inside a GUI bundle (measured 2026-10-22: the same
+# code creates the display fine as a CLI binary, refuses under hardened runtime).
+# Opt in with BOLTKVM_HARDENED_RUNTIME=1 when shipping.
+RUNTIME_FLAG=""
+if [ "${BOLTKVM_HARDENED_RUNTIME:-0}" = "1" ]; then
+  RUNTIME_FLAG="--options runtime"
+fi
+# Sign the nested helper first, then the bundle that contains it.
+codesign --force --timestamp=none --sign "$IDENTITY" "$APP/Contents/MacOS/boltkvm-server" >/dev/null
+codesign --force $RUNTIME_FLAG --timestamp=none --sign "$IDENTITY" "$APP" >/dev/null
 codesign --verify --deep --strict "$APP"
 
 echo "==> $APP"
