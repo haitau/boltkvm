@@ -344,6 +344,12 @@ final class ServerAppController: NSObject {
             let scale = 3840.0 / Double(w)
             return (3840, Int((Double(h) * scale).rounded()))
         }
+        // Even on a fast link there is a ceiling: a 2x stream of an 8K-wide desktop
+        // would be absurd, so cap the encoded width at 8192 and keep the aspect.
+        guard w * 2 <= 8192 else {
+            let scale = 8192.0 / Double(w * 2)
+            return (8192, Int((Double(h * 2) * scale).rounded()))
+        }
         return (w * 2, h * 2)
     }
 

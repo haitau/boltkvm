@@ -52,11 +52,12 @@ enum Prefs {
         set { d.set(newValue, forKey: "server.displaySize") }
     }
 
-    /// "standard" scales the stream to at most 3840 wide; "pixel" streams at the
-    /// virtual display's real pixel size (2x the logical size), which is the only
-    /// way text stays crisp when the client window is as large as the desktop.
+    /// "pixel" (default) streams at the virtual display's real pixel size (2x the
+    /// logical size), which is the only way text stays crisp when the client
+    /// window is as large as the desktop. "standard" caps the stream at 3840 wide
+    /// for slow links.
     static var serverQuality: String {
-        get { d.string(forKey: "server.quality") ?? "standard" }
+        get { d.string(forKey: "server.quality") ?? "pixel" }
         set { d.set(newValue, forKey: "server.quality") }
     }
 
