@@ -11,6 +11,7 @@ func usage() -> Never {
 
     server:
       boltkvm server [--width 3840] [--height 2160] [--port 7474] [--seconds 20]
+                     [--virtual-display external|builtin] [--virtual-display-size WxH]
                      [--bind auto|<ipv4>] [--codec prores|hevc] [--key <psk>|--insecure]
                      [--audio]   # 默认不传音频；加 --audio 才采集并转发
 
@@ -118,7 +119,10 @@ struct BoltKVM {
         guard args.count >= 2 else { usage() }
         switch args[1] {
         case "server":
-            await runServer(args)
+            // Creation has to happen on the main thread, so it runs here rather
+            // than inside the async server loop.
+            let virtualDisplay = prepareVirtualDisplay(args: args)
+            await runServer(args, virtualDisplay: virtualDisplay)
         case "doctor":
             runDoctor(args)
         case "watchdog":
@@ -142,7 +146,7 @@ struct BoltKVM {
         }
     }
 
-    static func runServer(_ args: [String]) async {
+    static func runServer(_ args: [String], virtualDisplay: BuiltinVirtualDisplay? = nil) async {
         let width = argInt(args, "--width", 3840)
         let height = argInt(args, "--height", 2160)
         let port = UInt16(argInt(args, "--port", 7474))
@@ -158,6 +162,14 @@ struct BoltKVM {
             exit(2)
         }
         if insecure { log("WARNING: --insecure — anyone who can reach this port controls the machine") }
+        if let virtualDisplay {
+            // Losing the display means capture is meaningless; exit and let the
+            // supervisor recreate the process (and with it, the display).
+            virtualDisplay.onLost = {
+                log("virtual display: removed by the system; exiting so the supervisor can recreate it")
+                exit(3)
+            }
+        }
         do {
             let listener = try TCPListener(port: port, bind: bindSpec)
             let deadline: UInt64? = seconds > 0

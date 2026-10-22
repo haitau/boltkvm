@@ -78,6 +78,8 @@ boltkvm server --width 3840 --height 2160 --port 7474 --seconds 0
 # 观察：出现 "capture started; waiting for frames" 才算 capture 正常
 # 绑定：默认 --bind auto，只监听雷雳桥（bridge*）地址；同机测试用 --bind 127.0.0.1
 # 音频：默认不传。需要转发时加 --audio（48 kHz 立体声，约 1.5 Mbps）
+# 虚拟屏：默认 external，假定 vdscreen/物理屏已经提供；加 --virtual-display builtin
+#         由本进程自己创建（--virtual-display-size 3008x1692 指定逻辑尺寸）
 ```
 
 ### 4. 起客户端（主控端）

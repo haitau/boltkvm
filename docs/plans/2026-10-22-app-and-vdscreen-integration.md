@@ -174,7 +174,7 @@ Packaging/
 | 阶段 | 内容 | 验收 | 估时 |
 |---|---|---|---|
 | 0 | 核对上游 LICENSE 与 `vdscreen.m` 的抽取边界（只需创建 + 核对 + terminationHandler） | 确定 vendor 范围，写出 NOTICE | 0.5 天 |
-| 1 | `CVirtualDisplay` target + `VirtualDisplayService` + 协议双实现 | `--virtual-display=builtin` 起服务端，客户端出画面；`vdscreen status` 不再需要；杀掉服务端后显示器消失、重启后重建 | 2–3 天 |
+| 1 | `CVirtualDisplay` target + `--virtual-display=builtin` | **已完成 2026-10-22**：`id=7 logical=3008x1692 backing=6016x3384 hiDPI=true`（创建耗时 2.1 s），客户端 888 帧 / 60.4 fps / `failed=0`；恢复 external 后 469 帧无回归。未测：`onLost` 回调（需要系统主动移除显示器） | 2–3 天 |
 | 2 | 删掉 `ExternalVDScreen`，mini 上卸 vdscreen.app 与它的 LaunchAgent | 部署件从 6 件降到 4 件；重启恢复仍通过 | 0.5 天 |
 | 3 | 抽出 `BoltKVMCore`（Protocol/Server/Renderer/Audio/VirtualDisplay 移入），CLI 变薄壳 | CLI 全功能不回退，`swift build` 通过，8h 冒烟 | 1–2 天 |
 | 4 | `BoltKVM Client.app`：全屏窗口、输入、连接面板、退出快捷键 | 双击即连；TCC 弹出的是 Client.app；输入延迟与 CLI 版一致 | 2–3 天 |
