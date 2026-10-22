@@ -21,6 +21,8 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     /// over (it auto-reveals at the top edge, like Screen Sharing).
     private var videoTopToBar: NSLayoutConstraint?
     private var videoTopToContent: NSLayoutConstraint?
+    private var chromeTimer: Timer?
+    private var appliedFullScreen: Bool?
 
     private static let tbControl = NSToolbarItem.Identifier("boltkvm.control")
     private static let tbApp = NSToolbarItem.Identifier("boltkvm.app")
@@ -149,6 +151,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             self?.statsLabel.stringValue = text
         }
         installToolbar()
+        setupFullScreenChrome()
     }
 
     // MARK: - Toolbar
@@ -190,16 +193,49 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Fullscreen chrome
 
-    func windowWillEnterFullScreen(_ notification: Notification) {
-        bar.isHidden = true
-        videoTopToBar?.isActive = false
-        videoTopToContent?.isActive = true
+    /// Neither the `windowWillEnterFullScreen` delegate callbacks nor the
+    /// did-* notifications fired for this window (verified with temporary logs),
+    /// so the fullscreen chrome is polled instead: the style mask is the truth,
+    /// and the pointer position decides whether the toolbar is out. This is the
+    /// Screen Sharing behaviour — hidden by default, revealed at the top edge.
+    private func setupFullScreenChrome() {
+        guard let window else { return }
+        window.acceptsMouseMovedEvents = true
+        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+            self?.tickChrome()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        chromeTimer = timer
     }
 
-    func windowWillExitFullScreen(_ notification: Notification) {
-        videoTopToContent?.isActive = false
-        videoTopToBar?.isActive = true
-        bar.isHidden = false
+    private func tickChrome() {
+        guard let window else { return }
+        let fullScreen = window.styleMask.contains(.fullScreen)
+        if appliedFullScreen != fullScreen {
+            appliedFullScreen = fullScreen
+            bar.isHidden = fullScreen
+            videoTopToContent?.isActive = fullScreen
+            videoTopToBar?.isActive = !fullScreen
+            window.toolbar?.isVisible = !fullScreen
+            log("fs: chrome applied (fullscreen=\(fullScreen))")
+        }
+        guard fullScreen, let screen = window.screen else { return }
+        let y = NSEvent.mouseLocation.y
+        let top = screen.frame.maxY
+        let visible = window.toolbar?.isVisible ?? false
+        // Revealing the toolbar pushes the pointer down by the toolbar height,
+        // so the hide threshold has to clear that band or the two states fight.
+        if y > top - 4, !visible {
+            window.toolbar?.isVisible = true
+            log("fs: toolbar shown at the top edge")
+        } else if y < top - 110, visible {
+            window.toolbar?.isVisible = false
+            log("fs: toolbar hidden")
+        }
+    }
+
+    deinit {
+        chromeTimer?.invalidate()
     }
 
     private func label(_ text: String) -> NSTextField {

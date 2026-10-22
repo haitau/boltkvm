@@ -118,17 +118,19 @@ id=25  inactive online ASLEEP main 3008x1692
 
 验证：窗口态截图确认工具栏五项齐全、图标正确。
 
-全屏态（实测 2026-10-22 17:40 前后，Pro 本机）：
+全屏态（2026-10-22 17:45 重做，Pro 本机）：**工具栏默认隐藏，指针到顶边才浮现**。
 
-- 工具栏「全屏」按钮能进全屏（`AXFullScreen=true`，drawable 6016x3280），
-  指针移到顶边时工具栏连标题一起浮现，截图里能看到五项；
-- 但 `windowWillEnterFullScreen` / `windowWillExitFullScreen` **没有触发**
-  （临时加的日志一次都没打印），所以"全屏隐藏连接栏"那段代码实际没生效，
-  现在靠系统工具栏覆盖，属于待修；
-- 退出全屏：⌃⌘F 和「视图 → 全屏」在这次测试里都没生效，最后用
-  `set value of attribute "AXFullScreen" ... to false` 才退出来；
-- 早前两次退全屏时窗口直接消失、连接中断（日志停在 65.8s），之后没能复现，
-  但也没找到原因。
+- `windowWillEnter/ExitFullScreen` 和 `didEnter/ExitFullScreen` 通知**都不会来**
+  （两轮临时日志一条都没打印），所以改成 0.2s 轮询 `window.styleMask.contains(.fullScreen)`；
+- 全屏时隐藏连接栏（换约束）、隐藏工具栏、隐藏标题；指针进顶边 4pt 内显示工具栏，
+  退到 110pt 以外再隐藏。阈值取 110 不是随意：工具栏一浮现，系统会把指针往
+  下推大约一个工具栏的高度（实测 y 从 1689 掉到 1615，top=1692），阈值设 40 会
+  变成"显示 → 隐藏"每个 tick 抖一次；
+- 验证日志：`fs: chrome applied (fullscreen=true)` → `fs: toolbar shown at the top edge`
+  → `fs: toolbar hidden`；截图对比确认隐藏时画面上没有工具栏、到顶边时五项都在；
+- 退出全屏：`视图 → 全屏` 正常，`chrome applied (fullscreen=false)`，连接保持
+  60fps · 1357Mbps。之前"退全屏窗口消失"的现象没有复现——那两次多半是我用 AX
+  查窗口时查不到（全屏窗口在独立 Space 里 AX 索引不到），不是窗口真的没了。
 
 ## 远程系统操作（调度中心 / 显示桌面 / App 窗口）
 
