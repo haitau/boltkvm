@@ -24,10 +24,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private var chromeTimer: Timer?
     private var appliedFullScreen: Bool?
 
-    private static let tbApp = NSToolbarItem.Identifier("boltkvm.app")
     private static let tbRemote = NSToolbarItem.Identifier("boltkvm.remote")
-    private static let tbMission = NSToolbarItem.Identifier("boltkvm.missionControl")
-    private static let tbDesktop = NSToolbarItem.Identifier("boltkvm.desktop")
 
     init() {
         let window = NSWindow(
@@ -175,8 +172,12 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         stack.orientation = .horizontal
         stack.spacing = 26
         stack.alignment = .centerY
+        // App Exposé is missing on purpose: macOS 26 offers no permission-free
+        // way to trigger it. The Dock notification that still drives Mission
+        // Control and Show Desktop (com.apple.expose.front.awake) is accepted and
+        // then does nothing here; the keyboard route needs Accessibility, the
+        // AppleScript route needs Automation, and this app gets neither.
         let entries: [(String, String, Selector)] = [
-            (L.t("client.toolbar.app"), "rectangle.on.rectangle", #selector(showAppWindows)),
             (L.t("client.toolbar.missionControl"), "square.grid.2x2", #selector(showMissionControl)),
             (L.t("client.toolbar.desktop"), "display", #selector(showDesktop)),
         ]
@@ -294,11 +295,6 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         session?.sendCommand(.missionControl)
     }
 
-    /// App Exposé — the current app's windows.
-    @objc func showAppWindows() {
-        session?.sendCommand(.appWindows)
-    }
-
     /// Show Desktop.
     @objc func showDesktop() {
         session?.sendCommand(.showDesktop)
@@ -338,25 +334,6 @@ extension ClientController: NSToolbarDelegate {
             item.label = ""
             item.paletteLabel = L.t("client.toolbar.app")
             item.view = remoteActionsView()
-        case Self.tbApp:
-            item.label = L.t("client.toolbar.app")
-            item.paletteLabel = item.label
-            item.toolTip = L.t("client.toolbar.app.tip")
-            item.image = toolbarImage("rectangle.on.rectangle")
-            item.action = #selector(showAppWindows)
-        case Self.tbMission:
-            item.label = L.t("client.toolbar.missionControl")
-            item.paletteLabel = item.label
-            item.toolTip = L.t("client.toolbar.missionControl.tip")
-            item.image = toolbarImage("square.grid.2x2")
-            item.action = #selector(showMissionControl)
-        case Self.tbDesktop:
-            item.label = L.t("client.toolbar.desktop")
-            item.paletteLabel = item.label
-            item.toolTip = L.t("client.toolbar.desktop.tip")
-            item.image = toolbarImage("menubar.dock.rectangle")
-                ?? toolbarImage("display")
-            item.action = #selector(showDesktop)
         default:
             return nil
         }

@@ -457,25 +457,7 @@ final class ServerAppController: NSObject {
         guard !line.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if line.hasPrefix("@@REMOTE:"),
-               let raw = UInt8(line.dropFirst("@@REMOTE:".count)),
-               let action = RemoteAction(rawValue: raw) {
-                // Run the AppleScript here, not in the helper: only the app has a
-                // bundle identity TCC will prompt for.
-                // tccd only raises the Automation consent dialog for a foreground
-                // app; in the server role this process is a background accessory
-                // with no window, so the request was denied silently (-1743) and
-                // never appeared under 隐私与安全性 → 自动化.
-                NSApp.setActivationPolicy(.regular)
-                NSApp.activate(ignoringOtherApps: true)
-                performRemoteAction(action)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
-                    guard let self, self.stateItem?.title != nil else { return }
-                    NSApp.setActivationPolicy(.accessory)
-                }
-                self.setState(L.t("server.status.connected"), detail: "command: \(action)")
-                return
-            }
+            // (remote actions are performed by the server process itself; no relay)
             if line.contains("listening on") {
                 self.setState(L.t("server.status.listening"), detail: L.f("server.status.port", Prefs.serverPort))
                 self.lastStats = ""

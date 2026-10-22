@@ -303,20 +303,9 @@ final class Server: NSObject, SCStreamOutput {
         if first { log("session: client disconnected") }
     }
 
-    /// System-UI actions that macOS refuses to take from synthetic keystrokes.
-    /// Mission Control has a launchable app; the rest go through System Events,
-    /// which is a trusted sender (the first use asks for Automation permission).
+    /// System-UI actions: post the shortcut into the HID stream (no TCC needed).
     private func performRemote(_ action: RemoteAction) {
         log("command: \(action)")
-        // The helper is a bare executable: TCC attributes Automation prompts to it
-        // and silently denies (-1743). The app that spawned it is a real app with
-        // a bundle identity, so hand the action up and let it run the AppleScript.
-        if ProcessInfo.processInfo.environment["BOLTKVM_RELAY_REMOTE"] == "1" {
-            print("@@REMOTE:\(action.rawValue)")
-            fflush(stdout)
-            log("command: relayed \(action) to the app")
-            return
-        }
         DispatchQueue.main.async {
             performRemoteAction(action)
         }
