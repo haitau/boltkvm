@@ -250,3 +250,29 @@ GUI 客户端连不上（`EHOSTUNREACH` / "无到主机的路由"）、同机 CL
 **系统设置 → 隐私与安全性 → 本地网络 → BoltKVM.app 的开关是关的**，
 命令行继承终端权限所以不受影响。截图核对后手动打开，客户端立刻连上
 （60fps · 1371Mbps）。反复重建签名会重置这类授权，调试期间要注意。
+
+## 单实例约束（2026-10-22 18:40）
+
+一台机器上只允许一个 boltkvm，分两把锁（`~/Library/Application Support/BoltKVM/*.pid`，
+`flock(LOCK_EX|LOCK_NB)` 持有到进程退出）：
+
+- `.app`：GUI 进程启动时取；取不到说明已有实例，激活那个窗口后 `exit(0)`；
+- `.server`：`server` 角色取；helper 和手动 `boltkvm-server server` 共用这一把，
+  第二个直接 `exit(9)`，不抢虚拟屏和 7474 端口。
+
+用 flock 而不是"检查 pid 文件存在"：内核在进程退出（包括 SIGKILL）时自动释放，
+所以崩溃留下的文件不会挡住下次启动。原来的 `NSRunningApplication` 扫描留着做
+"激活已有窗口"，但它不是原子的——登录项 + 手动启动可能同时通过检查。
+
+app 侧对 `exit(9)` 特殊处理：状态显示「另一个实例正在运行」并**停止自动重启**
+（否则每 3 秒拉一次，永远循环）。
+
+实测（Pro + mini）：
+
+- 已在运行时直接再跑一次 `dist/BoltKVM.app/Contents/MacOS/BoltKVM`
+  → `boltkvm: another instance is already running (pid 86734); exiting`，进程数保持 1；
+- mini 上 app 正在跑时手动 `/Applications/BoltKVM.app/Contents/MacOS/boltkvm-server server`
+  → `boltkvm: another server is already running (pid 31713)`；
+- 部署后客户端照常连接：60 fps · 1791 Mbps。
+
+未验证：登录项 + 手动启动同时触发的竞态（只做了顺序启动的验证）。

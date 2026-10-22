@@ -34,18 +34,22 @@ public enum AppMain {
         // Only the main executable counts: the capture helper lives inside the
         // bundle and reports the same bundle id, so matching on the id alone
         // would make the app refuse to start after an orphaned helper survives.
-        if let id = Bundle.main.bundleIdentifier {
-            let mine = Bundle.main.executableURL?.resolvingSymlinksInPath()
-            let twin = NSRunningApplication.runningApplications(withBundleIdentifier: id)
-                .first { app in
-                    app.processIdentifier != ProcessInfo.processInfo.processIdentifier
-                        && app.executableURL?.resolvingSymlinksInPath() == mine
-                }
-            if let twin {
-                twin.activate(options: [])
-                FileHandle.standardError.write(Data("another BoltKVM is already running (pid \(twin.processIdentifier)); exiting\n".utf8))
-                exit(0)
+        // An flock, not just a bundle-id scan: login item + manual launch can
+        // start two processes at the same instant, before either one shows up in
+        // NSRunningApplication. The kernel lock is atomic, and it is released on
+        // crash/SIGKILL, so a stale pid file never blocks a restart.
+        if let owner = SingleInstance.acquire(.app) {
+            if let id = Bundle.main.bundleIdentifier,
+               let twin = NSRunningApplication.runningApplications(withBundleIdentifier: id)
+                   .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
+                twin.activate(options: [.activateAllWindows])
             }
+            let note = "boltkvm: another instance is already running (pid \(owner)); exiting\n"
+            // stderr already points at the app log, so also say it on stdout for
+            // the case where someone launched the binary from a terminal.
+            FileHandle.standardError.write(Data(note.utf8))
+            FileHandle.standardOutput.write(Data(note.utf8))
+            exit(0)
         }
         let app = NSApplication.shared
         let delegate = AppDelegate()

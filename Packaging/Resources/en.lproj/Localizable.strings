@@ -47,6 +47,7 @@
 /* Controlled Mac menu bar */
 "server.tooltip" = "BoltKVM controlled Mac";
 "server.status.stopped" = "Stopped";
+"server.status.blocked" = "Another instance is running";
 "server.status.listening" = "Listening";
 "server.status.connected" = "Connected";
 "server.status.starting" = "Starting…";

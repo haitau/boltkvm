@@ -47,6 +47,7 @@
 /* 被控端菜单栏 */
 "server.tooltip" = "BoltKVM 被控端";
 "server.status.stopped" = "已停止";
+"server.status.blocked" = "另一个实例正在运行";
 "server.status.listening" = "监听中";
 "server.status.connected" = "已连接";
 "server.status.starting" = "启动中…";

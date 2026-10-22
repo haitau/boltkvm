@@ -428,6 +428,14 @@ final class ServerAppController: NSObject {
     }
 
     private func handleExit(status: Int32) {
+        if status == 9 {
+            // SingleInstance refused: another boltkvm owns the server role. Do
+            // not restart — that would spin every 3 seconds forever.
+            wanted = false
+            setState(L.t("server.status.blocked"), detail: "another instance is running")
+            log("app: helper refused to start: another server instance owns the lock")
+            return
+        }
         pipe?.fileHandleForReading.readabilityHandler = nil
         pipe = nil
         process = nil

@@ -8,6 +8,10 @@ import ApplicationServices
 public enum CLI {
 
     public static func runServer(_ args: [String]) async {
+        if let owner = SingleInstance.acquire(.server) {
+            FileHandle.standardError.write(Data("boltkvm: another server is already running (pid \(owner))\n".utf8))
+            exit(9)
+        }
         exitWhenParentGoesAway()
         // Held for the process lifetime; a sleeping display means no frames.
         let sleepAssertion = DisplaySleepAssertion(reason: "BoltKVM is serving a remote screen")
