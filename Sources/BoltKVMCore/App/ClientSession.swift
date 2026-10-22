@@ -59,7 +59,22 @@ final class ClientSession {
             var bytes = 0
             var lastReport = DispatchTime.now().uptimeNanoseconds
             do {
-                let c = try tcpConnect(host: host, port: port)
+                // The first socket of a freshly launched app can be refused by
+                // the Local Network privacy check ("No route to host") while the
+                // check is still settling; retry briefly instead of showing an
+                // error the user would read as "the server is down".
+                var connection: TCPConnection?
+                for attempt in 1...3 {
+                    do {
+                        connection = try tcpConnect(host: host, port: port)
+                        break
+                    } catch {
+                        if attempt == 3 { throw error }
+                        log("connect: attempt \(attempt) failed (\(error.localizedDescription)); retrying")
+                        Thread.sleep(forTimeInterval: 0.6)
+                    }
+                }
+                guard let c = connection else { return }
                 self.conn = c
                 defer { c.close() }
                 try c.send(timeSyncRequest())

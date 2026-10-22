@@ -237,6 +237,8 @@ app 直接在自己进程里调 `BKVVirtualDisplayCreate` 时，同样的代码�
 
 | 8 | 主控端输入免权限 + 画面/UI 事件分流 + 全屏按钮 | **已完成并实测 2026-10-22**：app 用 `NSEvent.addLocalMonitorForEvents` 只监听本窗口，命中测试（`hitTest`）确认指针在画面内才转发，其余事件放行给连接栏/菜单；被控端补齐辅助功能权限引导。实测：指针在画面内 120 次事件 → 服务端 `input events=120`；全屏按钮 `AXFullScreen true → 3008×1692`，再点回 `false / 1200×788` | 1 天 |
 
+| 9 | 无头虚拟屏休眠导致画面冻结 | **已修复并实测 2026-10-22**：进程生命周期持有 `PreventUserIdleDisplaySleep`、建屏后主动唤醒、建屏重试延长到 20 秒；修复后静止 50 秒显示器仍 `active online awake`、服务端 58 fps | 0.5 天 |
+
 ## 5. 收益量化
 
 | 指标 | 现在 | 之后 |

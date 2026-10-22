@@ -11,6 +11,7 @@
 "menu.quit" = "Quit BoltKVM";
 "menu.view" = "View";
 "menu.fullscreen" = "Toggle Full Screen";
+"menu.showWindow" = "Show Controller Window";
 "menu.role" = "Role";
 
 /* First-run role chooser */

@@ -119,6 +119,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         serverController = nil
     }
 
+    /// Closing the client window used to leave no way back: this is a menu bar
+    /// app, so there is no Dock icon to click.
+    @objc private func showClientWindow() {
+        guard Prefs.role == .client else { return }
+        if clientController == nil {
+            let controller = ClientController()
+            clientController = controller
+        }
+        clientController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Dock/reopen events (also covers ⌘-tab back into the app).
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { showClientWindow() }
+        return true
+    }
+
     @objc private func switchRole() {
         stopAll()
         Prefs.role = nil
@@ -178,6 +196,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let roleItem = NSMenuItem()
         let menu = NSMenu(title: L.t("menu.role"))
+        let showWindow = NSMenuItem(title: L.t("menu.showWindow"), action: #selector(showClientWindow), keyEquivalent: "")
+        showWindow.target = self
+        menu.addItem(showWindow)
+        menu.addItem(.separator())
         menu.addItem(withTitle: L.t("menu.role.server"), action: #selector(useServerRole), keyEquivalent: "")
         menu.addItem(withTitle: L.t("menu.role.client"), action: #selector(useClientRole), keyEquivalent: "")
         menu.addItem(withTitle: L.t("menu.role.switch"), action: #selector(switchRole), keyEquivalent: "")

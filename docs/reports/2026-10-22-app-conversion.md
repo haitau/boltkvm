@@ -51,14 +51,30 @@ mini 已从「CLI 守护循环 + vdscreen 虚拟屏」切换为「`/Applications
 4. **ad-hoc 签名会重置所有 TCC**：每次构建 cdhash 都变。改用自签名证书（`scripts/make-signing-identity.sh`）后授权可跨构建保留。
 5. **APFS 大小写不敏感**：`Contents/MacOS/boltkvm` 会覆盖主程序 `BoltKVM`，helper 必须叫别的名字（现为 `boltkvm-server`）。
 
-## 帧率口径提醒
+## 帧率：45 fps 之谜与一个真 bug
 
-同一套代码在 mini 上观测到 36–60 fps 的差异，事后核对环境发现两个混淆项：
+关掉 mini 的屏幕共享后重测，帧率先是 23 fps、随后归零，`boltkvm displays` 显示
 
-1. **屏幕内容是否在动**：完全静态时出帧少（36–47），持续动画时更高；
-2. **mini 上是否有人同时在做屏幕共享**：今天下午为了授权 TCC，user 一直连着 `screensharingd`。系统里同时存在另一个采集会话时，我们的帧率被压到 45 左右；无人的上午是 59.8。
+```
+id=25  inactive online ASLEEP main 3008x1692
+```
 
-所以 45 fps 不是 app 化引入的回归，但这一条只是【推断】，还没有做「关掉屏幕共享前后各测一次」的对照。后续所有帧率对比都必须同时记录：屏幕是否在动、是否有 screensharingd/VNC 会话。
+也就是说：**无头机器的虚拟屏在没有外部刺激时会自己睡过去**，一旦 ASLEEP，ScreenCaptureKit 不再出帧，远端画面就冻住。之前看到的 45 fps 是屏幕共享会话一直在给这块屏制造重绘，掩盖了问题；上午 59.8 fps 时也没有这个休眠窗口。
+
+修复三处：
+
+1. 服务端进程生命周期内持有 `PreventUserIdleDisplaySleep` 断言（原来只在每次建 capture 时短暂声明一次用户活动）；
+2. 建屏后 `IOPMAssertionDeclareUserActivity` 主动唤醒；
+3. 建屏失败的重试窗口从 3 秒延长到 20 秒——上一个 helper 被 kill 后，它的虚拟屏会残留（inactive/ASLEEP）几秒，占着同一个 identity，重试太短就会掉到 1920×1080 占位屏，客户端于是串流了错误的屏幕。
+
+修复后（无屏幕共享、Pro 端 app 客户端）：
+
+| 场景 | 服务端 | 客户端 |
+|---|---|---|
+| 持续有输入/画面变化 | 55–60 fps，`dropped=0`，~790 Mbps，encLat 7.9–8.8 ms | 60 fps · 771–793 Mbps |
+| 静止 50 秒后 | 58.0 fps，显示器仍 `active online awake`，断言在 `pmset -g assertions` 里可见 | 画面不冻 |
+
+顺带修了两件小事：主控端窗口关掉后没有入口再打开（加了「显示主控端窗口」菜单项和 reopen 处理）；app 刚启动时第一次连接偶尔报 `No route to host`（本地网络检查未就绪），改成 3 次重试后稳定一次成功。
 
 ## 未验证 / 下一步
 

@@ -84,13 +84,20 @@ func prepareVirtualDisplay(args: [String]) -> BuiltinVirtualDisplay? {
     if display == nil {
         // A display with this identity is usually still being torn down by the
         // previous helper. Give it a moment before giving up.
-        for attempt in 1...2 {
-            Thread.sleep(forTimeInterval: 1.5)
-            log("virtual display: creation refused, retry \(attempt)/2")
+        // A display from the previous helper can linger (inactive, ASLEEP) for a
+        // while after its owner dies; the system then refuses the same identity.
+        // Falling back to the 1920x1080 placeholder here is wrong — the client
+        // would stream the wrong screen — so keep trying for ~20 s.
+        for attempt in 1...10 {
+            Thread.sleep(forTimeInterval: 2)
+            log("virtual display: creation refused, retry \(attempt)/10")
             display = BuiltinVirtualDisplay(name: "boltKVM", width: logicalWidth, height: logicalHeight, hiDPI: hiDPI)
             if display != nil { break }
         }
     }
+    // Waking a freshly adopted or freshly created headless display: without user
+    // activity it can sit ASLEEP, and a sleeping display produces no frames.
+    IOPMAssertionDeclareUserActivity("BoltKVM remote screen" as CFString, kIOPMUserActiveLocal, nil)
     guard let display else {
         // Capture whatever exists rather than refusing to start; the CLI logs the
         // reason (identity conflict) from the C layer.

@@ -1,9 +1,41 @@
 import Foundation
+import IOKit.pwr_mgt
 import CoreMedia
 import CoreVideo
 import Darwin
 import AppKit
 import ApplicationServices
+
+/// A headless KVM must not let its virtual display fall asleep: once the system
+/// marks the display ASLEEP, ScreenCaptureKit stops delivering frames and the
+/// remote picture freezes (measured 2026-10-22: fps fell 45 -> 0 after the last
+/// stimulus, display state `inactive ... ASLEEP`). The assertion is held for the
+/// whole server lifetime and released when the process exits.
+final class DisplaySleepAssertion {
+    private var id: IOPMAssertionID = 0
+
+    init(reason: String) {
+        let created = IOPMAssertionCreateWithName(
+            kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            reason as CFString,
+            &id
+        )
+        if created == kIOReturnSuccess {
+            log("power: display sleep prevented (assertion \(id))")
+        } else {
+            log("power: could not create display assertion (0x\(String(created, radix: 16)))")
+        }
+    }
+
+    func release() {
+        guard id != 0 else { return }
+        IOPMAssertionRelease(id)
+        id = 0
+    }
+
+    deinit { release() }
+}
 
 /// When the app spawns us it hands over a stdin pipe and never writes to it, so
 /// EOF means the app is gone (quit, crash, SIGKILL). Without this the helper

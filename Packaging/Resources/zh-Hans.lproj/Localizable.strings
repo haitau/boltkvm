@@ -11,6 +11,7 @@
 "menu.quit" = "退出 BoltKVM";
 "menu.view" = "视图";
 "menu.fullscreen" = "全屏";
+"menu.showWindow" = "显示主控端窗口";
 "menu.role" = "角色";
 
 /* 首次启动选角色 */

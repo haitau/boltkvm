@@ -9,6 +9,9 @@ public enum CLI {
 
     public static func runServer(_ args: [String]) async {
         exitWhenParentGoesAway()
+        // Held for the process lifetime; a sleeping display means no frames.
+        let sleepAssertion = DisplaySleepAssertion(reason: "BoltKVM is serving a remote screen")
+        defer { sleepAssertion.release() }
         // Creation must happen on the main thread, so hop there before the
         // async server loop starts.
         let virtualDisplay = await MainActor.run { prepareVirtualDisplay(args: args) }
