@@ -73,6 +73,10 @@ func authenticateServer(conn: TCPConnection, key: Data, timeoutSeconds: Int = 5)
 /// aligned in each direction.
 func enableClientEncryption(conn: TCPConnection, nonce: Data?) {
     guard let nonce, let key = resolveAuthKey(CommandLine.arguments) else { return }
+    enableClientEncryption(conn: conn, nonce: nonce, key: key)
+}
+
+func enableClientEncryption(conn: TCPConnection, nonce: Data, key: Data) {
     let keys = deriveSessionKeys(psk: key, nonce: nonce)
     conn.outCipher = SessionCipher(key: keys.c2s)
     conn.inCipher = SessionCipher(key: keys.s2c)
@@ -85,6 +89,11 @@ func respondToAuthChallenge(conn: TCPConnection, nonce: Data) throws {
         log("server requires a pre-shared key: pass --key, set $BOLTKVM_KEY, or create ~/.boltkvm-key")
         exit(2)
     }
+    try respondToAuthChallenge(conn: conn, nonce: nonce, key: key)
+}
+
+/// Key-injecting variant for the app, which must not read CommandLine or exit.
+func respondToAuthChallenge(conn: TCPConnection, nonce: Data, key: Data) throws {
     let mac = authMAC(key: key, nonce: nonce)
     try conn.send(packet(type: .authResponse, ptsMicros: 0, payload: mac))
 }

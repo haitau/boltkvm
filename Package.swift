@@ -32,5 +32,13 @@ let package = Package(
             path: "Sources/boltkvm",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // The single app bundle. Packaging/build-app.sh turns this into
+        // BoltKVM.app; the role is chosen at first run, not by which binary.
+        .executableTarget(
+            name: "BoltKVMApp",
+            dependencies: ["BoltKVMCore"],
+            path: "Sources/BoltKVMApp",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

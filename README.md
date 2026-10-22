@@ -37,6 +37,22 @@ CGEvent 输入注入             ◄── 输入事件流 ───────
 
 默认编码为 ProRes 422（[ADR-0003](docs/adr/0003-prores-422-primary.md)），服务端可用 `--codec hevc` 切换；传输层目前只有 TCP，UDP/QUIC 未实现。
 
+## app（单包，两个角色）
+
+```bash
+./Packaging/build-app.sh          # 产出 dist/BoltKVM.app
+open dist/BoltKVM.app             # 首次启动选「被控端」还是「主控端」
+```
+
+同一个 app 两种角色，选择记在 UserDefaults 里，菜单「角色」可随时切换：
+
+- **被控端**：无窗口，菜单栏常驻；自己创建虚拟屏、监听端口，缺屏幕录制权限时弹窗引导；
+- **主控端**：一个窗口，顶部填主机/端口/密钥，连接后画面填满窗口，⌃⌘F 全屏，可勾选转发键鼠与音频。
+
+`Info.plist` 里的 `NSLocalNetworkUsageDescription` 是硬要求：macOS 15 起连内网地址属于「本地网络」权限，缺了会直接 `No route to host`。
+
+ad-hoc 签名（默认 `-`）每次构建 cdhash 都会变，TCC 会当成新 app、权限要重给；要固定身份就用自己的自签名证书并设 `BOLTKVM_CODESIGN_IDENTITY`。
+
 ## 快速开始
 
 ### 0. 构建
