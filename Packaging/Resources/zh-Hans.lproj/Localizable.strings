@@ -80,3 +80,7 @@
 "server.resolution.custom.invalid" = "格式不对，应为 宽x高（640–8192）。";
 "common.ok" = "好";
 "common.cancel" = "取消";
+"menu.remote" = "远程";
+"menu.remote.missionControl" = "调度中心（多桌面）";
+"menu.remote.appWindows" = "显示 App 窗口";
+"menu.remote.showDesktop" = "显示桌面";

@@ -169,6 +169,23 @@ final class ClientController: NSWindowController, NSWindowDelegate {
                         playAudio: audioCheck.state == .on)
     }
 
+    // MARK: - Remote system shortcuts
+
+    /// Mission Control (Spaces overview).
+    @objc func showMissionControl() {
+        session?.sendCommand(.missionControl)
+    }
+
+    /// App Exposé — the current app's windows.
+    @objc func showAppWindows() {
+        session?.sendCommand(.appWindows)
+    }
+
+    /// Show Desktop.
+    @objc func showDesktop() {
+        session?.sendCommand(.showDesktop)
+    }
+
     @objc func toggleFullScreenAction(_ sender: Any?) {
         window?.toggleFullScreen(sender)
     }

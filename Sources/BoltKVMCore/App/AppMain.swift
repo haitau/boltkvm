@@ -185,6 +185,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appItem.submenu = appMenu
         main.addItem(appItem)
 
+        // Own menu, after the app menu: the system auto-titles the first item with
+        // the app name, so anything inserted before it steals that slot.
+        let remoteItem = NSMenuItem(title: L.t("menu.remote"), action: nil, keyEquivalent: "")
+        remoteItem.submenu = buildRemoteMenu()
+        main.addItem(remoteItem)
+
         let viewItem = NSMenuItem()
         let viewMenu = NSMenu(title: L.t("menu.view"))
         let full = NSMenuItem(title: L.t("menu.fullscreen"), action: #selector(toggleFullScreen), keyEquivalent: "f")
@@ -210,6 +216,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.mainMenu = main
     }
+
+    /// Actions that make the *remote* Mac do something, like Screen Sharing's
+    /// control menu. They travel over the input channel, so no new protocol.
+    private func buildRemoteMenu() -> NSMenu {
+        let menu = NSMenu(title: L.t("menu.remote"))
+        let entries: [(String, Selector, Int)] = [
+            ("menu.remote.missionControl", #selector(remoteMissionControl), 126),
+            ("menu.remote.appWindows", #selector(remoteAppWindows), 125),
+            ("menu.remote.showDesktop", #selector(remoteShowDesktop), 103),
+        ]
+        for (key, action, _) in entries {
+            let item = NSMenuItem(title: L.t(key), action: action, keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func remoteMissionControl() { clientController?.showMissionControl() }
+    @objc private func remoteAppWindows() { clientController?.showAppWindows() }
+    @objc private func remoteShowDesktop() { clientController?.showDesktop() }
 
     private func updateRoleMenu() {
         guard let roleMenu else { return }

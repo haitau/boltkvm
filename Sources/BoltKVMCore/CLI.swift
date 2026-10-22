@@ -464,6 +464,8 @@ public enum CLI {
                         log("loop.win packets=\(packets) received=\(received)")
                     }
                     switch header.type {
+                    case .command:
+                        break  // server performs commands; a client never receives them
                     case .format:
                         if let f = StreamFormat.decode(payload) {
                             try decoder.configure(f)

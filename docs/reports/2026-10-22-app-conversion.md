@@ -102,6 +102,26 @@ id=25  inactive online ASLEEP main 3008x1692
 
 清晰模式的 1.38 Gbps 只在雷雳桥（10Gbps）上验证过；Wi-Fi 下应该退回「标准」。默认值已改成「清晰」，清掉 preferences 后验证：helper 参数 `--width 6016 --height 3384`，客户端 60 fps / 1381 Mbps / dropped=0。
 
+## 远程系统操作（调度中心 / 显示桌面 / App 窗口）
+
+参照屏幕共享加了「远程」菜单：调度中心（多桌面）、显示 App 窗口、显示桌面。
+
+一开始把它们实现成"注入 `⌃↑` / `⌃↓` / `F11`"，实测**不生效**：按键确实到达并被注入
+（服务端 `input events=360 keys=6`），但系统级热键无视合成事件。同一条链路里
+`⌘Space` 能打开远端 Spotlight（画面 79 → 188），说明注入本身没问题——被吃掉的是
+`RegisterEventHotKey` 一类热键（和之前 `⌘⇧3` 截图不生效是同一个原因）。
+
+所以改成**命令通道**：客户端发 `PacketType.command = 10` + 一个动作字节，服务端自己执行。
+
+| 动作 | 服务端实现 | 实测 |
+|---|---|---|
+| 调度中心 | `NSWorkspace.open("/System/Applications/Mission Control.app")` | ✅ 服务端日志 `command: missionControl`，画面结构变化（相关性 0.41）、亮度 188 → 81 |
+| 显示 App 窗口 | System Events `key code 125 using control down` | 未验证（需要服务端第一次批准「自动化」权限） |
+| 显示桌面 | System Events `key code 103` | 未验证（同上） |
+
+也试过给合成事件换 event tap（hid / session / annotated）和用 `flagsChanged` 发修饰键，
+都不影响系统热键的行为——这条路走不通，命令通道才是对的。
+
 ## 未验证 / 下一步
 
 - app 部署下 >10 分钟的稳定性（今天只做了分钟级）；

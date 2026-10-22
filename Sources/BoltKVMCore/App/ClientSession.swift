@@ -87,6 +87,8 @@ final class ClientSession {
                     let (header, payload) = try c.recvFrame()
                     bytes += payload.count
                     switch header.type {
+                    case .command, .input, .audio:
+                        break  // client never receives these
                     case .authChallenge:
                         challengeNonce = payload
                         try respondToAuthChallenge(conn: c, nonce: payload, key: sessionKey)
@@ -151,6 +153,19 @@ final class ClientSession {
             input = capture
         } else {
             log("input: not started (Input Monitoring permission?)")
+        }
+    }
+
+    /// Ask the remote to perform a system-UI action (Mission Control, …).
+    /// Keystrokes cannot do this: macOS ignores synthetic events for its own
+    /// hotkeys, so the server performs the action itself.
+    func sendCommand(_ action: RemoteAction) {
+        guard let conn, isActive else { return }
+        do {
+            try conn.send(packet(type: .command, payload: Data([action.rawValue])))
+            log("command: sent \(action)")
+        } catch {
+            log("command: send failed: \(error)")
         }
     }
 

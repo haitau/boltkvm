@@ -30,6 +30,21 @@ enum PacketType: UInt8 {
     /// Opt-in only (server `--audio`): raw PCM, 48 kHz, 2 ch, int16 LE,
     /// interleaved. Without the flag no such packet is ever produced.
     case audio = 9
+    /// Remote control of system UI that no keyboard event can trigger: the
+    /// server performs the action natively (see `RemoteAction`).
+    case command = 10
+}
+
+/// Actions the client asks the *server* to perform. These are deliberately not
+/// synthesised keystrokes: macOS ignores synthetic events for system hotkeys
+/// (Mission Control, Show Desktop, App Exposé), which is why they need a path of
+/// their own.
+enum RemoteAction: UInt8 {
+    case missionControl = 1
+    case showDesktop = 2
+    case appWindows = 3
+    case spaceLeft = 4
+    case spaceRight = 5
 }
 
 struct PacketHeader {

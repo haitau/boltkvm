@@ -253,6 +253,10 @@ final class Server: NSObject, SCStreamOutput {
                         if let ev = InputEvent.decode(payload) {
                             self.inject(ev)
                         }
+                    } else if h.type == .command {
+                        if let raw = payload.first, let action = RemoteAction(rawValue: raw) {
+                            self.performRemote(action)
+                        }
                     }
                 } catch {
                     self.signalDisconnect()
@@ -272,6 +276,37 @@ final class Server: NSObject, SCStreamOutput {
         disconnectedFlag = true
         lockState.unlock()
         if first { log("session: client disconnected") }
+    }
+
+    /// System-UI actions that macOS refuses to take from synthetic keystrokes.
+    /// Mission Control has a launchable app; the rest go through System Events,
+    /// which is a trusted sender (the first use asks for Automation permission).
+    private func performRemote(_ action: RemoteAction) {
+        log("command: \(action)")
+        DispatchQueue.main.async {
+            switch action {
+            case .missionControl:
+                NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Mission Control.app"))
+            case .showDesktop:
+                Self.keyViaSystemEvents("key code 103")
+            case .appWindows:
+                Self.keyViaSystemEvents("key code 125 using control down")
+            case .spaceLeft:
+                Self.keyViaSystemEvents("key code 123 using control down")
+            case .spaceRight:
+                Self.keyViaSystemEvents("key code 124 using control down")
+            }
+        }
+    }
+
+    private static func keyViaSystemEvents(_ body: String) {
+        let source = "tell application \"System Events\" to \(body)"
+        guard let script = NSAppleScript(source: source) else { return }
+        var error: NSDictionary?
+        script.executeAndReturnError(&error)
+        if let error {
+            log("command: AppleScript failed: \(error[NSAppleScript.errorNumber] ?? "?") \(error[NSAppleScript.errorMessage] ?? "")")
+        }
     }
 
     private func inject(_ ev: InputEvent) {

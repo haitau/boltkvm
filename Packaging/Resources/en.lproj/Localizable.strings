@@ -79,3 +79,7 @@
 "server.resolution.custom.invalid" = "That is not WIDTHxHEIGHT (640–8192).";
 "common.ok" = "OK";
 "common.cancel" = "Cancel";
+"menu.remote" = "Remote";
+"menu.remote.missionControl" = "Mission Control (Spaces)";
+"menu.remote.appWindows" = "App Windows";
+"menu.remote.showDesktop" = "Show Desktop";
