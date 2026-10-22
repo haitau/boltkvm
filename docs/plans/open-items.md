@@ -48,13 +48,13 @@
 
 | ID | 问题 | 复现 | 判断 |
 |---|---|---|---|
-| B1 | 工具栏 `桌面` / `App` 无效 | 点按钮，服务端日志出现 `AppleScript failed: -1743 未获得授权将Apple事件发送给 System Events` | 动作本身是 `key code 103` / `key code 125 using control down`，需要 System Events 的自动化授权。helper 没有 bundle 身份，已改成转交 app 执行（`@@REMOTE:` 通道），但仍被旧的拒绝记录挡住。需要人工在服务端 `系统设置 → 隐私与安全性 → 自动化 → BoltKVM → System Events` 勾选 |
+| B1 | 工具栏 `桌面` / `App` 无效 | 点按钮，服务端日志出现 `AppleScript failed: -1743 未获得授权将Apple事件发送给 System Events`；`自动化` 面板里没有 BoltKVM 条目（该面板不能手动添加，条目只在应用首次请求时出现） | 需要 System Events 的自动化授权。已尝试三种办法：动作改由 app 执行（`@@REMOTE:` 通道）、`AEDeterminePermissionToAutomateTarget` 主动请求、请求前把 app 临时提到前台——仍然立即 -1743、不弹框。推测服务端角色是后台附件型进程，tccd 不为它弹框。备选方案：改用客户端注入快捷键（`⌃↑` / `⌃↓` / `F11`），不依赖任何授权 |
 
 ### 未定位
 
 | ID | 问题 | 复现 | 影响 |
 |---|---|---|---|
-| B2 | 连接失败后客户端窗口消失 | 连续点连接按钮，或连接失败后重试；`System Events` 报 `不能获得 window 1 of process "BoltKVM"（-1719）`，进程仍在 | 只能杀进程重开。怀疑失败路径里把窗口关了却没恢复，未定位 |
+| B2 | 客户端窗口消失（进程和连接都还在） | 2026-10-22 18:40 再次复现：AX 报 `-1719`、CGWindowList 里 0 个窗口，但服务端仍在 60fps 编码（会话没断）；执行 `open -a <app>` 后窗口恢复 | 已加 `applicationShouldHandleReopen` 的补救（对已关闭窗口补 `makeKeyAndOrderFront`），现在只是能救回来，还没避免。窗口何时被关闭仍未定位，需要给 `windowWillClose` / `shutdown()` 打点抓调用栈 |
 | B3 | 首次连接偶发停在"正在连接…" | 服务端重启后第一次连接，服务端日志只到 `auth ok`，没有 `capture started` | 已加 SCShareableContent 5s 超时（修复后 CLI 首次连接稳定），但仍有"要连两次才成功"的观察，未解释 |
 
 | B4 | 画面右上角出现黑色三角 | 客户端连接后偶发：视频区右上角一块约 90×65px 的纯黑斜角，改一次窗口尺寸后消失，之后再移动鼠标/重连未复现 | 已排除两个方向：客户端代码里没有任何圆角遮罩（`grep cornerRadius/maskedCorners` 为空），服务端 `config.showsCursor = false` 且客户端不画光标叠加。更像是那一次定格下来的远端内容（窗口圆角/阴影或菜单栏动画帧）。暂无法复现，先记着；下次出现先改窗口尺寸或切一次全屏 |
@@ -75,6 +75,6 @@
 
 ### 待做功能
 
-- 工具栏居中（现在靠右，标题还在）与 `缩放` 按钮（屏幕共享右侧那组）。
+- `缩放` 按钮（屏幕共享右侧那组 `+/-` 与适应窗口）；工具栏居中已完成（`b61617b`）。
 - 调度中心目前只能按 Esc 退出；再点一次不会关闭 Mission Control。
 - app 内音频实测；输入连续性 8 小时长跑；app 模式 >10 分钟稳定性的复核。
