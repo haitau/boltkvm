@@ -12,9 +12,11 @@ func usage() -> Never {
     server:
       boltkvm server [--width 3840] [--height 2160] [--port 7474] [--seconds 20]
                      [--bind auto|<ipv4>] [--codec prores|hevc] [--key <psk>|--insecure]
+                     [--audio]   # 默认不传音频；加 --audio 才采集并转发
 
     client:
       boltkvm client [--host <mini>] [--port 7474] [--seconds 20] [--render] [--switch-mode] [--input] [--reconnect] [--key <psk>]
+                     [--audio] [--audio-record <path>]   # 播放 / 落盘被控端音频
 
     utilities:
       boltkvm doctor [--role server|client]
@@ -158,7 +160,9 @@ struct BoltKVM {
                         continue
                     }
                 }
-                let server = Server(width: width, height: height, codec: codec, connection: conn, dumpPath: dump.isEmpty ? nil : dump)
+                let audio = args.contains("--audio")
+        let server = Server(width: width, height: height, codec: codec, connection: conn,
+                            dumpPath: dump.isEmpty ? nil : dump, audioEnabled: audio)
                 do {
                     try await server.start()
                 } catch {
@@ -348,6 +352,11 @@ struct BoltKVM {
         let switchMode = args.contains("--switch-mode")
         let wantsInput = args.contains("--input")
         let reconnect = args.contains("--reconnect")
+        let audioRecord = argValue(args, "--audio-record", "")
+        let wantsAudio = args.contains("--audio") || !audioRecord.isEmpty
+        let audio: AudioPlayer? = wantsAudio
+            ? AudioPlayer(play: args.contains("--audio"), recordPath: audioRecord.isEmpty ? nil : audioRecord)
+            : nil
 
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.delegate = RenderSession.shared
@@ -413,6 +422,8 @@ struct BoltKVM {
                             decoder.decode(payload, ptsMicros: header.ptsMicros)
                         } else if header.type == .timeSync {
                             handleTimeSync(header, payload, decoder: decoder)
+                        } else if header.type == .audio {
+                            audio?.enqueue(payload)
                         }
                     }
                     c.close()
@@ -433,6 +444,7 @@ struct BoltKVM {
                 }
             }
             sleep(1)
+            audio?.finish()
             lastDecoder?.report()
             DispatchQueue.main.async {
                 NSApplication.shared.terminate(nil)
@@ -445,6 +457,10 @@ struct BoltKVM {
         let host = argValue(args, "--host", "127.0.0.1")
         let port = UInt16(argInt(args, "--port", 7474))
         let seconds = Double(argInt(args, "--seconds", 20))
+        let audioRecord = argValue(args, "--audio-record", "")
+        let audio: AudioPlayer? = (args.contains("--audio") || !audioRecord.isEmpty)
+            ? AudioPlayer(play: args.contains("--audio"), recordPath: audioRecord.isEmpty ? nil : audioRecord)
+            : nil
         do {
             let conn = try tcpConnect(host: host, port: port)
             log("connected to \(host):\(port)")
@@ -485,12 +501,15 @@ struct BoltKVM {
                         log("auth ok")
                     case .input, .authResponse:
                         break
+                    case .audio:
+                        audio?.enqueue(payload)
                     }
                 } catch {
                     log("client read error: \(error)")
                     break
                 }
             }
+            audio?.finish()
             decoder.report()
             log("received frames=\(received) lastType=\(String(describing: lastHeader?.type))")
             conn.close()

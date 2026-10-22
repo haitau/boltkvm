@@ -17,7 +17,7 @@
 | 帧率 | 60 fps | 服务端编码 59.9 fps，客户端上屏 **51 fps** | 未达标（见下） |
 | 端到端延迟 | P95 < 33 ms | 4K ProRes 48.4 ms；低码率 30.5 ms | SLO 未达标，按帧大小分档后告警为 0 |
 | 稳定性 | 连续 8 小时无断连 | 8h00m01s：0 断连、0 解码失败、0 watchdog 重建 | 达标 |
-| 音频隔离 | 硬性否决项 | **未测** | 未验证 |
+| 音频隔离 | 默认不传音频 | 默认链路零音频字节；`--audio` 可选转发，440 Hz 测试音频率无偏移 | 达标（默认），可选功能可用 |
 | 输入连续性 | 8 小时内持续可用 | 长稳期间无人操作，仅验证 tap 存活 | 未验证 |
 
 上屏 51 fps 是 4K present 表面的固定上限（1080p 源同样 51 fps，与带宽、`--input` 无关）；延迟随码率上升是发送队列排队的结果，因此告警线按帧大小分三档（33/40/55 ms），33 ms 仍作为产品 SLO 单独统计命中率。详见 [8 小时长稳结论](docs/reports/2026-10-22-m3-soak-8h.md)。
@@ -77,6 +77,7 @@ caffeinate -disu &
 boltkvm server --width 3840 --height 2160 --port 7474 --seconds 0
 # 观察：出现 "capture started; waiting for frames" 才算 capture 正常
 # 绑定：默认 --bind auto，只监听雷雳桥（bridge*）地址；同机测试用 --bind 127.0.0.1
+# 音频：默认不传。需要转发时加 --audio（48 kHz 立体声，约 1.5 Mbps）
 ```
 
 ### 4. 起客户端（主控端）
@@ -84,6 +85,7 @@ boltkvm server --width 3840 --height 2160 --port 7474 --seconds 0
 ```bash
 boltkvm client --host <被控端雷雳 IP> --port 7474 --seconds 28800 \
   --render --switch-mode --input --reconnect
+  # 需要听被控端声音：加 --audio；只想落盘检查：--audio-record /tmp/a.caf
 ```
 
 注意用**雷雳网桥的字面 IP**，不要用主机名：本机代理可能把主机名解析成 fake-ip，TCP 建连后立即被 RST。
@@ -141,6 +143,7 @@ reboot ──25s──► ssh 可用 ──► 自动登录进桌面会话
 - [M0 前置验证计划](docs/plans/m0-verification.md)
 - [输入连续性长跑计划](docs/plans/input-continuity.md)
 - [未完成事项（P0/P1/P2）](docs/plans/open-items.md)
+- [音频可选与默认隔离](docs/reports/2026-10-22-audio-option.md)
 - [M0 显示层验证报告](docs/reports/2026-10-21-m0-display.md)
 - [M1 编码可行性探针](docs/reports/2026-10-21-m1-encoder-probe.md)
 - [M1 α′ 管线报告](docs/reports/2026-10-21-m1-pipeline.md)

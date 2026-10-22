@@ -27,6 +27,9 @@ enum PacketType: UInt8 {
     case authChallenge = 6
     case authResponse = 7
     case authOk = 8
+    /// Opt-in only (server `--audio`): raw PCM, 48 kHz, 2 ch, int16 LE,
+    /// interleaved. Without the flag no such packet is ever produced.
+    case audio = 9
 }
 
 struct PacketHeader {

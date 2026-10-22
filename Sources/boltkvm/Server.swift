@@ -7,6 +7,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import ScreenCaptureKit
 import VideoToolbox
+import AVFoundation
 import Darwin
 import IOKit.pwr_mgt
 
@@ -16,7 +17,16 @@ final class Server: NSObject, SCStreamOutput {
     let codec: VideoCodec
     let connection: TCPConnection
     let dumpPath: String?
+    let audioEnabled: Bool
     private var dumped = false
+
+    private let audioTarget = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000,
+                                            channels: 2, interleaved: true)!
+    private var audioConverter: AVAudioConverter?
+    private var audioSourceFormat: AVAudioFormat?
+    private var audioPackets = 0
+    private var audioBytes = 0
+    private var audioLoggedSource = false
 
     private var stream: SCStream?
     private var session: VTCompressionSession?
@@ -47,8 +57,10 @@ final class Server: NSObject, SCStreamOutput {
     private var disconnectedFlag = false
     private var startTime = DispatchTime.now().uptimeNanoseconds
 
-    init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?) {
+    init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?,
+         audioEnabled: Bool = false) {
         self.captureWidth = width
+        self.audioEnabled = audioEnabled
         self.captureHeight = height
         self.codec = codec
         self.connection = connection
@@ -159,10 +171,18 @@ final class Server: NSObject, SCStreamOutput {
         config.minimumFrameInterval = CMTime(value: 0, timescale: 1)
         config.queueDepth = 8
         config.showsCursor = true
-        config.capturesAudio = false
+        config.capturesAudio = audioEnabled
+        if audioEnabled {
+            config.sampleRate = 48_000
+            config.channelCount = 2
+            config.excludesCurrentProcessAudio = true
+        }
 
         let stream = SCStream(filter: filter, configuration: config, delegate: nil)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "boltkvm.capture", qos: .userInteractive))
+        if audioEnabled {
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "boltkvm.audio", qos: .userInteractive))
+        }
         try await stream.startCapture()
         self.stream = stream
         startTime = DispatchTime.now().uptimeNanoseconds
@@ -320,6 +340,10 @@ final class Server: NSObject, SCStreamOutput {
     // MARK: SCStreamOutput
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        if type == .audio {
+            if audioEnabled, CMSampleBufferIsValid(sampleBuffer) { handleAudio(sampleBuffer) }
+            return
+        }
         guard type == .screen, CMSampleBufferIsValid(sampleBuffer),
               let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
@@ -345,6 +369,60 @@ final class Server: NSObject, SCStreamOutput {
         if st != noErr {
             inFlight.signal()
             lock.lock(); dropped += 1; lock.unlock()
+        }
+    }
+
+    // MARK: audio
+
+    /// ScreenCaptureKit hands back the display's audio in whatever format the
+    /// system picked; convert once to the fixed wire format (48 kHz, 2 ch,
+    /// int16 interleaved) so the client can schedule buffers untouched.
+    private func handleAudio(_ sbuf: CMSampleBuffer) {
+        guard let fmt = CMSampleBufferGetFormatDescription(sbuf),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fmt),
+              let src = AVAudioFormat(streamDescription: asbd) else { return }
+        let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sbuf))
+        guard frames > 0 else { return }
+
+        if audioSourceFormat != src {
+            audioSourceFormat = src
+            audioConverter = AVAudioConverter(from: src, to: audioTarget)
+            lock.lock()
+            let firstTime = !audioLoggedSource
+            audioLoggedSource = true
+            lock.unlock()
+            if firstTime {
+                log("audio source: \(Int(src.sampleRate)) Hz \(src.channelCount) ch interleaved=\(src.isInterleaved) float=\(src.commonFormat == .pcmFormatFloat32)")
+            }
+        }
+        guard audioConverter != nil,
+              let inBuf = AVAudioPCMBuffer(pcmFormat: src, frameCapacity: frames) else { return }
+        inBuf.frameLength = frames
+        let copyStatus = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sbuf, at: 0, frameCount: Int32(frames), into: inBuf.mutableAudioBufferList)
+        guard copyStatus == noErr else { return }
+
+        let capacity = AVAudioFrameCount(Double(frames) * audioTarget.sampleRate / src.sampleRate) + 32
+        guard let outBuf = AVAudioPCMBuffer(pcmFormat: audioTarget, frameCapacity: capacity) else { return }
+        do { try audioConverter?.convert(to: outBuf, from: inBuf) } catch { return }
+
+        let n = Int(outBuf.frameLength)
+        guard n > 0, let ch = outBuf.int16ChannelData else { return }
+        let data = Data(bytes: ch[0], count: n * 4)
+        lock.lock()
+        audioPackets += 1
+        audioBytes += data.count
+        let dead = closed
+        lock.unlock()
+        guard !dead else { return }
+        let micros = Int64(Date().timeIntervalSince1970 * 1_000_000)
+        sendQueue.async { [weak self] in
+            guard let self else { return }
+            do { try self.connection.send(packet(type: .audio, ptsMicros: micros, payload: data)) }
+            catch {
+                self.lock.lock(); self.closed = true; self.lock.unlock()
+                self.signalDisconnect()
+            }
         }
     }
 
@@ -456,7 +534,8 @@ final class Server: NSObject, SCStreamOutput {
         lock.unlock()
         let fps = elapsed > 0 ? Double(e) / elapsed : 0
         let mbps = elapsed > 0 ? Double(b) * 8 / elapsed / 1e6 : 0
-        log(String(format: "stats captured=%d encoded=%d sent=%d dropped=%d key=%d fps=%.1f bitrate=%.1fMbps encLat=%.2fms", c, e, s, d, k, fps, mbps, lat))
+        let audioLine = audioEnabled ? String(format: " audio=%d pkts/%.1fMbps", audioPackets, elapsed > 0 ? Double(audioBytes) * 8 / elapsed / 1e6 : 0) : ""
+        log(String(format: "stats captured=%d encoded=%d sent=%d dropped=%d key=%d fps=%.1f bitrate=%.1fMbps encLat=%.2fms", c, e, s, d, k, fps, mbps, lat) + audioLine)
         if lat > 12 { log("WARNING: encode latency \(String(format: "%.1f", lat))ms exceeds 12ms budget") }
         if e > 0 && Double(d) / Double(e + d) > 0.01 { log("WARNING: drop ratio exceeds 1%") }
     }
