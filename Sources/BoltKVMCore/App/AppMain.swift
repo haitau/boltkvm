@@ -130,6 +130,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if clientController == nil {
             let controller = ClientController()
             clientController = controller
+        } else if let window = clientController?.window, !window.isVisible {
+            // A closed window stays alive (isReleasedWhenClosed = false) but
+            // showWindow alone does not bring it back.
+            window.makeKeyAndOrderFront(nil)
         }
         clientController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)

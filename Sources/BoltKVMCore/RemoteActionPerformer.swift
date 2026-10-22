@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Foundation
 
 /// Executes the remote system-UI actions (App Exposé, Mission Control, Show
@@ -13,6 +14,17 @@ import Foundation
 /// role it relays the action to the app (`@@REMOTE:<raw>`) and the app calls
 /// this function instead.
 func performRemoteAction(_ action: RemoteAction) {
+    // The app is a background accessory in the server role, so asking System
+    // Events out of the blue is denied without ever showing a dialog (and
+    // without the app appearing under 隐私与安全性 → 自动化). This is the API
+    // that actually raises the consent prompt; afterwards the app shows up in
+    // that pane.
+    if action != .missionControl {
+        let status = requestAutomationPermission()
+        if status != noErr {
+            log("command: automation permission not granted (OSStatus \(status))")
+        }
+    }
     switch action {
     case .missionControl:
         NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Mission Control.app"))
@@ -25,6 +37,24 @@ func performRemoteAction(_ action: RemoteAction) {
     case .spaceRight:
         keyViaSystemEvents("key code 124 using control down")
     }
+}
+
+/// Asks TCC for the right to drive System Events, prompting if undecided.
+@discardableResult
+private func requestAutomationPermission() -> OSStatus {
+    guard var target = systemEventsTarget() else { return OSStatus(-1) }
+    return AEDeterminePermissionToAutomateTarget(&target, AEEventClass(typeWildCard),
+                                                AEEventID(typeWildCard), true)
+}
+
+private func systemEventsTarget() -> AEAddressDesc? {
+    var desc = AEAddressDesc()
+    var bundleID = "com.apple.systemevents"
+    let status = bundleID.withUTF8 { buf -> OSStatus in
+        guard let base = buf.baseAddress else { return OSStatus(-1) }
+        return OSStatus(AECreateDesc(DescType(typeApplicationBundleID), base, buf.count, &desc))
+    }
+    return status == noErr ? desc : nil
 }
 
 private func keyViaSystemEvents(_ body: String) {
