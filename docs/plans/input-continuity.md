@@ -39,6 +39,15 @@ H5 不是本轮的硬判据，但一旦命中就是重启救援那条链的关�
 
 ## 4. 执行
 
+一键跑（推荐）：
+
+```bash
+scripts/input-continuity.sh --host <bridge-ip> --seconds 28800
+# 产物：~/soak/<日期>-input/{probe.log,client.log,monitor.tsv}，结束时打印汇总
+```
+
+手工分步（想看每一步时）：
+
 ```bash
 # 0) 起跑前自检（含 key、caffeinate、残留进程）
 scripts/soak-preflight.sh --host <bridge-ip>
