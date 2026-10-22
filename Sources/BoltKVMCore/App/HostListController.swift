@@ -161,6 +161,16 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         let portValue: UInt16 = host?.port ?? UInt16(Prefs.port)
         let portField = NSTextField(string: String(portValue))
         portField.placeholderString = L.t("client.label.port")
+        // Stored only for now: resolution is a *server* setting until the config
+        // packet exists (see docs/plans/2026-10-22-connection-manager-design.md).
+        let resolution = NSPopUpButton(frame: NSRect(x: 90, y: 0, width: 220, height: 25), pullsDown: false)
+        resolution.addItems(withTitles: ["默认", "1280×720", "1920×1080", "2560×1440", "3008×1692"])
+        let sizes: [(Int, Int)?] = [nil, (1280, 720), (1920, 1080), (2560, 1440), (3008, 1692)]
+        if let w = host?.width, let h = host?.height,
+           let index = sizes.firstIndex(where: { $0?.0 == w && $0?.1 == h }) {
+            resolution.selectItem(at: index)
+        }
+
         let preset = NSPopUpButton(frame: NSRect(x: 90, y: 0, width: 220, height: 25), pullsDown: false)
         preset.addItems(withTitles: [L.t("quality.pixel"), L.t("quality.balanced"), L.t("quality.smooth")])
         if let quality = host?.quality {
@@ -170,17 +180,18 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         // Manual frames: an NSGridView/NSStackView accessory tripped the Swift
         // compiler here ("failed to produce diagnostic"), and this form is fixed
         // size anyway.
-        let form = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 130))
+        let form = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 162))
         let labels = [L.t("client.hosts.name"), L.t("client.label.host"),
-                      L.t("client.label.port"), L.t("client.hosts.quality")]
-        let controls: [NSView] = [nameField, hostField, portField, preset]
+                      L.t("client.label.port"), L.t("client.hosts.resolution"),
+                      L.t("client.hosts.quality")]
+        let controls: [NSView] = [nameField, hostField, portField, resolution, preset]
         for index in 0..<labels.count {
             let label = NSTextField(labelWithString: labels[index])
             label.alignment = .right
-            label.frame = NSRect(x: 0, y: 100 - index * 32, width: 82, height: 22)
+            label.frame = NSRect(x: 0, y: 132 - index * 32, width: 82, height: 22)
             form.addSubview(label)
             let control = controls[index]
-            control.frame = NSRect(x: 90, y: 99 - index * 32, width: 240, height: 24)
+            control.frame = NSRect(x: 90, y: 131 - index * 32, width: 240, height: 24)
             form.addSubview(control)
         }
         alert.accessoryView = form
@@ -189,14 +200,18 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         let name = nameField.stringValue.isEmpty ? hostField.stringValue : nameField.stringValue
         let port = UInt16(portField.stringValue) ?? 7474
         let quality = SavedHost.Quality.allCases[max(0, preset.indexOfSelectedItem)]
+        let size = sizes[max(0, resolution.indexOfSelectedItem)]
         if var existing = host {
             existing.name = name
             existing.host = hostField.stringValue
             existing.port = port
             existing.quality = quality
+            existing.width = size?.0
+            existing.height = size?.1
             store.update(existing)
         } else {
-            store.add(SavedHost(name: name, host: hostField.stringValue, port: port, quality: quality))
+            store.add(SavedHost(name: name, host: hostField.stringValue, port: port,
+                                width: size?.0, height: size?.1, quality: quality))
         }
         reload()
     }

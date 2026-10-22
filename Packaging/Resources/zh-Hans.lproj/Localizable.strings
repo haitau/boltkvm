@@ -104,3 +104,4 @@
 "quality.pixel" = "像素（无损）";
 "quality.balanced" = "均衡";
 "quality.smooth" = "流畅";
+"client.hosts.resolution" = "分辨率";

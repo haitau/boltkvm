@@ -103,3 +103,4 @@
 "quality.pixel" = "Pixel (lossless)";
 "quality.balanced" = "Balanced";
 "quality.smooth" = "Smooth";
+"client.hosts.resolution" = "Resolution";

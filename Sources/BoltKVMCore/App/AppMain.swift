@@ -150,8 +150,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clientController?.shutdown()
         clientController = nil
         let controller = ClientController(preset: host)
-        controller.onClosed = { [weak self] in
-            guard let self else { return }
+        controller.onClosed = { [weak self, weak controller] in
+            guard let self, let controller else { return }
+            // A closing *previous* session must not clear the current one.
+            guard self.clientController === controller else { return }
             self.clientController = nil
             HostStore.shared.touch(id: host.id)
             self.showConnectionList()
