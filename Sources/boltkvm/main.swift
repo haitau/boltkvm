@@ -18,6 +18,7 @@ func usage() -> Never {
 
     utilities:
       boltkvm doctor [--role server|client]
+      boltkvm inputprobe [--seconds 60] [--interval-ms 60000]
       boltkvm watchdog [--once] [--install] [--uninstall] [--interval 5]
       boltkvm selftest
       boltkvm pattern <png> [seconds]
@@ -106,6 +107,8 @@ struct BoltKVM {
             Watchdog.run(args)
         case "selftest":
             runSelftest()
+        case "inputprobe":
+            await runInputProbe(args)
         case "pattern":
             await runPattern(args)
         case "client":
@@ -179,6 +182,39 @@ struct BoltKVM {
             log("server error: \(error)")
             exit(1)
         }
+    }
+
+    /// Posts an inert mouse move on a fixed cadence. Used to prove the input
+    /// chain stays alive over a long run: the events are posted at the HID tap,
+    /// so the client's CGEventTap sees them exactly like a physical mouse, and
+    /// the server's captured-frame counter proves they landed on the other Mac
+    /// (showsCursor is on, so a move changes pixels).
+    static func runInputProbe(_ args: [String]) async {
+        let seconds = Double(argInt(args, "--seconds", 60))
+        let intervalMs = max(200, argInt(args, "--interval-ms", 60_000))
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(1, seconds) * 1_000_000_000)
+        log("inputprobe start seconds=\(Int(seconds)) interval=\(intervalMs)ms")
+        var posted = 0
+        var dx: CGFloat = 3
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            guard let cur = CGEvent(source: nil)?.location else {
+                log("inputprobe: cannot read cursor position (no session?)")
+                exit(1)
+            }
+            let target = CGPoint(x: cur.x + dx, y: cur.y)
+            guard let ev = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                                   mouseCursorPosition: target, mouseButton: .left) else {
+                log("inputprobe: cannot create event")
+                exit(1)
+            }
+            ev.post(tap: .cghidEventTap)
+            posted += 1
+            log("inputprobe posted=\(posted) at=\(Int(target.x)),\(Int(target.y))")
+            dx = -dx
+            try? await Task.sleep(nanoseconds: UInt64(intervalMs) * 1_000_000)
+        }
+        log("inputprobe done posted=\(posted)")
+        exit(0)
     }
 
     static func runDoctor(_ args: [String]) {
