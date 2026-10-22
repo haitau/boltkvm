@@ -13,6 +13,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private var inputCheck: NSButton!
     private var audioCheck: NSButton!
     private var connectButton: NSButton!
+    private var fullScreenButton: NSButton!
     private var statusLabel: NSTextField!
     private var statsLabel: NSTextField!
     private var videoView: NSView!
@@ -62,6 +63,12 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         connectButton.bezelStyle = .rounded
         connectButton.keyEquivalent = "\r"
 
+        // The remote gets the keyboard while the pointer is over the picture, so
+        // the ⌃⌘F menu shortcut only works from the bar; this button is the
+        // discoverable way in.
+        fullScreenButton = NSButton(title: L.t("client.button.fullscreen"), target: self, action: #selector(toggleFullScreenAction(_:)))
+        fullScreenButton.bezelStyle = .rounded
+
         statusLabel = NSTextField(labelWithString: L.t("client.state.idle"))
         statusLabel.textColor = .secondaryLabelColor
         statsLabel = NSTextField(labelWithString: "")
@@ -71,7 +78,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
         let bar = NSStackView(views: [hostLabel, hostField, portLabel, portField,
                                       keyLabel, keyField, inputCheck, audioCheck,
-                                      connectButton, statusLabel, statsLabel])
+                                      connectButton, fullScreenButton, statusLabel, statsLabel])
         bar.orientation = .horizontal
         bar.spacing = 8
         bar.alignment = .centerY
@@ -156,6 +163,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         let explicitKey: Data? = keyField.stringValue.isEmpty
             ? nil
             : resolveAuthKey(["--key", keyField.stringValue])
+        session.inputView = renderer?.view
         session.connect(host: host, port: port, key: explicitKey,
                         forwardInput: inputCheck.state == .on,
                         playAudio: audioCheck.state == .on)

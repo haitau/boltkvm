@@ -176,3 +176,126 @@ final class InputCapture {
         return nil // swallow locally
     }
 }
+
+/// Windowed client used by the app. A local NSEvent monitor sees events
+/// delivered to our own window, so forwarding needs no Input Monitoring grant
+/// (TCC applies to the global tap below, which is what the CLI client uses).
+/// Coordinates are normalised inside the view, which is what the remote screen
+/// is mapped onto.
+final class WindowInputCapture {
+    private let conn: TCPConnection
+    private weak var view: NSView?
+    private var monitor: Any?
+    private var sent = 0
+
+    init(conn: TCPConnection, view: NSView) {
+        self.conn = conn
+        self.view = view
+    }
+
+    func start() -> Bool {
+        guard view != nil else { return false }
+        let mask: NSEvent.EventTypeMask = [
+            .keyDown, .keyUp, .flagsChanged, .mouseMoved,
+            .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+            .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+            .otherMouseDown, .otherMouseUp, .otherMouseDragged,
+            .scrollWheel,
+        ]
+        monitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            guard let self else { return event }
+            // Only the picture area belongs to the remote Mac. Everything else
+            // (the connection bar, the window title, menu shortcuts) has to keep
+            // working locally, so those events pass through untouched.
+            return self.handle(event)
+        }
+        log("input: window monitor started (no TCC needed)")
+        return true
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        log("input: window monitor stopped sent=\(sent)")
+    }
+
+    private func handle(_ event: NSEvent) -> NSEvent? {
+        // Escape hatch: ⌃⌥⌘Q always reaches the local Mac (disconnect + quit).
+        if event.type == .keyDown,
+           event.keyCode == 12,
+           event.modifierFlags.contains([.control, .option, .command]) {
+            stop()
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+            return nil
+        }
+        guard let view, let window = view.window else { return event }
+        // Keyboard events carry no location, so "is the pointer over the picture"
+        // decides whether the remote or the local app gets them.
+        let inWindow: NSPoint
+        switch event.type {
+        case .keyDown, .keyUp, .flagsChanged:
+            inWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        default:
+            inWindow = event.locationInWindow
+        }
+        // Ask AppKit which view is under the pointer instead of converting
+        // coordinates by hand (window/view origins made that error-prone).
+        let hit = window.contentView?.hitTest(inWindow)
+        let inVideo = hit === view || hit?.isDescendant(of: view) == true
+        guard inVideo else { return event }
+        let point = view.convert(inWindow, from: nil)
+        let w = max(1, view.bounds.width), h = max(1, view.bounds.height)
+        var nx = Double(point.x / w), ny = Double(point.y / h)
+        if !view.isFlipped { ny = 1 - ny }
+        nx = min(1, max(0, nx)); ny = min(1, max(0, ny))
+        let flags = UInt64(event.modifierFlags.rawValue)
+
+        func send(_ ev: InputEvent) {
+            let pkt = packet(type: .input,
+                             ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000),
+                             payload: ev.encode())
+            do {
+                try conn.send(pkt)
+                sent += 1
+                if sent % 60 == 0 { log("input: forwarded=\(sent)") }
+            } catch {
+                log("input: send failed: \(error)")
+                stop()
+            }
+        }
+
+        switch event.type {
+        case .keyDown, .keyUp:
+            send(InputEvent(type: event.type == .keyDown ? .keyDown : .keyUp,
+                            keyCode: event.keyCode, flags: flags, x: nx, y: ny,
+                            isRepeat: event.isARepeat))
+        case .flagsChanged:
+            send(InputEvent(type: .flagsChanged, keyCode: event.keyCode, flags: flags, x: nx, y: ny))
+        case .mouseMoved:
+            send(InputEvent(type: .mouseMoved, flags: flags, x: nx, y: ny))
+        case .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+             .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+             .otherMouseDown, .otherMouseUp, .otherMouseDragged:
+            let map: [NSEvent.EventType: InputEventType] = [
+                .leftMouseDown: .leftMouseDown, .leftMouseUp: .leftMouseUp, .leftMouseDragged: .leftMouseDragged,
+                .rightMouseDown: .rightMouseDown, .rightMouseUp: .rightMouseUp, .rightMouseDragged: .rightMouseDragged,
+                .otherMouseDown: .otherMouseDown, .otherMouseUp: .otherMouseUp, .otherMouseDragged: .otherMouseDragged,
+            ]
+            if let t = map[event.type] {
+                send(InputEvent(type: t, flags: flags, x: nx, y: ny,
+                                button: UInt8(truncatingIfNeeded: event.buttonNumber)))
+            }
+        case .scrollWheel:
+            send(InputEvent(type: .scroll, flags: flags, x: nx, y: ny,
+                            scrollX: Double(event.scrollingDeltaX),
+                            scrollY: Double(event.scrollingDeltaY),
+                            phase: UInt8(truncatingIfNeeded: event.phase.rawValue),
+                            momentum: UInt8(truncatingIfNeeded: event.momentumPhase.rawValue)))
+        default:
+            break
+        }
+        // Swallow what we forwarded: the local Mac must not react to keys that
+        // were meant for the remote one.
+        return nil
+    }
+}

@@ -28,6 +28,10 @@ final class ClientSession {
     private var task: Task<Void, Never>?
     private var conn: TCPConnection?
     private var input: InputCapture?
+    private var windowInput: WindowInputCapture?
+    /// Window the remote picture is drawn into; when set, input is captured
+    /// with a local NSEvent monitor (no Input Monitoring permission needed).
+    weak var inputView: NSView?
     private var audio: AudioPlayer?
     private var decoder: VideoDecoder?
 
@@ -118,7 +122,14 @@ final class ClientSession {
     }
 
     private func startInput(conn: TCPConnection) {
-        guard input == nil else { return }
+        guard input == nil, windowInput == nil else { return }
+        if let view = inputView {
+            let capture = WindowInputCapture(conn: conn, view: view)
+            if capture.start() {
+                windowInput = capture
+                return
+            }
+        }
         let capture = InputCapture(conn: conn)
         if capture.start() {
             input = capture
@@ -134,6 +145,8 @@ final class ClientSession {
         conn = nil
         input?.stop()
         input = nil
+        windowInput?.stop()
+        windowInput = nil
         audio?.finish()
         audio = nil
         decoder?.report()

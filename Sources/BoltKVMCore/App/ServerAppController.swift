@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Foundation
 import ServiceManagement
 
@@ -19,6 +20,7 @@ final class ServerAppController: NSObject {
     private var stateItem: NSMenuItem?
     private var detailItem: NSMenuItem?
     private var permissionItem: NSMenuItem?
+    private var accessibilityItem: NSMenuItem?
     private var loginItem: NSMenuItem?
 
     private var process: Process?
@@ -34,15 +36,23 @@ final class ServerAppController: NSObject {
 
     func startAutomatically() {
         installStatusItem()
-        log("app: server role starting (screen recording granted: \(CGPreflightScreenCaptureAccess()))")
-        guard CGPreflightScreenCaptureAccess() else {
+        log("app: server role starting (screen recording: \(CGPreflightScreenCaptureAccess()), accessibility: \(AXIsProcessTrusted()))")
+        let canCapture = CGPreflightScreenCaptureAccess()
+        // Injection needs Accessibility; capture needs Screen Recording. They are
+        // separate TCC items and the app owns both now that it is the process the
+        // user launched (the helper inherits them as responsible-process child).
+        let canInject = AXIsProcessTrusted()
+        permissionItem?.isHidden = canCapture
+        accessibilityItem?.isHidden = canInject
+        guard canCapture else {
             // A server has no window, so the permission lives in the menu bar
             // instead of a modal dialog that would block launch.
             setState(L.t("server.status.needsPermission"), detail: L.t("server.permission.hint"))
-            permissionItem?.isHidden = false
             return
         }
-        permissionItem?.isHidden = true
+        if !canInject {
+            setState(L.t("server.status.needsAccessibility"), detail: L.t("server.accessibility.hint"))
+        }
         _ = AppKey.ensure()
         start()
     }
@@ -110,6 +120,12 @@ final class ServerAppController: NSObject {
         menu.addItem(permission)
         permissionItem = permission
 
+        let access = NSMenuItem(title: L.t("server.menu.accessibility"), action: #selector(openAccessibility), keyEquivalent: "")
+        access.target = self
+        access.isHidden = true
+        menu.addItem(access)
+        accessibilityItem = access
+
         let toggle = NSMenuItem(title: L.t("server.menu.start"), action: #selector(toggleService), keyEquivalent: "")
         toggle.target = self
         menu.addItem(toggle)
@@ -159,6 +175,13 @@ final class ServerAppController: NSObject {
     @objc private func openPermissions() {
         _ = CGRequestScreenCaptureAccess()
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func openAccessibility() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         NSWorkspace.shared.open(url)
     }
 
@@ -227,9 +250,10 @@ final class ServerAppController: NSObject {
         // Keep the child's output in the app log as well as parsing it: the menu
         // bar only has room for one line.
         if logHandle == nil {
-            FileManager.default.createFile(atPath: AppLog.path, contents: nil)
-            logHandle = FileHandle(forWritingAtPath: AppLog.path)
-            logHandle?.seekToEndOfFile()
+            // O_APPEND, not createFile: truncating here wiped the app's own
+            // startup lines, and its stderr FILE keeps its old offset.
+            let fd = open(AppLog.path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
+            if fd >= 0 { logHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true) }
         }
         let handle = pipe.fileHandleForReading
         handle.readabilityHandler = { [weak self] h in
@@ -321,5 +345,9 @@ public enum AppLog {
             try? fm.removeItem(atPath: path)
         }
         freopen(path, "a", stderr)
+        // stderr is block-buffered once it is a file, which made the app's own
+        // lines show up minutes late (or only at exit) while the child's piped
+        // output landed immediately.
+        setvbuf(stderr, nil, _IONBF, 0)
     }
 }

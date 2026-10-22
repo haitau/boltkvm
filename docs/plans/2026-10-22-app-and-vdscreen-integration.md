@@ -235,6 +235,8 @@ app 直接在自己进程里调 `BKVVirtualDisplayCreate` 时，同样的代码�
 
 | 7 | 界面本地化：中英双语，按系统语言自动选，非中文回退英文 | **已完成并实测 2026-10-22**：`Localization.swift` + `{en,zh-Hans}.lproj/Localizable.strings`（56 键，覆盖全部界面文案），Info.plist 声明开发语言 en 与支持语言列表；实测英文下窗口为 `BoltKVM — Controller / Host / Port / Key / Not connected`、菜单 `View / Role`、首启页 `What should this Mac do?`，中文下为 `BoltKVM — 主控端 / 主机 / 端口 / 密钥 / 未连接` | 0.5 天 |
 
+| 8 | 主控端输入免权限 + 画面/UI 事件分流 + 全屏按钮 | **已完成并实测 2026-10-22**：app 用 `NSEvent.addLocalMonitorForEvents` 只监听本窗口，命中测试（`hitTest`）确认指针在画面内才转发，其余事件放行给连接栏/菜单；被控端补齐辅助功能权限引导。实测：指针在画面内 120 次事件 → 服务端 `input events=120`；全屏按钮 `AXFullScreen true → 3008×1692`，再点回 `false / 1200×788` | 1 天 |
+
 ## 5. 收益量化
 
 | 指标 | 现在 | 之后 |

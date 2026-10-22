@@ -32,6 +32,7 @@
 "client.check.input" = "转发键鼠";
 "client.check.audio" = "音频";
 "client.button.connect" = "连接";
+"client.button.fullscreen" = "全屏";
 "client.button.disconnect" = "断开";
 "client.state.idle" = "未连接";
 "client.state.connecting" = "正在连接…";
@@ -63,3 +64,8 @@
 "server.helper.failed" = "子进程启动失败";
 "server.login.failed.title" = "设置开机自启失败";
 "server.login.failed.detail" = "%@\n\n用自签名证书签名后再试（./scripts/make-signing-identity.sh）。";
+
+/* 辅助功能 */
+"server.status.needsAccessibility" = "需要辅助功能权限";
+"server.accessibility.hint" = "不授权则键鼠注入无效";
+"server.menu.accessibility" = "授权…（辅助功能）";
