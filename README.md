@@ -140,6 +140,7 @@ reboot ──25s──► ssh 可用 ──► 自动登录进桌面会话
 - [设计文档](docs/design/project-charter.md)：目标、约束、已验证事实、方案空间与里程碑
 - [M0 前置验证计划](docs/plans/m0-verification.md)
 - [输入连续性长跑计划](docs/plans/input-continuity.md)
+- [未完成事项（P0/P1/P2）](docs/plans/open-items.md)
 - [M0 显示层验证报告](docs/reports/2026-10-21-m0-display.md)
 - [M1 编码可行性探针](docs/reports/2026-10-21-m1-encoder-probe.md)
 - [M1 α′ 管线报告](docs/reports/2026-10-21-m1-pipeline.md)
