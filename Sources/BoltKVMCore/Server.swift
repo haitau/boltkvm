@@ -179,7 +179,11 @@ final class Server: NSObject, SCStreamOutput {
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         config.minimumFrameInterval = CMTime(value: 0, timescale: 1)
         config.queueDepth = 8
-        config.showsCursor = true
+        // Do not paint the remote cursor into the stream. The client already has
+        // a cursor at the very position it forwards, so a second (lagging) one
+        // arrives ~30-40 ms late and jitters over the local one — it reads as
+        // "the mouse is jumping around" (reported 2026-10-22).
+        config.showsCursor = false
         config.capturesAudio = audioEnabled
         if audioEnabled {
             config.sampleRate = 48_000
