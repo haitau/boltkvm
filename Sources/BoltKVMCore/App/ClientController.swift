@@ -276,6 +276,15 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
     /// Mission Control (Spaces overview).
     @objc func showMissionControl() {
+        // Mission Control is a mode, not an action: you have to be able to leave
+        // it. With input forwarding off there is no Esc, so the remote just sits
+        // in the overview and reads as "frozen desktop" — which is exactly how
+        // this looked in testing.
+        if inputCheck.state == .off {
+            inputCheck.state = .on
+            Prefs.forwardInput = true
+            session?.setInputEnabled(true)
+        }
         session?.sendCommand(.missionControl)
     }
 
