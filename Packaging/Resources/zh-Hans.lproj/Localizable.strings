@@ -81,6 +81,6 @@
 "common.ok" = "好";
 "common.cancel" = "取消";
 "menu.remote" = "远程";
-"menu.remote.missionControl" = "调度中心（多桌面）";
-"menu.remote.appWindows" = "显示 App 窗口";
-"menu.remote.showDesktop" = "显示桌面";
+"menu.remote.missionControl" = "调度中心";
+"menu.remote.appWindows" = "App";
+"menu.remote.showDesktop" = "桌面";

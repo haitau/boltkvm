@@ -221,12 +221,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// control menu. They travel over the input channel, so no new protocol.
     private func buildRemoteMenu() -> NSMenu {
         let menu = NSMenu(title: L.t("menu.remote"))
-        let entries: [(String, Selector, Int)] = [
-            ("menu.remote.missionControl", #selector(remoteMissionControl), 126),
-            ("menu.remote.appWindows", #selector(remoteAppWindows), 125),
-            ("menu.remote.showDesktop", #selector(remoteShowDesktop), 103),
+        let entries: [String] = [
+            "menu.remote.appWindows",
+            "menu.remote.missionControl",
+            "menu.remote.showDesktop",
         ]
-        for (key, action, _) in entries {
+        let actions: [Selector] = [#selector(remoteAppWindows),
+                                   #selector(remoteMissionControl),
+                                   #selector(remoteShowDesktop)]
+        for (key, action) in zip(entries, actions) {
             let item = NSMenuItem(title: L.t(key), action: action, keyEquivalent: "")
             item.target = self
             menu.addItem(item)

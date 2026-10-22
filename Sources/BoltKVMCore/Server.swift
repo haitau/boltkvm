@@ -259,6 +259,7 @@ final class Server: NSObject, SCStreamOutput {
                         }
                     }
                 } catch {
+                    log("session: read loop ended: \(error)")
                     self.signalDisconnect()
                     break
                 }

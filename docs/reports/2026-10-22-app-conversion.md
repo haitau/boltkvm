@@ -112,12 +112,13 @@ id=25  inactive online ASLEEP main 3008x1692
 `RegisterEventHotKey` 一类热键（和之前 `⌘⇧3` 截图不生效是同一个原因）。
 
 所以改成**命令通道**：客户端发 `PacketType.command = 10` + 一个动作字节，服务端自己执行。
+菜单项名称按用户口径改为 **App / 调度中心 / 桌面**。
 
 | 动作 | 服务端实现 | 实测 |
 |---|---|---|
 | 调度中心 | `NSWorkspace.open("/System/Applications/Mission Control.app")` | ✅ 服务端日志 `command: missionControl`，画面结构变化（相关性 0.41）、亮度 188 → 81 |
-| 显示 App 窗口 | System Events `key code 125 using control down` | 未验证（需要服务端第一次批准「自动化」权限） |
-| 显示桌面 | System Events `key code 103` | 未验证（同上） |
+| App（App 窗口） | System Events `key code 125 using control down` | ❌ 需要「自动化」授权，当前返回 -1743 `未获得授权将Apple事件发送给 System Events` |
+| 桌面（显示桌面） | System Events `key code 103` | ❌ 同上，需要授权 |
 
 也试过给合成事件换 event tap（hid / session / annotated）和用 `flagsChanged` 发修饰键，
 都不影响系统热键的行为——这条路走不通，命令通道才是对的。

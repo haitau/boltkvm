@@ -80,6 +80,6 @@
 "common.ok" = "OK";
 "common.cancel" = "Cancel";
 "menu.remote" = "Remote";
-"menu.remote.missionControl" = "Mission Control (Spaces)";
-"menu.remote.appWindows" = "App Windows";
-"menu.remote.showDesktop" = "Show Desktop";
+"menu.remote.missionControl" = "Mission Control";
+"menu.remote.appWindows" = "App";
+"menu.remote.showDesktop" = "Desktop";
