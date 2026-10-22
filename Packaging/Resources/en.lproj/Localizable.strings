@@ -33,7 +33,6 @@
 "client.check.input" = "Forward input";
 "client.check.audio" = "Audio";
 "client.button.connect" = "Connect";
-"client.button.fullscreen" = "Full Screen";
 "client.button.disconnect" = "Disconnect";
 "client.state.idle" = "Not connected";
 "client.state.connecting" = "Connecting…";
@@ -85,8 +84,6 @@
 "menu.remote.appWindows" = "App";
 "menu.remote.showDesktop" = "Desktop";
 
-"client.toolbar.control" = "Control";
-"client.toolbar.control.tip" = "Forward this Mac's pointer and keyboard (off = view only)";
 "client.toolbar.app" = "App";
 "client.toolbar.app.tip" = "Show all windows of the remote app";
 "client.toolbar.missionControl" = "Mission Control";

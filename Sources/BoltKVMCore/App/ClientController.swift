@@ -24,11 +24,10 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private var chromeTimer: Timer?
     private var appliedFullScreen: Bool?
 
-    private static let tbControl = NSToolbarItem.Identifier("boltkvm.control")
     private static let tbApp = NSToolbarItem.Identifier("boltkvm.app")
+    private static let tbRemote = NSToolbarItem.Identifier("boltkvm.remote")
     private static let tbMission = NSToolbarItem.Identifier("boltkvm.missionControl")
     private static let tbDesktop = NSToolbarItem.Identifier("boltkvm.desktop")
-    private static let tbFullScreen = NSToolbarItem.Identifier("boltkvm.fullScreen")
 
     init() {
         let window = NSWindow(
@@ -136,12 +135,6 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             self.statusLabel.stringValue = state.text
             self.statusLabel.textColor = state == .streaming ? .systemGreen : .secondaryLabelColor
             self.connectButton.title = self.session?.isActive == true ? L.t("client.button.disconnect") : L.t("client.button.connect")
-            if state == .streaming {
-                // Input starts on the first format packet, one hop after this state.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                    self?.refreshControlItem()
-                }
-            }
             if case .failed = state {
                 self.statusLabel.textColor = .systemRed
                 self.connectButton.title = L.t("client.button.connect")
@@ -166,29 +159,42 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         toolbar.displayMode = .iconAndLabel
         toolbar.allowsUserCustomization = false
         toolbar.autosavesConfiguration = false
+        // 屏幕共享的三个按钮是居中的；middle item 置中后两侧自然分开。
+        // One view-based item, centred as a whole: with individual items only the
+        // named one is centred and the rest pile up at the leading edge.
+        toolbar.centeredItemIdentifier = Self.tbRemote
         window?.toolbar = toolbar
         window?.toolbarStyle = .unified
     }
 
+    /// The three remote actions as one horizontally centred group. Screen
+    /// Sharing puts them in the middle of the title bar; individual NSToolbarItems
+    /// cannot be centred as a group, so they live in one view-based item.
+    private func remoteActionsView() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.spacing = 26
+        stack.alignment = .centerY
+        let entries: [(String, String, Selector)] = [
+            (L.t("client.toolbar.app"), "rectangle.on.rectangle", #selector(showAppWindows)),
+            (L.t("client.toolbar.missionControl"), "square.grid.2x2", #selector(showMissionControl)),
+            (L.t("client.toolbar.desktop"), "display", #selector(showDesktop)),
+        ]
+        for (title, symbol, action) in entries {
+            let button = NSButton(title: title, target: self, action: action)
+            button.image = toolbarImage(symbol)
+            button.imagePosition = .imageAbove
+            button.bezelStyle = .inline
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 11)
+            stack.addArrangedSubview(button)
+        }
+        stack.setFrameSize(stack.fittingSize)
+        return stack
+    }
+
     private func toolbarImage(_ name: String) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)
-    }
-
-    private var controlImageName: String {
-        session?.isForwardingInput == true ? "cursorarrow.rays" : "hand.raised.slash"
-    }
-
-    private func refreshControlItem() {
-        window?.toolbar?.items.first { $0.itemIdentifier == Self.tbControl }?.image =
-            toolbarImage(controlImageName)
-    }
-
-    @objc private func controlPressed(_ sender: Any?) {
-        let enable = !(session?.isForwardingInput == true)
-        session?.setInputEnabled(enable)
-        inputCheck.state = enable ? .on : .off
-        Prefs.forwardInput = enable
-        refreshControlItem()
     }
 
     // MARK: - Fullscreen chrome
@@ -315,8 +321,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
 extension ClientController: NSToolbarDelegate {
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.tbControl, .flexibleSpace, Self.tbApp, Self.tbMission, Self.tbDesktop,
-         .flexibleSpace, Self.tbFullScreen]
+        [Self.tbRemote]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -329,12 +334,10 @@ extension ClientController: NSToolbarDelegate {
         let item = NSToolbarItem(itemIdentifier: identifier)
         item.target = self
         switch identifier {
-        case Self.tbControl:
-            item.label = L.t("client.toolbar.control")
-            item.paletteLabel = item.label
-            item.toolTip = L.t("client.toolbar.control.tip")
-            item.image = toolbarImage(controlImageName)
-            item.action = #selector(controlPressed(_:))
+        case Self.tbRemote:
+            item.label = ""
+            item.paletteLabel = L.t("client.toolbar.app")
+            item.view = remoteActionsView()
         case Self.tbApp:
             item.label = L.t("client.toolbar.app")
             item.paletteLabel = item.label
@@ -354,11 +357,6 @@ extension ClientController: NSToolbarDelegate {
             item.image = toolbarImage("menubar.dock.rectangle")
                 ?? toolbarImage("display")
             item.action = #selector(showDesktop)
-        case Self.tbFullScreen:
-            item.label = L.t("client.button.fullscreen")
-            item.paletteLabel = item.label
-            item.image = toolbarImage("arrow.up.left.and.arrow.down.right")
-            item.action = #selector(toggleFullScreenAction(_:))
         default:
             return nil
         }
