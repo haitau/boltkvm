@@ -140,6 +140,7 @@ final class ClientSession {
         guard input == nil, windowInput == nil else { return }
         if let view = inputView {
             let capture = WindowInputCapture(conn: conn, view: view)
+            capture.aspectProvider = { [weak self] in self?.renderer.imageAspect ?? 0 }
             if capture.start() {
                 windowInput = capture
                 return

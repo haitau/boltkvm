@@ -185,6 +185,9 @@ final class InputCapture {
 final class WindowInputCapture {
     private let conn: TCPConnection
     private weak var view: NSView?
+    /// Aspect ratio of the picture (letterboxed inside the view); nil before the
+    /// first frame arrives, in which case the whole view is used.
+    var aspectProvider: (() -> CGFloat)?
     private var monitor: Any?
     private var sent = 0
     /// Key codes whose keyDown we forwarded (and therefore swallowed). The
@@ -231,6 +234,17 @@ final class WindowInputCapture {
         log("input: window monitor stopped sent=\(sent)")
     }
 
+    private func fittedRect(in bounds: CGRect, aspect: CGFloat) -> CGRect {
+        guard aspect > 0.01, bounds.width > 0, bounds.height > 0 else { return bounds }
+        let viewAspect = bounds.width / bounds.height
+        if viewAspect > aspect {
+            let w = bounds.height * aspect
+            return CGRect(x: bounds.midX - w / 2, y: bounds.minY, width: w, height: bounds.height)
+        }
+        let h = bounds.width / aspect
+        return CGRect(x: bounds.minX, y: bounds.midY - h / 2, width: bounds.width, height: h)
+    }
+
     private func handle(_ event: NSEvent) -> NSEvent? {
         // Escape hatch: ⌃⌥⌘Q always reaches the local Mac (disconnect + quit).
         if event.type == .keyDown,
@@ -256,8 +270,12 @@ final class WindowInputCapture {
         let inVideo = hit === view || hit?.isDescendant(of: view) == true
         guard inVideo else { return event }
         let point = view.convert(inWindow, from: nil)
-        let w = max(1, view.bounds.width), h = max(1, view.bounds.height)
-        var nx = Double(point.x / w), ny = Double(point.y / h)
+        // The picture is centred with black bars, so map only inside the picture:
+        // clicks on a bar belong to nobody and are passed through.
+        let fit = fittedRect(in: view.bounds, aspect: aspectProvider?() ?? 0)
+        guard fit.contains(point) else { return event }
+        var nx = Double((point.x - fit.minX) / max(1, fit.width))
+        var ny = Double((point.y - fit.minY) / max(1, fit.height))
         if !view.isFlipped { ny = 1 - ny }
         nx = min(1, max(0, nx)); ny = min(1, max(0, ny))
         let flags = UInt64(event.modifierFlags.rawValue)

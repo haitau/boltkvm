@@ -48,11 +48,19 @@ struct ColorParams {
     var tenBit: Float
 }
 
+/// Must match `struct ViewParams` in the shader source (one float2).
+struct ViewParams {
+    var scale: SIMD2<Float>
+}
+
 final class Renderer: NSObject, MTKViewDelegate {
     let view: MTKView
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
+    /// Aspect ratio of the picture currently on screen; the input map needs it to
+    /// know where the letterbox bars are.
+    private var pictureAspect: CGFloat = 0
     private var textureCache: CVMetalTextureCache?
     private let lock = NSLock()
     private var latest: CVPixelBuffer?
@@ -105,11 +113,15 @@ final class Renderer: NSObject, MTKViewDelegate {
         #include <metal_stdlib>
         using namespace metal;
         struct VOut { float4 pos [[position]]; float2 uv; };
-        vertex VOut vmain(uint vid [[vertex_id]]) {
+        struct ViewParams { float2 scale; };
+        vertex VOut vmain(uint vid [[vertex_id]], constant ViewParams &vp [[buffer(0)]]) {
             float2 p[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
+            // Scale keeps the picture at its own aspect ratio and leaves black
+            // bars instead of stretching it to fill the window.
+            float2 q = p[vid] * vp.scale;
             VOut o;
-            o.pos = float4(p[vid], 0.0, 1.0);
-            o.uv = (p[vid] + 1.0) * 0.5;
+            o.pos = float4(q, 0.0, 1.0);
+            o.uv = (q + 1.0) * 0.5;
             o.uv.y = 1.0 - o.uv.y;
             return o;
         }
@@ -158,6 +170,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         view.frame = window.contentView?.bounds ?? .zero
         view.autoresizingMask = [.width, .height]
         window.contentView = view
+    }
+
+    var imageAspect: CGFloat {
+        lock.lock(); defer { lock.unlock() }
+        return pictureAspect
     }
 
     func submit(_ pb: CVPixelBuffer, captureLocalMicros: Int64) {
@@ -213,8 +230,19 @@ final class Renderer: NSObject, MTKViewDelegate {
             return
         }
 
+        let viewAspect = Float(view.drawableSize.width / max(1, view.drawableSize.height))
+        let imgAspect = Float(w) / Float(max(1, h))
+        var viewParams = ViewParams(scale: SIMD2<Float>(1, 1))
+        if viewAspect > imgAspect {
+            viewParams.scale.x = imgAspect / viewAspect
+        } else {
+            viewParams.scale.y = viewAspect / imgAspect
+        }
+        lock.lock(); pictureAspect = CGFloat(imgAspect); lock.unlock()
+
         var params = ColorParams(fullRange: isFull ? 1.0 : 0.0, tenBit: is10 ? 1.0 : 0.0)
         enc.setRenderPipelineState(pipeline)
+        enc.setVertexBytes(&viewParams, length: MemoryLayout<ViewParams>.size, index: 0)
         enc.setFragmentTexture(yTex, index: 0)
         enc.setFragmentTexture(cTex, index: 1)
         enc.setFragmentBytes(&params, length: MemoryLayout<ColorParams>.size, index: 0)
