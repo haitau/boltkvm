@@ -123,6 +123,31 @@ id=25  inactive online ASLEEP main 3008x1692
 也试过给合成事件换 event tap（hid / session / annotated）和用 `flagsChanged` 发修饰键，
 都不影响系统热键的行为——这条路走不通，命令通道才是对的。
 
+## 「BoltKVM 意外退出」的崩溃报告（2026-10-22 17:00 后）
+
+mini 上报了多条 `boltkvm-server-*.ips`。抓一份看：
+
+```
+exception: EXC_CRASH / SIGABRT (abort trap: 6)
+  _NSFileHandleRaiseOperationExceptionWhileReading
+  -[NSConcreteFileHandle writeData:]
+  log(_:)
+  closure #1 in exitWhenParentGoesAway()
+```
+
+`log()` 用 `FileHandle.standardError.write(...)`，描述符已关闭时 Foundation 抛
+Objective-C 异常 → `std::terminate` → abort。触发条件很具体：父进程（被控端 app）
+退出 → helper 的 stdin EOF → 它写下最后一行"parent closed stdin" → 此时 stderr
+已经是断掉的管道 → 抛异常 → 崩溃报告。
+
+改成 `write(2)`（带 EINTR 重试，失败就放弃这行日志），并在
+`exitWhenParentGoesAway()` 开头忽略 SIGPIPE。
+
+验证：重启 app 再 kill，崩溃报告数 13 → 13，helper 干净退出。
+
+另有一份 `boltkvm-*.ips` 是 `SIGKILL (Code Signature Invalid)`——那是重建二进制时
+taskgated 杀掉正在运行的旧 CLI 进程，不是代码问题。
+
 ## 未验证 / 下一步
 
 - app 部署下 >10 分钟的稳定性（今天只做了分钟级）；

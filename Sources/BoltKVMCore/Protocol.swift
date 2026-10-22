@@ -507,7 +507,25 @@ func packet(type: PacketType, flags: UInt8 = 0, ptsMicros: Int64 = 0, payload: D
 }
 
 func log(_ s: String) {
-    FileHandle.standardError.write((s + "\n").data(using: .utf8)!)
+    // Plain write(2), not FileHandle: Foundation raises an Objective-C exception
+    // (and the process aborts, leaving a "quit unexpectedly" crash report) when
+    // the descriptor is closed. The helper logs one line exactly when its parent
+    // dies and stderr may already be a broken pipe.
+    var bytes = Array((s + "\n").utf8)
+    bytes.withUnsafeBufferPointer { buf in
+        guard let base = buf.baseAddress else { return }
+        var offset = 0
+        while offset < buf.count {
+            let n = write(STDERR_FILENO, base.advanced(by: offset), buf.count - offset)
+            if n > 0 {
+                offset += n
+            } else if n < 0 && errno == EINTR {
+                continue
+            } else {
+                return
+            }
+        }
+    }
 }
 
 func tcpConnect(host: String, port: UInt16, timeoutSeconds: Int = 5) throws -> TCPConnection {

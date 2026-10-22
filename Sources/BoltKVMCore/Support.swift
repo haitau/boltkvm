@@ -43,6 +43,8 @@ final class DisplaySleepAssertion {
 /// which then blocks the next launch from creating one with the same identity.
 func exitWhenParentGoesAway() {
     guard ProcessInfo.processInfo.environment["BOLTKVM_EXIT_ON_STDIN_EOF"] == "1" else { return }
+    // The parent may be gone by the time we write our last line.
+    signal(SIGPIPE, SIG_IGN)
     Thread.detachNewThread {
         var byte: UInt8 = 0
         while true {
