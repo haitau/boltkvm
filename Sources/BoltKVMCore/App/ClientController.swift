@@ -22,6 +22,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private var videoTopToContent: NSLayoutConstraint?
     private var chromeTimer: Timer?
     private var appliedFullScreen: Bool?
+    private var didLogInvisibleWindow = false
 
     private static let tbRemote = NSToolbarItem.Identifier("boltkvm.remote")
     private static let tbStatus = NSToolbarItem.Identifier("boltkvm.status")
@@ -214,6 +215,15 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
     private func tickChrome() {
         guard let window else { return }
+        // B2 instrumentation: the window has vanished before while the session was
+        // still streaming. Record whether it was *closed* (windowWillClose logs a
+        // stack) or merely stopped being visible.
+        if !window.isVisible && !didLogInvisibleWindow {
+            didLogInvisibleWindow = true
+            log("window: not visible (closed=\(window.isReleasedWhenClosed), session=\(session?.isActive == true), key=\(window.isKeyWindow))")
+        } else if window.isVisible {
+            didLogInvisibleWindow = false
+        }
         let fullScreen = window.styleMask.contains(.fullScreen)
         if appliedFullScreen != fullScreen {
             appliedFullScreen = fullScreen
@@ -305,6 +315,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        log("window: will close — stack: \(Thread.callStackSymbols.dropFirst().prefix(10).joined(separator: " <- "))")
         // Closing the window *is* the disconnect (R4); for the client role the
         // app has nothing left to do, so it quits the way a document window would.
         session?.disconnect()
