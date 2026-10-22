@@ -9,7 +9,7 @@
 | 问题 | 建议 |
 |---|---|
 | 要不要把 vdscreen 合进来 | **要**，但不是把它当包依赖——它没有库；把它的 **402 行 ObjC 核心**中约 70 行（创建 + HiDPI 核对）vendor 成一个 SPM C target |
-| 能不能做成标准 app | **能**，两个 `.app`（Server 菜单栏、Client 全屏）共享一个 Core 库，SPM + 打包脚本产出，不用 Xcode 工程 |
+| 能不能做成标准 app | **能**，而且应该是**一个 app**：首次启动选"被控"还是"主控"，角色存在偏好里，随时可切。SPM + 打包脚本产出，不用 Xcode 工程 |
 | 最大收益是什么 | **TCC 归属从 Terminal 转到 app 本体**，现在"必须从 GUI Terminal 启动服务端"这条最别扭的运维约束直接消失 |
 
 两周到三周可以到"双击即用"的形态，分 5 个阶段，每阶段都能单独验收、单独回退。
@@ -107,24 +107,36 @@ linkerSettings: [.unsafeFlags(["-Xlinker", "-undefined", "-Xlinker", "dynamic_lo
 
 能，而且这是解决 TCC 那条死结的正路。
 
-### 3.1 目标形态
+### 3.1 目标形态：一个 app，两个角色
 
 ```
-BoltKVM.app (Server)     LSUIElement 菜单栏，无 Dock 图标
-  ├─ 内建虚拟显示（替换 vdscreen.app + LaunchAgent）
-  ├─ ScreenCaptureKit 采集 + VideoToolbox 编码
-  ├─ 监听 7474，状态菜单：客户端连接数 / 分辨率 / 帧率 / 最近错误
-  └─ SMAppService 注册开机自启（替换登录项 + .command）
-
-BoltKVM Client.app       全屏窗口 + 输入捕获 + 连接面板
-  ├─ Metal 1:1 呈现
-  ├─ CGEventTap 输入（TCC 授予本 app，不再授予 Terminal）
-  └─ ⌃⌥⌘Q 退出
-
-BoltKVMCore.framework    两端共享：Protocol / Server / Renderer / Audio / VirtualDisplay
+BoltKVM.app
+  首次启动：这台 Mac 要做什么？
+    ○ 被控（共享这台屏幕）   → 角色 server
+    ○ 主控（连接另一台 Mac） → 角色 client
+  菜单栏常驻，随时可切；角色写进 UserDefaults
 ```
 
-一个二进制带子命令也可以（`BoltKVM.app/Contents/MacOS/BoltKVM --mode=server`），但**两个 bundle 更干净**：TCC 按 bundle 授权，服务端只需要"屏幕录制"，客户端只需要"辅助功能/输入监控"，混在一个 bundle 里会让客户端莫名要求屏幕录制权限。
+| | server 角色 | client 角色 |
+|---|---|---|
+| 窗口 | 无窗口，菜单栏图标 | 全屏渲染窗口 + 连接面板 |
+| 激活策略 | `.accessory`（无 Dock 图标） | `.regular` |
+| TCC | 屏幕录制 + 辅助功能（注入事件） | 输入监控（捕获事件） |
+| 自启 | `SMAppService.mainApp` 注册 | 不注册 |
+| 单实例 | 必须（端口独占，已有 PID 文件逻辑） | 不要求 |
+
+两台机器各装同一个 app、各选一个角色；它们几乎不会同时需要跑在同一台机器上，所以"一个进程同时做两端"的复杂度其实不必付出。
+
+**为什么改掉了原来的两个 app**：最初的理由是"最小权限"和"生命周期不同"。但 macOS 的 TCC 是**懒弹窗**——只有在第一次真正调用时才请求：
+
+- 只有 server 角色第一次开采集时才会弹"屏幕录制"；
+- 只有 client 角色第一次 `CGEventTap` 时才会弹"输入监控"。
+
+所以单个 bundle 并不会让纯客端的用户被要求授权屏幕录制。权限论据不成立，那就没有理由拆成两个包、两份签名、两次公证。
+
+而且两端的权限需求本来就不同（server 是屏幕录制 + 辅助功能，client 是输入监控），同一份代码在两个角色下只申请各自那几项。
+
+剩下的差异都能在运行时处理：`NSApp.setActivationPolicy()` 切 Dock 图标，菜单栏切换角色，server 角色启动时加单实例锁。
 
 ### 3.2 打包方式：SPM + 脚本，不引入 Xcode 工程
 
@@ -140,21 +152,21 @@ BoltKVMCore.framework    两端共享：Protocol / Server / Renderer / Audio / V
 ```
 Packaging/
   build-app.sh          # swift build -c release → 组装 .app → codesign → 可选 notarize
-  Server-Info.plist     # LSUIElement, NSScreenCaptureUsageDescription
-  Client-Info.plist
-  Server.entitlements   # 目前不需要额外权限，先留空模板
+  Info.plist            # 一份，两个角色共用
   AppIcon.icns
 ```
 
-关键 Info.plist 键：`LSUIElement=1`（服务端无 Dock）、`NSScreenCaptureUsageDescription`（首次采集弹窗文案）、`LSMinimumSystemVersion=13.0`、`CFBundleIdentifier` 用 `io.github.<user>.boltkvm.server` / `.client`。
+关键 Info.plist 键：`NSScreenCaptureUsageDescription`（首次采集弹窗文案）、`LSMinimumSystemVersion=13.0`、`CFBundleIdentifier=io.github.<user>.boltkvm`。**不要**写死 `LSUIElement`——启动后按角色调用 `setActivationPolicy`，写死在 plist 里反而会让 client 角色没有 Dock 图标。
 
 ### 3.3 TCC 的变化（这是重点）
 
-| | 现在 | app 化之后 |
-|---|---|---|
-| 屏幕录制 | 授予 **Terminal.app**，launchd 启动必失败 | 授予 BoltKVM Server.app，系统弹窗一次，之后任何启动方式都有效 |
-| 输入监控 | 授予 Terminal（客户端也跑在 Terminal 里） | 授予 BoltKVM Client.app |
-| 自启 | 登录项 + `.command` + Terminal 窗口常驻 | `SMAppService.mainApp.register()`，无窗口 |
+| 权限 | 哪个角色要 | 现在授予谁 | app 化之后 |
+|---|---|---|---|
+| 屏幕录制 | server | **Terminal.app**，launchd 启动必失败 | BoltKVM.app（只在切到 server 角色、首次采集时弹） |
+| 辅助功能（post events） | server | Terminal | 同上 |
+| 输入监控（listen events） | client | Terminal | BoltKVM.app（只有 client 角色会弹） |
+| 自启 | server | 登录项 + `.command` + Terminal 窗口常驻 | `SMAppService.mainApp.register()`，无窗口 |
+
 | 权限丢失 | 升级 macOS 后静默失败，靠 doctor 事后发现 | 同样会丢，但 `CGPreflightScreenCaptureAccess()` 可在启动时检测并引导 |
 
 这一条把"服务端必须从 GUI Terminal 启动"彻底消灭——那是本项目最反直觉的运维约束，也是重启恢复链里最脆的一环。
@@ -169,6 +181,8 @@ Packaging/
 
 公证不是技术问题而是账号问题，先按 ad-hoc 做，脚本里留 `SIGN_IDENTITY` / `NOTARY_PROFILE` 两个变量，有账号时改一行。
 
+**ad-hoc 有个坑**：TCC 记录的签名身份对 ad-hoc 是 cdhash，重新构建一次 cdhash 就变，权限全要重授。解决成本很低——在钥匙串里建一个自签名的代码签名证书（如 "BoltKVM Local"），用 `codesign -s "BoltKVM Local"` 签名，TCC 就按这个稳定身份记，重编译不用重授。这个证书不需要开发者账号。
+
 ## 4. 分阶段计划
 
 | 阶段 | 内容 | 验收 | 估时 |
@@ -177,9 +191,9 @@ Packaging/
 | 1 | `CVirtualDisplay` target + `--virtual-display=builtin` | **已完成 2026-10-22**：`id=7 logical=3008x1692 backing=6016x3384 hiDPI=true`（创建耗时 2.1 s），客户端 888 帧 / 60.4 fps / `failed=0`；恢复 external 后 469 帧无回归。未测：`onLost` 回调（需要系统主动移除显示器） | 2–3 天 |
 | 2 | 删掉 `ExternalVDScreen`，mini 上卸 vdscreen.app 与它的 LaunchAgent | 部署件从 6 件降到 4 件；重启恢复仍通过 | 0.5 天 |
 | 3 | 抽出 `BoltKVMCore`（Protocol/Server/Renderer/Audio/VirtualDisplay 移入），CLI 变薄壳 | CLI 全功能不回退，`swift build` 通过，8h 冒烟 | 1–2 天 |
-| 4 | `BoltKVM Client.app`：全屏窗口、输入、连接面板、退出快捷键 | 双击即连；TCC 弹出的是 Client.app；输入延迟与 CLI 版一致 | 2–3 天 |
-| 5 | `BoltKVM Server.app`：菜单栏、状态项、SMAppService 自启、权限引导 | 冷启动到可连 < 10s；重启后无人工步骤；`doctor` 三项全绿 | 3–4 天 |
-| 6 | `Packaging/build-app.sh` + 图标 + 签名 | 一条命令产出两个 .app；`codesign -dv` 正常；断开 Terminal 也能跑 | 1–2 天 |
+| 4 | 单 app 骨架：角色选择、菜单栏常驻、client 全屏窗口 + 输入 + 连接面板 | 首次启动能选角色；client 角色双击即连；TCC 弹的是 BoltKVM.app；输入延迟与 CLI 版一致 | 3–4 天 |
+| 5 | server 角色：无窗口菜单栏、状态项、权限引导、SMAppService 自启、单实例锁 | 冷启动到可连 < 10s；重启后无人工步骤；`doctor` 三项全绿 | 2–3 天 |
+| 6 | `Packaging/build-app.sh` + 图标 + 自签名证书 | 一条命令产出 BoltKVM.app；`codesign -dv` 身份稳定，重编译后 TCC 不丢 | 1–2 天 |
 
 合计约 **10–16 个工作日**。阶段 1–2 是纯收益（少一个进程、少一个 LaunchAgent），阶段 4–6 才是"像个 app"。
 
@@ -187,7 +201,7 @@ Packaging/
 
 | 指标 | 现在 | 之后 |
 |---|---|---|
-| 部署件 | 6（二进制、supervisor、登录项、vdscreen.app、vdscreen LaunchAgent、Terminal 约束） | 2（两个 .app） |
+| 部署件 | 6（二进制、supervisor、登录项、vdscreen.app、vdscreen LaunchAgent、Terminal 约束） | 1（BoltKVM.app） |
 | 启动前提 | 必须 GUI Terminal | 双击 / 开机自启 |
 | 显示器生命周期 | 外部进程，靠轮询发现丢失 | 进程内回调，立即重建 |
 | 权限归属 | Terminal（脆弱，重装/升级易丢） | app bundle（稳定） |
@@ -197,7 +211,7 @@ Packaging/
 
 1. **私有 API**：`CGVirtualDisplay` 不属于任何兼容性承诺，macOS 更新可能改行为或移除。风险现在就有，整合不新增；但 app 化之后如果它失效，退路是"回到外接物理屏"或换 DeskPad 同类实现。
 2. **公证账号**：没有付费账号就只能自用。**这是唯一需要你拍板的外部依赖**。
-3. **双 bundle 的代码签名一致性**：两个 app 用同一个 Team ID 签，否则 SMAppService 与 keychain 访问会有意外。
+3. **角色切换的状态迁移**：单 app 的主要复杂度来源。server→client 要释放端口、销毁虚拟屏；client→server 要停输入捕获、清空渲染器。需要一个显式状态机，而不是散落的 if。
 4. **迁移期双轨**：阶段 1–2 需要同时保留旧路径，`--virtual-display` 开关是回退阀门。
 5. **输入捕获的 TCC 差异**：`CGEventTap` 在 app 里需要"输入监控"授权，用户可能只给了辅助功能；需要在启动时检测并提示。
 
