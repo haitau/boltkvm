@@ -172,12 +172,12 @@ nohup scripts/soak-monitor.sh --client-log ~/soak/<run>/client.log &
 
 ## 9. 尚未覆盖
 
-- 输入连续性（8 小时长稳期间无人操作，只验证了 tap 存活）；
-- 睡眠/唤醒、拔插雷雳线、网络切换的恢复；
+- 输入连续性（8 小时长稳期间无人操作，只验证了 tap 存活）——计划内，见 [input-continuity.md](../plans/input-continuity.md)；
+- 睡眠/唤醒、拔插雷雳线、网络切换的恢复——**不列入计划**（需要人工操作），见 [open-items.md](../plans/open-items.md)；
 - 锁屏界面能否用注入事件解锁（重启后服务恢复已验，见 §12；解锁本身未验证）；
-- VNC 预登录救援（自动登录已可用，预登录窗口未单独验证）；
-- macOS 升级后的 TCC 重新授权演练；
-- 音频隔离实测。
+- VNC 预登录救援（自动登录已可用，预登录窗口未单独验证）——不列入计划；
+- macOS 升级后的 TCC 重新授权演练——不列入计划；
+- 音频隔离实测——已补，见 [2026-10-22-audio-option.md](2026-10-22-audio-option.md)（默认零音频字节，`--audio` 可选）。
 
 ## 10. watchdog v1 误判与修复（2026-10-21）
 
