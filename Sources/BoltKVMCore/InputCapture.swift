@@ -187,6 +187,11 @@ final class WindowInputCapture {
     private weak var view: NSView?
     private var monitor: Any?
     private var sent = 0
+    /// Key codes whose keyDown we forwarded (and therefore swallowed). The
+    /// matching keyUp must only be swallowed if we swallowed the keyDown —
+    /// otherwise the local system is left with a keyDown and no release, which
+    /// repeats the character forever (seen 2026-10-22: a stuck "aaaaa").
+    private var forwardedKeys = Set<UInt16>()
 
     init(conn: TCPConnection, view: NSView) {
         self.conn = conn
@@ -216,6 +221,13 @@ final class WindowInputCapture {
     func stop() {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        // Release anything we may have left down, locally and on the remote.
+        for code in forwardedKeys {
+            CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(code), keyDown: false)?
+                .post(tap: .cghidEventTap)
+        }
+        if !forwardedKeys.isEmpty { log("input: released \(forwardedKeys.count) held key(s)") }
+        forwardedKeys.removeAll()
         log("input: window monitor stopped sent=\(sent)")
     }
 
@@ -265,10 +277,14 @@ final class WindowInputCapture {
         }
 
         switch event.type {
-        case .keyDown, .keyUp:
-            send(InputEvent(type: event.type == .keyDown ? .keyDown : .keyUp,
-                            keyCode: event.keyCode, flags: flags, x: nx, y: ny,
-                            isRepeat: event.isARepeat))
+        case .keyDown:
+            forwardedKeys.insert(event.keyCode)
+            send(InputEvent(type: .keyDown, keyCode: event.keyCode, flags: flags,
+                            x: nx, y: ny, isRepeat: event.isARepeat))
+        case .keyUp:
+            // Only swallow the release of a key we actually captured.
+            guard forwardedKeys.remove(event.keyCode) != nil else { return event }
+            send(InputEvent(type: .keyUp, keyCode: event.keyCode, flags: flags, x: nx, y: ny))
         case .flagsChanged:
             send(InputEvent(type: .flagsChanged, keyCode: event.keyCode, flags: flags, x: nx, y: ny))
         case .mouseMoved:
