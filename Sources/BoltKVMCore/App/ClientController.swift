@@ -14,7 +14,6 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private var audioCheck: NSButton!
     private var connectButton: NSButton!
     private var statusLabel: NSTextField!
-    private var statsLabel: NSTextField!
     private var videoView: NSView!
     private var bar: NSStackView!
     /// The connect bar is windowed-only chrome; in fullscreen the toolbar takes
@@ -25,6 +24,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private var appliedFullScreen: Bool?
 
     private static let tbRemote = NSToolbarItem.Identifier("boltkvm.remote")
+    private static let tbStatus = NSToolbarItem.Identifier("boltkvm.status")
+    /// Live `fps · bitrate` label hosted in the toolbar's trailing edge.
+    private let toolbarStatusLabel = NSTextField(labelWithString: "")
 
     init() {
         let window = NSWindow(
@@ -73,14 +75,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
         statusLabel = NSTextField(labelWithString: L.t("client.state.idle"))
         statusLabel.textColor = .secondaryLabelColor
-        statsLabel = NSTextField(labelWithString: "")
-        statsLabel.textColor = .secondaryLabelColor
-        statsLabel.alignment = .right
-        statsLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
         let bar = NSStackView(views: [hostLabel, hostField, portLabel, portField,
                                       keyLabel, keyField, inputCheck, audioCheck,
-                                      connectButton, statusLabel, statsLabel])
+                                      connectButton, statusLabel])
         bar.orientation = .horizontal
         bar.spacing = 8
         bar.alignment = .centerY
@@ -131,15 +128,15 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             guard let self else { return }
             self.statusLabel.stringValue = state.text
             self.statusLabel.textColor = state == .streaming ? .systemGreen : .secondaryLabelColor
-            self.connectButton.title = self.session?.isActive == true ? L.t("client.button.disconnect") : L.t("client.button.connect")
-            if case .failed = state {
-                self.statusLabel.textColor = .systemRed
-                self.connectButton.title = L.t("client.button.connect")
-            }
+            // No 断开 button: closing the window is the disconnect (R4).
+            self.connectButton.isHidden = self.session?.isActive == true
         }
         session?.onStats = { [weak self] text in
-            self?.statsLabel.stringValue = text
+            self?.toolbarStatusLabel.stringValue = text
         }
+        toolbarStatusLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        toolbarStatusLabel.textColor = .secondaryLabelColor
+        toolbarStatusLabel.alignment = .right
         installToolbar()
         setupFullScreenChrome()
     }
@@ -254,11 +251,8 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     // MARK: - Actions
 
     @objc private func connectPressed() {
-        guard let session else { return }
-        if session.isActive {
-            session.disconnect()
-            return
-        }
+        guard let session, !session.isActive else { return }
+        // Disconnecting is done by closing the window (R4), so this only connects.
         let host = hostField.stringValue.trimmingCharacters(in: .whitespaces)
         guard !host.isEmpty else {
             statusLabel.stringValue = L.t("client.host.required")
@@ -311,13 +305,20 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        // Closing the window *is* the disconnect (R4); for the client role the
+        // app has nothing left to do, so it quits the way a document window would.
         session?.disconnect()
+        if Prefs.role == .client {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                NSApp.terminate(nil)
+            }
+        }
     }
 }
 
 extension ClientController: NSToolbarDelegate {
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.tbRemote]
+        [Self.tbRemote, .flexibleSpace, Self.tbStatus]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -334,6 +335,12 @@ extension ClientController: NSToolbarDelegate {
             item.label = ""
             item.paletteLabel = L.t("client.toolbar.app")
             item.view = remoteActionsView()
+        case Self.tbStatus:
+            toolbarStatusLabel.setFrameSize(NSSize(width: 150, height: 18))
+            toolbarStatusLabel.alignment = .right
+            item.label = ""
+            item.paletteLabel = L.t("client.label.stats")
+            item.view = toolbarStatusLabel
         default:
             return nil
         }

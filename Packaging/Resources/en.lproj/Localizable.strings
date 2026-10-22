@@ -25,6 +25,7 @@
 
 /* Controller window */
 "client.window.title" = "BoltKVM — Controller";
+"client.label.stats" = "Connection status";
 "client.label.host" = "Host";
 "client.label.port" = "Port";
 "client.label.key" = "Key";

@@ -25,6 +25,7 @@
 
 /* 主控端窗口 */
 "client.window.title" = "BoltKVM — 主控端";
+"client.label.stats" = "连接状态";
 "client.label.host" = "主机";
 "client.label.port" = "端口";
 "client.label.key" = "密钥";

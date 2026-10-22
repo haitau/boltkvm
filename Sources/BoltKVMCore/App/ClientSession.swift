@@ -123,8 +123,9 @@ final class ClientSession {
                         let secs = Double(now - lastReport) / 1e9
                         let fps = Double(frames) / secs
                         let mbps = Double(bytes) * 8 / secs / 1e6
-                        self.onStats?(String(format: "%.0f fps · %.0f Mbps · %@",
-                                             fps, mbps, host))
+                        // The host is already in the connect bar; the toolbar
+                        // only carries the live numbers.
+                        self.onStats?(String(format: "%.0f fps · %.0f Mbps", fps, mbps))
                         frames = 0
                         bytes = 0
                         lastReport = now
