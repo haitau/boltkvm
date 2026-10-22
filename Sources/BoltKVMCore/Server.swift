@@ -53,6 +53,7 @@ final class Server: NSObject, SCStreamOutput {
     private var closed = false
     private var displayBounds = CGRect.zero
     private var inputCount = 0
+    private var keyCount = 0
     private var scrollCount = 0
     private var heartbeatTimer: DispatchSourceTimer?
     private var activity: NSObjectProtocol?
@@ -275,7 +276,8 @@ final class Server: NSObject, SCStreamOutput {
             y: displayBounds.minY + ev.y * displayBounds.height
         )
         inputCount += 1
-        if inputCount % 120 == 0 { log("input events=\(inputCount)") }
+        if ev.type == .keyDown || ev.type == .keyUp || ev.type == .flagsChanged { keyCount += 1 }
+        if inputCount % 120 == 0 { log("input events=\(inputCount) keys=\(keyCount)") }
 
         switch ev.type {
         case .keyDown, .keyUp:
