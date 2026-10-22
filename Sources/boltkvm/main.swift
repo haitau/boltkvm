@@ -21,6 +21,7 @@ func usage() -> Never {
     utilities:
       boltkvm doctor [--role server|client]
       boltkvm inputprobe [--seconds 60] [--interval-ms 60000]
+      boltkvm cryptotest      # 会话加密往返与篡改拒绝自测
       boltkvm watchdog [--once] [--install] [--uninstall] [--interval 5]
       boltkvm selftest
       boltkvm pattern <png> [seconds]
@@ -54,12 +55,27 @@ func authenticateServer(conn: TCPConnection, key: Data, timeoutSeconds: Int = 5)
         if h.type == .authResponse {
             guard authMACMatches(expected, payload) else { throw POSIXError(.EACCES) }
             try conn.send(packet(type: .authOk, ptsMicros: 0, payload: Data()))
+            // Auth ok is the last plaintext packet: everything after it is sealed.
+            let keys = deriveSessionKeys(psk: key, nonce: nonce)
+            conn.inCipher = SessionCipher(key: keys.c2s)
+            conn.outCipher = SessionCipher(key: keys.s2c)
             return
         }
     }
     throw POSIXError(.ETIMEDOUT)
 }
 
+/// Installs the session ciphers once the server confirms auth. Both sides set
+/// them at the same point (right after authOk), which keeps the nonce counters
+/// aligned in each direction.
+func enableClientEncryption(conn: TCPConnection, nonce: Data?) {
+    guard let nonce, let key = resolveAuthKey(CommandLine.arguments) else { return }
+    let keys = deriveSessionKeys(psk: key, nonce: nonce)
+    conn.outCipher = SessionCipher(key: keys.c2s)
+    conn.inCipher = SessionCipher(key: keys.s2c)
+}
+
+/// Client side of the handshake: answer the challenge with the MAC.
 func respondToAuthChallenge(conn: TCPConnection, nonce: Data) throws {
     guard let key = resolveAuthKey(CommandLine.arguments) else {
         // Fatal on purpose: retrying cannot help and --reconnect would spin.
@@ -111,6 +127,8 @@ struct BoltKVM {
             runSelftest()
         case "inputprobe":
             await runInputProbe(args)
+        case "cryptotest":
+            runCryptoTest()
         case "pattern":
             await runPattern(args)
         case "client":
@@ -250,6 +268,57 @@ struct BoltKVM {
     nonisolated(unsafe) static var patternTimer: Timer?
     nonisolated(unsafe) static var patternActivity: NSObjectProtocol?
 
+    /// Round-trips the session cipher: both directions, many packets, and the
+    /// three failure modes that matter (tampered body, tampered header, wrong
+    /// key). No network, no TCC — run it after touching the crypto code.
+    static func runCryptoTest() {
+        let psk = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
+        let nonce = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
+        let keys = deriveSessionKeys(psk: psk, nonce: nonce)
+        var failures = 0
+
+        let send = SessionCipher(key: keys.c2s)
+        let recv = SessionCipher(key: keys.c2s)
+        var lastFrame = Data()
+        for i in 0..<1_000 {
+            let body = Data((0..<(i % 500)).map { _ in UInt8.random(in: 0...255) })
+            var frame = packet(type: .frame, flags: 0, ptsMicros: Int64(i), payload: body)
+            frame = send.seal(frame)
+            guard let head = PacketHeader.decode(frame.prefix(HEADER_SIZE)) else {
+                print("FAIL: header decode at \(i)"); failures += 1; break
+            }
+            guard head.flags & FLAG_ENCRYPTED != 0 else {
+                print("FAIL: encrypted flag missing at \(i)"); failures += 1; break
+            }
+            let opened = try? recv.open(header: Data(frame.prefix(HEADER_SIZE)), body: Data(frame.dropFirst(HEADER_SIZE)))
+            if opened != body { print("FAIL: payload mismatch at \(i)"); failures += 1; break }
+            lastFrame = frame
+        }
+
+        // Tampered body must fail authentication.
+        var tampered = lastFrame
+        tampered[tampered.count - 1] ^= 0xFF
+        let bodyTamper = try? SessionCipher(key: keys.c2s).open(
+            header: Data(tampered.prefix(HEADER_SIZE)), body: Data(tampered.dropFirst(HEADER_SIZE)))
+        if bodyTamper != nil { print("FAIL: tampered body accepted"); failures += 1 }
+
+        // Tampered header is AAD, so it must fail too.
+        var headerTampered = lastFrame
+        headerTampered[headerTampered.startIndex + 6] ^= 0x01
+        let headerTamper = try? SessionCipher(key: keys.c2s).open(
+            header: Data(headerTampered.prefix(HEADER_SIZE)), body: Data(headerTampered.dropFirst(HEADER_SIZE)))
+        if headerTamper != nil { print("FAIL: tampered header accepted"); failures += 1 }
+
+        // Wrong key must fail.
+        let wrong = SessionCipher(key: deriveSessionKeys(psk: Data(repeating: 0, count: 32), nonce: nonce).c2s)
+        let wrongKey = try? wrong.open(header: Data(lastFrame.prefix(HEADER_SIZE)),
+                                       body: Data(lastFrame.dropFirst(HEADER_SIZE)))
+        if wrongKey != nil { print("FAIL: wrong key accepted"); failures += 1 }
+
+        print(failures == 0 ? "cryptotest PASS (1000 frames, 3 tamper cases)" : "cryptotest FAILED (\(failures))")
+        exit(failures == 0 ? 0 : 1)
+    }
+
     static func runSelftest() {
         var failures = 0
         func check(_ ok: Bool, _ name: String) {
@@ -375,6 +444,7 @@ struct BoltKVM {
                 var conn: TCPConnection?
                 var sawChallenge = false
                 var sawAuthOk = false
+                var challengeNonce: Data?
                 do {
                     let c = try tcpConnect(host: host, port: port)
                     conn = c
@@ -385,9 +455,7 @@ struct BoltKVM {
                     lastDecoder = decoder
                     var inputStarted = false
                     while DispatchTime.now().uptimeNanoseconds < deadline {
-                        let hd = try c.recvExact(HEADER_SIZE)
-                        guard let header = PacketHeader.decode(hd) else { throw POSIXError(.EBADMSG) }
-                        let payload = try c.recvExact(Int(header.payloadLength))
+                        let (header, payload) = try c.recvFrame()
                         packets += 1
                         winBytes += payload.count
                         if header.type == .frame { frames += 1; winFrames += 1 }
@@ -406,10 +474,15 @@ struct BoltKVM {
                         }
                         if header.type == .authChallenge {
                             sawChallenge = true
+                            challengeNonce = payload
                             try respondToAuthChallenge(conn: c, nonce: payload)
                         } else if header.type == .authOk {
                             sawAuthOk = true
+                            enableClientEncryption(conn: c, nonce: challengeNonce)
                             log("auth ok")
+                            // Encrypted ping: proves the client->server direction
+                            // decrypts, not just server->client.
+                            try? c.send(timeSyncRequest())
                         } else if header.type == .format, let f = StreamFormat.decode(payload) {
                             try decoder.configure(f)
                             if wantsInput && !inputStarted {
@@ -470,13 +543,12 @@ struct BoltKVM {
             var received = 0
             var packets = 0
             var lastHeader: PacketHeader?
+            var challengeNonce: Data?
             var lastBeat = DispatchTime.now().uptimeNanoseconds
             while DispatchTime.now().uptimeNanoseconds < deadline {
                 do {
-                    let hd = try conn.recvExact(HEADER_SIZE)
-                    guard let header = PacketHeader.decode(hd) else { throw POSIXError(.EBADMSG) }
+                    let (header, payload) = try conn.recvFrame()
                     lastHeader = header
-                    let payload = try conn.recvExact(Int(header.payloadLength))
                     packets += 1
                     let beatNow = DispatchTime.now().uptimeNanoseconds
                     if beatNow - lastBeat >= 60_000_000_000 {
@@ -496,9 +568,12 @@ struct BoltKVM {
                     case .timeSync:
                         handleTimeSync(header, payload, decoder: decoder)
                     case .authChallenge:
+                        challengeNonce = payload
                         try respondToAuthChallenge(conn: conn, nonce: payload)
                     case .authOk:
+                        enableClientEncryption(conn: conn, nonce: challengeNonce)
                         log("auth ok")
+                        try? conn.send(timeSyncRequest())
                     case .input, .authResponse:
                         break
                     case .audio:

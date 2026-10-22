@@ -272,6 +272,64 @@ func randomNonce(_ count: Int = 32) -> Data {
 
 // MARK: - TCP
 
+/// Set in PacketHeader.flags when the payload is ChaCha20-Poly1305 sealed.
+let FLAG_ENCRYPTED: UInt8 = 0x2
+
+/// Session keys derived from the same PSK the HMAC handshake used, salted with
+/// the server's challenge nonce — no extra round trip, and a fresh key per
+/// connection because the nonce is random.
+func deriveSessionKeys(psk: Data, nonce: Data) -> (c2s: SymmetricKey, s2c: SymmetricKey) {
+    let ikm = SymmetricKey(data: psk)
+    let c2s = HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, salt: nonce,
+                                     info: Data("boltkvm c2s".utf8), outputByteCount: 32)
+    let s2c = HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, salt: nonce,
+                                     info: Data("boltkvm s2c".utf8), outputByteCount: 32)
+    return (c2s, s2c)
+}
+
+/// One direction of the encrypted stream. The header stays clear (it carries the
+/// framing) but is authenticated as AAD, so type/length tampering is rejected.
+/// Nonce is a 64-bit counter in the last 8 bytes; TCP is ordered, so both ends
+/// stay in step without a replay window.
+final class SessionCipher {
+    private let key: SymmetricKey
+    private var counter: UInt64 = 0
+
+    init(key: SymmetricKey) { self.key = key }
+
+    private func nextNonce() -> ChaChaPoly.Nonce {
+        var bytes = [UInt8](repeating: 0, count: 12)
+        var c = counter.bigEndian
+        withUnsafeBytes(of: &c) { raw in
+            for i in 0..<8 { bytes[4 + i] = raw[i] }
+        }
+        counter &+= 1
+        return try! ChaChaPoly.Nonce(data: Data(bytes))
+    }
+
+    func seal(_ frame: Data) -> Data {
+        guard frame.count >= HEADER_SIZE else { return frame }
+        var header = Data(frame.prefix(HEADER_SIZE))
+        let body = Data(frame.dropFirst(HEADER_SIZE))
+        header[6] |= FLAG_ENCRYPTED
+        let newLength = UInt32(body.count + 16)
+        header.replaceSubrange(8..<12, with: withUnsafeBytes(of: newLength.bigEndian) { Data($0) })
+        let sealed = try! ChaChaPoly.seal(body, using: key, nonce: nextNonce(), authenticating: header)
+        var out = header
+        out.append(sealed.ciphertext)
+        out.append(sealed.tag)
+        return out
+    }
+
+    func open(header: Data, body: Data) throws -> Data {
+        guard body.count >= 16 else { throw POSIXError(.EBADMSG) }
+        let ct = Data(body.dropLast(16))
+        let tag = Data(body.suffix(16))
+        let box = try ChaChaPoly.SealedBox(nonce: nextNonce(), ciphertext: ct, tag: tag)
+        return try ChaChaPoly.open(box, using: key, authenticating: header)
+    }
+}
+
 final class TCPConnection {
     let fd: Int32
     private let sendLock = NSLock()
@@ -281,10 +339,16 @@ final class TCPConnection {
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
     }
 
+    /// Nil until the handshake completes; both ends install them at the same
+    /// protocol point (right after authOk) so the nonce counters stay aligned.
+    var outCipher: SessionCipher?
+    var inCipher: SessionCipher?
+
     func send(_ data: Data) throws {
+        let wire = outCipher.map { $0.seal(data) } ?? data
         sendLock.lock()
         defer { sendLock.unlock() }
-        try data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+        try wire.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             guard let base = raw.baseAddress else { return }
             var sent = 0
             while sent < raw.count {
@@ -312,6 +376,19 @@ final class TCPConnection {
             got += n
         }
         return out
+    }
+
+    /// Reads one frame and decrypts it when the encrypted flag is set. Used by
+    /// everything that runs after the handshake.
+    func recvFrame() throws -> (PacketHeader, Data) {
+        let hd = try recvExact(HEADER_SIZE)
+        guard let head = PacketHeader.decode(hd) else { throw POSIXError(.EBADMSG) }
+        let body = try recvExact(Int(head.payloadLength))
+        if head.flags & FLAG_ENCRYPTED != 0 {
+            guard let cipher = inCipher else { throw POSIXError(.EPROTO) }
+            return (head, try cipher.open(header: hd, body: body))
+        }
+        return (head, body)
     }
 
     func setRecvTimeout(_ seconds: Int) {

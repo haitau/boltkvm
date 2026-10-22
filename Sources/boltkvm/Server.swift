@@ -228,9 +228,7 @@ final class Server: NSObject, SCStreamOutput {
             guard let self else { return }
             while true {
                 do {
-                    let hd = try self.connection.recvExact(HEADER_SIZE)
-                    guard let h = PacketHeader.decode(hd) else { break }
-                    let payload = try self.connection.recvExact(Int(h.payloadLength))
+                    let (h, payload) = try self.connection.recvFrame()
                     if h.type == .timeSync {
                         let t1 = h.ptsMicros
                         let t2 = Int64(Date().timeIntervalSince1970 * 1_000_000)

@@ -117,7 +117,7 @@ reboot ──25s──► ssh 可用 ──► 自动登录进桌面会话
 
 ## 已知限制与坑
 
-- **认证有，加密没有**：预共享密钥 + HMAC-SHA256 挑战应答，客户端不持密钥无法建连；但链路是明文 TCP，密钥泄露等于交出一台机器。默认只绑雷雳桥，`--bind 0.0.0.0` 会监听所有网卡（会打警告）。
+- **认证 + 加密**：预共享密钥 + HMAC-SHA256 挑战应答，握手后整条链路用 ChaCha20-Poly1305 密封（帧头作为 AAD 参与认证）。`--insecure` 是明文逃生口，会打警告；默认只绑雷雳桥，`--bind 0.0.0.0` 会监听所有网卡。密钥仍等于一台机器——没有前向保密。
 - **跨机更新二进制后可能被 AMFI 杀掉**：`scp` 过去的新二进制若启动即 137、无任何输出，在被控端跑一次 `codesign --force -s - ~/boltkvm` 即可。
 - **残留服务端会让 capture 静默挂死**：`startCapture()` 不返回、不报错，客户端只收到心跳。起跑前必须 `pkill -f 'boltkvm server'`。
 - **`--seconds` 只结束会话，不结束进程**：到期后打 `session ended; accepting next client` 继续监听。
@@ -145,6 +145,7 @@ reboot ──25s──► ssh 可用 ──► 自动登录进桌面会话
 - [未完成事项（P0/P1/P2）](docs/plans/open-items.md)
 - [音频可选与默认隔离](docs/reports/2026-10-22-audio-option.md)
 - [上屏 51 fps 的真因](docs/reports/2026-10-22-present-sync-fix.md)
+- [传输加密（ChaCha20-Poly1305）](docs/reports/2026-10-22-transport-encryption.md)
 - [M0 显示层验证报告](docs/reports/2026-10-21-m0-display.md)
 - [M1 编码可行性探针](docs/reports/2026-10-21-m1-encoder-probe.md)
 - [M1 α′ 管线报告](docs/reports/2026-10-21-m1-pipeline.md)
