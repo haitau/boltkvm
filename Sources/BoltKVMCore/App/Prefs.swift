@@ -52,6 +52,25 @@ enum Prefs {
         set { d.set(newValue, forKey: "server.displaySize") }
     }
 
+    /// "standard" scales the stream to at most 3840 wide; "pixel" streams at the
+    /// virtual display's real pixel size (2x the logical size), which is the only
+    /// way text stays crisp when the client window is as large as the desktop.
+    static var serverQuality: String {
+        get { d.string(forKey: "server.quality") ?? "standard" }
+        set { d.set(newValue, forKey: "server.quality") }
+    }
+
+    /// Presets offered in the server menu; vdscreen-style, plus a custom entry.
+    static let displayPresets: [(String, Int, Int)] = [
+        ("1920x1080", 1920, 1080),
+        ("2560x1440", 2560, 1440),
+        ("2880x1620", 2880, 1620),
+        ("3008x1692", 3008, 1692),
+        ("3840x2160", 3840, 2160),
+        ("5120x2880", 5120, 2880),
+        ("6016x3384", 6016, 3384),
+    ]
+
     static var serverAudio: Bool {
         get { d.object(forKey: "server.audio") as? Bool ?? false }
         set { d.set(newValue, forKey: "server.audio") }

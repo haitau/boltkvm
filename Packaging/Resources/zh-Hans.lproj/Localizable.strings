@@ -70,3 +70,13 @@
 "server.status.needsAccessibility" = "需要辅助功能权限";
 "server.accessibility.hint" = "不授权则键鼠注入无效";
 "server.menu.accessibility" = "授权…（辅助功能）";
+"server.menu.resolution" = "分辨率";
+"server.menu.resolution.custom" = "自定义…";
+"server.menu.quality" = "画面质量";
+"server.menu.quality.standard" = "标准（≤3840 宽）";
+"server.menu.quality.pixel" = "清晰（虚拟屏像素）";
+"server.resolution.custom.title" = "自定义分辨率";
+"server.resolution.custom.detail" = "输入 宽x高，例如 2560x1440。虚拟屏用它作为逻辑尺寸，码流跟着变。";
+"server.resolution.custom.invalid" = "格式不对，应为 宽x高（640–8192）。";
+"common.ok" = "好";
+"common.cancel" = "取消";

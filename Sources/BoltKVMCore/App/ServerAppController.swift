@@ -21,6 +21,8 @@ final class ServerAppController: NSObject {
     private var detailItem: NSMenuItem?
     private var permissionItem: NSMenuItem?
     private var accessibilityItem: NSMenuItem?
+    private var resolutionMenu: NSMenu?
+    private var qualityMenu: NSMenu?
     private var loginItem: NSMenuItem?
 
     private var process: Process?
@@ -131,6 +133,16 @@ final class ServerAppController: NSObject {
         menu.addItem(toggle)
         startStopItem = toggle
 
+        let resolutionItem = NSMenuItem(title: L.t("server.menu.resolution"), action: nil, keyEquivalent: "")
+        resolutionItem.submenu = buildResolutionMenu()
+        menu.addItem(resolutionItem)
+        resolutionMenu = resolutionItem.submenu
+
+        let qualityItem = NSMenuItem(title: L.t("server.menu.quality"), action: nil, keyEquivalent: "")
+        qualityItem.submenu = buildQualityMenu()
+        menu.addItem(qualityItem)
+        qualityMenu = qualityItem.submenu
+
         let login = NSMenuItem(title: L.t("server.menu.login"), action: #selector(toggleLoginItem), keyEquivalent: "")
         login.target = self
         menu.addItem(login)
@@ -170,6 +182,104 @@ final class ServerAppController: NSObject {
 
     @objc private func toggleService() {
         wanted ? stop() : start()
+    }
+
+    private func buildResolutionMenu() -> NSMenu {
+        let menu = NSMenu(title: L.t("server.menu.resolution"))
+        let current = Prefs.serverDisplaySize
+        for (label, w, h) in Prefs.displayPresets {
+            let item = NSMenuItem(title: label, action: #selector(pickResolution(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = "\(w)x\(h)"
+            item.state = current == "\(w)x\(h)" ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let custom = NSMenuItem(title: L.t("server.menu.resolution.custom"), action: #selector(customResolution), keyEquivalent: "")
+        custom.target = self
+        menu.addItem(custom)
+        return menu
+    }
+
+    private func buildQualityMenu() -> NSMenu {
+        let menu = NSMenu(title: L.t("server.menu.quality"))
+        for (key, title) in [("standard", L.t("server.menu.quality.standard")),
+                             ("pixel", L.t("server.menu.quality.pixel"))] {
+            let item = NSMenuItem(title: title, action: #selector(pickQuality(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = key
+            item.state = Prefs.serverQuality == key ? .on : .off
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func pickResolution(_ sender: NSMenuItem) {
+        guard let size = sender.representedObject as? String else { return }
+        guard size != Prefs.serverDisplaySize else { return }
+        Prefs.serverDisplaySize = size
+        refreshMenus()
+        restartHelper()
+    }
+
+    @objc private func pickQuality(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String, key != Prefs.serverQuality else { return }
+        Prefs.serverQuality = key
+        refreshMenus()
+        restartHelper()
+    }
+
+    @objc private func customResolution() {
+        let alert = NSAlert()
+        alert.messageText = L.t("server.resolution.custom.title")
+        alert.informativeText = L.t("server.resolution.custom.detail")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        field.stringValue = Prefs.serverDisplaySize
+        alert.accessoryView = field
+        alert.addButton(withTitle: L.t("common.ok"))
+        alert.addButton(withTitle: L.t("common.cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let text = field.stringValue.trimmingCharacters(in: .whitespaces)
+        let parts = text.lowercased().split(separator: "x")
+        guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]),
+              (640...8192).contains(w), (480...8192).contains(h) else {
+            let bad = NSAlert()
+            bad.messageText = L.t("server.resolution.custom.invalid")
+            bad.addButton(withTitle: L.t("common.ok"))
+            bad.runModal()
+            return
+        }
+        Prefs.serverDisplaySize = "\(w)x\(h)"
+        refreshMenus()
+        restartHelper()
+    }
+
+    private func refreshMenus() {
+        resolutionMenu?.removeAllItems()
+        let rebuilt = buildResolutionMenu()
+        while let item = rebuilt.items.first {
+            rebuilt.removeItem(item)
+            resolutionMenu?.addItem(item)
+        }
+        qualityMenu?.removeAllItems()
+        let rebuiltQuality = buildQualityMenu()
+        while let item = rebuiltQuality.items.first {
+            rebuiltQuality.removeItem(item)
+            qualityMenu?.addItem(item)
+        }
+    }
+
+    /// Resolution and quality only take effect in the child process, so a change
+    /// means: stop the old helper, start a new one.
+    private func restartHelper() {
+        guard wanted else { return }
+        log("app: restarting helper for new display settings")
+        stopProcess()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, self.wanted else { return }
+            self.launch()
+        }
     }
 
     @objc private func openPermissions() {
@@ -216,10 +326,32 @@ final class ServerAppController: NSObject {
         Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/boltkvm-server").path
     }
 
+    /// Logical size of the virtual display, e.g. (3008, 1692).
+    private var displaySize: (Int, Int) {
+        let parts = Prefs.serverDisplaySize.lowercased().split(separator: "x")
+        if parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]), w > 0, h > 0 {
+            return (w, h)
+        }
+        return (3008, 1692)
+    }
+
+    /// Encode size. "standard" keeps the stream at most 3840 wide to stay light;
+    /// "pixel" matches the virtual display's real pixels so nothing is resampled.
+    private var streamSize: (Int, Int) {
+        let (w, h) = displaySize
+        guard Prefs.serverQuality == "pixel" else {
+            guard w > 3840 else { return (w, h) }
+            let scale = 3840.0 / Double(w)
+            return (3840, Int((Double(h) * scale).rounded()))
+        }
+        return (w * 2, h * 2)
+    }
+
     private var serverArguments: [String] {
+        let stream = streamSize
         var args = ["server",
-                    "--width", "3840",
-                    "--height", "2160",
+                    "--width", String(stream.0),
+                    "--height", String(stream.1),
                     "--port", String(Prefs.serverPort),
                     "--virtual-display", "builtin",
                     "--virtual-display-size", Prefs.serverDisplaySize]

@@ -69,3 +69,13 @@
 "server.status.needsAccessibility" = "Accessibility required";
 "server.accessibility.hint" = "Input injection needs Accessibility";
 "server.menu.accessibility" = "Grant Permission… (Accessibility)";
+"server.menu.resolution" = "Display Resolution";
+"server.menu.resolution.custom" = "Custom…";
+"server.menu.quality" = "Picture Quality";
+"server.menu.quality.standard" = "Standard (≤3840 wide)";
+"server.menu.quality.pixel" = "Sharp (virtual display pixels)";
+"server.resolution.custom.title" = "Custom resolution";
+"server.resolution.custom.detail" = "Enter WIDTHxHEIGHT, for example 2560x1440. The virtual display uses it as logical size; the stream follows.";
+"server.resolution.custom.invalid" = "That is not WIDTHxHEIGHT (640–8192).";
+"common.ok" = "OK";
+"common.cancel" = "Cancel";
