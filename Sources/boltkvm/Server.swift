@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 import ScreenCaptureKit
 import VideoToolbox
 import Darwin
+import IOKit.pwr_mgt
 
 final class Server: NSObject, SCStreamOutput {
     let captureWidth: Int
@@ -118,7 +119,27 @@ final class Server: NSObject, SCStreamOutput {
             if rst != noErr { log("encoder property \(k) -> \(rst)") }
         }
 
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        // A sleeping display makes SCShareableContent report zero displays, which
+        // surfaces as the opaque "no display" error. Declaring user activity wakes
+        // it; retry briefly because the wake is asynchronous.
+        var content: SCShareableContent? = nil
+        for attempt in 0..<5 {
+            var assertionID: IOPMAssertionID = 0
+            IOPMAssertionDeclareUserActivity(
+                "boltkvm: wake display for capture" as CFString,
+                kIOPMUserActiveLocal, &assertionID)
+            if attempt > 0 { log("no display yet; waking display and retrying (\(attempt))") }
+            do {
+                let c = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                if !c.displays.isEmpty { content = c; break }
+            } catch {
+                if attempt == 4 { throw error }
+            }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+        }
+        guard let content else {
+            throw NSError(domain: "boltkvm", code: 1, userInfo: [NSLocalizedDescriptionKey: "no display (display asleep and would not wake; try caffeinate -disu on the server)"])
+        }
         func area(_ d: SCDisplay) -> Int {
             let m = CGDisplayCopyDisplayMode(d.displayID)
             return (m?.pixelWidth ?? d.width) * (m?.pixelHeight ?? d.height)

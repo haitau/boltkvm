@@ -11,9 +11,10 @@ func usage() -> Never {
 
     server:
       boltkvm server [--width 3840] [--height 2160] [--port 7474] [--seconds 20]
+                     [--bind auto|<ipv4>] [--codec prores|hevc] [--key <psk>|--insecure]
 
     client:
-      boltkvm client [--host <mini>] [--port 7474] [--seconds 20] [--render] [--switch-mode] [--input] [--reconnect]
+      boltkvm client [--host <mini>] [--port 7474] [--seconds 20] [--render] [--switch-mode] [--input] [--reconnect] [--key <psk>]
 
     utilities:
       boltkvm doctor [--role server|client]
@@ -31,6 +32,39 @@ func argValue(_ args: [String], _ name: String, _ def: String) -> String {
 
 func argInt(_ args: [String], _ name: String, _ def: Int) -> Int {
     Int(argValue(args, name, String(def))) ?? def
+}
+
+/// Server side of the handshake: send a nonce, then wait for the matching MAC.
+/// Packets that are not the response are skipped, because the client may have
+/// queued a time-sync request before it saw the challenge.
+func authenticateServer(conn: TCPConnection, key: Data, timeoutSeconds: Int = 5) throws {
+    let nonce = randomNonce()
+    try conn.send(packet(type: .authChallenge, ptsMicros: 0, payload: nonce))
+    conn.setRecvTimeout(timeoutSeconds)
+    defer { conn.setRecvTimeout(0) }
+    let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(timeoutSeconds) * 1_000_000_000
+    let expected = authMAC(key: key, nonce: nonce)
+    while DispatchTime.now().uptimeNanoseconds < deadline {
+        let hd = try conn.recvExact(HEADER_SIZE)
+        guard let h = PacketHeader.decode(hd) else { throw POSIXError(.EBADMSG) }
+        let payload = try conn.recvExact(Int(h.payloadLength))
+        if h.type == .authResponse {
+            guard authMACMatches(expected, payload) else { throw POSIXError(.EACCES) }
+            try conn.send(packet(type: .authOk, ptsMicros: 0, payload: Data()))
+            return
+        }
+    }
+    throw POSIXError(.ETIMEDOUT)
+}
+
+func respondToAuthChallenge(conn: TCPConnection, nonce: Data) throws {
+    guard let key = resolveAuthKey(CommandLine.arguments) else {
+        // Fatal on purpose: retrying cannot help and --reconnect would spin.
+        log("server requires a pre-shared key: pass --key, set $BOLTKVM_KEY, or create ~/.boltkvm-key")
+        exit(2)
+    }
+    let mac = authMAC(key: key, nonce: nonce)
+    try conn.send(packet(type: .authResponse, ptsMicros: 0, payload: mac))
 }
 
 func timeSyncRequest() -> Data {
@@ -93,16 +127,34 @@ struct BoltKVM {
         let dump = argValue(args, "--dump", "")
         let codecName = argValue(args, "--codec", "prores")
         let codec: VideoCodec = codecName == "prores" ? .prores422 : .hevc
+        let bindSpec = argValue(args, "--bind", "auto")
+        let insecure = args.contains("--insecure")
+        let authKey = resolveAuthKey(args)
+        if authKey == nil && !insecure {
+            log("refusing to start: no pre-shared key. Pass --key, set $BOLTKVM_KEY, or create ~/.boltkvm-key; use --insecure to override")
+            exit(2)
+        }
+        if insecure { log("WARNING: --insecure — anyone who can reach this port controls the machine") }
         do {
-            let listener = try TCPListener(port: port)
+            let listener = try TCPListener(port: port, bind: bindSpec)
             let deadline: UInt64? = seconds > 0
                 ? DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
                 : nil
-            log("listening on :\(port) (\(seconds > 0 ? "\(Int(seconds))s total" : "forever")); waiting for client")
+            log("listening on \(listener.label):\(port) (\(seconds > 0 ? "\(Int(seconds))s total" : "forever")), auth=\(authKey == nil ? "OFF" : "psk"); waiting for client")
             while true {
                 if let d = deadline, DispatchTime.now().uptimeNanoseconds >= d { break }
                 let conn = try await acceptAsync(listener)
                 log("client connected")
+                if let key = authKey {
+                    do {
+                        try authenticateServer(conn: conn, key: key)
+                        log("auth ok")
+                    } catch {
+                        log("auth failed: \(error); closing")
+                        conn.close()
+                        continue
+                    }
+                }
                 let server = Server(width: width, height: height, codec: codec, connection: conn, dumpPath: dump.isEmpty ? nil : dump)
                 do {
                     try await server.start()
@@ -268,8 +320,16 @@ struct BoltKVM {
         DispatchQueue.global(qos: .userInitiated).async {
             let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
             var lastDecoder: VideoDecoder?
+            var packets = 0
+            var frames = 0
+            var reconnects = 0
+            var winBytes = 0
+            var winFrames = 0
+            var lastBeat = DispatchTime.now().uptimeNanoseconds
             while DispatchTime.now().uptimeNanoseconds < deadline {
                 var conn: TCPConnection?
+                var sawChallenge = false
+                var sawAuthOk = false
                 do {
                     let c = try tcpConnect(host: host, port: port)
                     conn = c
@@ -283,7 +343,29 @@ struct BoltKVM {
                         let hd = try c.recvExact(HEADER_SIZE)
                         guard let header = PacketHeader.decode(hd) else { throw POSIXError(.EBADMSG) }
                         let payload = try c.recvExact(Int(header.payloadLength))
-                        if header.type == .format, let f = StreamFormat.decode(payload) {
+                        packets += 1
+                        winBytes += payload.count
+                        if header.type == .frame { frames += 1; winFrames += 1 }
+                        let beatNow = DispatchTime.now().uptimeNanoseconds
+                        if beatNow - lastBeat >= 60_000_000_000 {
+                            let secs = Double(beatNow - lastBeat) / 1e9
+                            let mbps = secs > 0 ? Double(winBytes) * 8 / secs / 1e6 : 0
+                            let kbFrame = winFrames > 0 ? Double(winBytes) / Double(winFrames) / 1024 : 0
+                            let budget = Renderer.budget(forFrameKB: kbFrame)
+                            RenderSession.shared.renderer?.setBudget(budget)
+                            lastBeat = beatNow
+                            log(String(format: "loop.win packets=%d frames=%d reconnects=%d mbps=%.1f kbFrame=%.0f budget=%.0fms",
+                                       packets, frames, reconnects, mbps, kbFrame, budget))
+                            winBytes = 0
+                            winFrames = 0
+                        }
+                        if header.type == .authChallenge {
+                            sawChallenge = true
+                            try respondToAuthChallenge(conn: c, nonce: payload)
+                        } else if header.type == .authOk {
+                            sawAuthOk = true
+                            log("auth ok")
+                        } else if header.type == .format, let f = StreamFormat.decode(payload) {
                             try decoder.configure(f)
                             if wantsInput && !inputStarted {
                                 inputStarted = true
@@ -300,7 +382,14 @@ struct BoltKVM {
                     c.close()
                     break
                 } catch {
-                    log("client render error: \(error)")
+                    if sawChallenge && !sawAuthOk {
+                        // Wrong key: the server closed after the challenge. Retrying
+                        // with the same key cannot succeed.
+                        log("auth rejected by server: check ~/.boltkvm-key on both ends (not retrying)")
+                        break
+                    }
+                    reconnects += 1
+                    log("client render error: \(error) (reconnect \(reconnects))")
                     conn?.close()
                     DispatchQueue.main.async { RenderSession.shared.stopInput() }
                     if !reconnect { break }
@@ -327,13 +416,21 @@ struct BoltKVM {
             let decoder = VideoDecoder()
             let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
             var received = 0
+            var packets = 0
             var lastHeader: PacketHeader?
+            var lastBeat = DispatchTime.now().uptimeNanoseconds
             while DispatchTime.now().uptimeNanoseconds < deadline {
                 do {
                     let hd = try conn.recvExact(HEADER_SIZE)
                     guard let header = PacketHeader.decode(hd) else { throw POSIXError(.EBADMSG) }
                     lastHeader = header
                     let payload = try conn.recvExact(Int(header.payloadLength))
+                    packets += 1
+                    let beatNow = DispatchTime.now().uptimeNanoseconds
+                    if beatNow - lastBeat >= 60_000_000_000 {
+                        lastBeat = beatNow
+                        log("loop.win packets=\(packets) received=\(received)")
+                    }
                     switch header.type {
                     case .format:
                         if let f = StreamFormat.decode(payload) {
@@ -346,7 +443,11 @@ struct BoltKVM {
                         break
                     case .timeSync:
                         handleTimeSync(header, payload, decoder: decoder)
-                    case .input:
+                    case .authChallenge:
+                        try respondToAuthChallenge(conn: conn, nonce: payload)
+                    case .authOk:
+                        log("auth ok")
+                    case .input, .authResponse:
                         break
                     }
                 } catch {

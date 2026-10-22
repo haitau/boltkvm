@@ -23,6 +23,8 @@ final class InputCapture {
     private var source: CFRunLoopSource?
     private var active = false
     private var sent = 0
+    private var tapDisabled = 0
+    private let statsLock = NSLock()
     private let displayBounds: CGRect
     private let tapLocation: CGEventTapLocation
 
@@ -76,6 +78,16 @@ final class InputCapture {
         return true
     }
 
+    var sentEvents: Int {
+        statsLock.lock(); defer { statsLock.unlock() }
+        return sent
+    }
+
+    var tapDisabledCount: Int {
+        statsLock.lock(); defer { statsLock.unlock() }
+        return tapDisabled
+    }
+
     func stop() {
         guard active else { return }
         active = false
@@ -86,11 +98,14 @@ final class InputCapture {
         tap = nil
         source = nil
         CGDisplayShowCursor(CGMainDisplayID())
-        log("input: capture stopped sent=\(sent)")
+        log("input: capture stopped sent=\(sentEvents)")
     }
 
     fileprivate func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            // Counted so a long run can tell "the system killed the tap"
+            // (lock screen / secure input / slow callback) from "no input happened".
+            statsLock.lock(); tapDisabled += 1; statsLock.unlock()
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return Unmanaged.passUnretained(event)
         }
@@ -153,7 +168,7 @@ final class InputCapture {
         do {
             let pkt = packet(type: .input, ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000), payload: ev.encode())
             try conn.send(pkt)
-            sent += 1
+            statsLock.lock(); sent += 1; statsLock.unlock()
         } catch {
             log("input: send failed: \(error)")
             stop()

@@ -109,10 +109,22 @@ received frames=... lastType=heartbeat
 
 ## 6. 延迟预算告警
 
-- 客户端 render P95 > 33ms 记 `WARNING`；
+- 客户端 render P95 超过**分档预算**（见 6.1）记 `WARNING`；33ms 仍是产品 SLO，单独统计命中率；
 - decoder P95 > 33ms 或解码失败记 `WARNING`；
 - 服务端编码均值 > 12ms 或丢帧比例 > 1% 记 `WARNING`；
-- 时钟同步 RTT > 20ms 时抑制延迟统计，避免把队列抖动误报成延迟超标。
+- 时钟同步 RTT > 20ms 时抑制解码侧延迟统计，避免把队列抖动误报成延迟超标（渲染侧统计不受此门槛影响）。
+
+### 6.1 分档（2026-10-22 定）
+
+排队延迟随编码帧大小上升，固定 33ms 在 4K ProRes 下必然每分钟告警（8 小时长稳刷了 480 条）。改为按客户端实测的每帧字节数分档：
+
+| 帧大小 | 预算 | 典型场景 | 实测 p95 |
+|---|---|---|---|
+| < 64 KB | 33 ms | 1080p UI / 轻内容 | 25 KB → 35.9 ms |
+| 64–512 KB | 40 ms | 4K 轻内容 | 89 KB → 30.5 ms |
+| ≥ 512 KB | 55 ms | 4K ProRes 422 @ 60fps | 2480 KB → 48.4 ms |
+
+实现：接收循环每 60s 用窗口内 `winBytes/winFrames` 算平均帧大小，`Renderer.budget(forFrameKB:)` 选档写入渲染器；`render.win` 行携带 `budget=XXms`，只在超过分档预算时告警；退出时另打一行 `SLO33 windows hit=N/M` 保留 33ms 产品口的命中率。
 
 ## 7. 5 分钟短稳
 
@@ -121,9 +133,9 @@ received frames=... lastType=heartbeat
 - 静止后心跳维持连接，客户端 300s 正常退出；
 - watchdog 同时在线，显示未丢失。
 
-## 8. 8 小时长稳（待执行）
+## 8. 8 小时长稳（已执行）
 
-需要夜间无人占用 MacBook：
+2026-10-21 19:10 → 10-22 03:10 已跑完，结论、数据与分档复核见 [8 小时长稳结论](2026-10-22-m3-soak-8h.md)。下面是当时的执行方式，仍可复用：
 
 ```bash
 # mini（watchdog 已装）
@@ -136,12 +148,36 @@ received frames=... lastType=heartbeat
 
 观察项：断连次数、watchdog 重建次数、服务端 dropped、客户端 P95 漂移、输入是否持续可用。
 
+### 8.1 执行方式（2026-10-21 修订）
+
+起跑前用 `scripts/soak-preflight.sh --host <mini>` 自检（caffeinate 标志、pmset 断言、
+电源、TCP 可达、残留进程），它同时创建 run 目录并打印双端命令；起跑后把
+`scripts/soak-monitor.sh` 挂上做 5 分钟粒度采样，明早直接看 `monitor.tsv`。
+
+```bash
+scripts/soak-preflight.sh --host <mini>
+nohup .build/release/boltkvm client ... 2>&1 | tee ~/soak/<run>/client.log &
+nohup scripts/soak-monitor.sh --client-log ~/soak/<run>/client.log &
+```
+
+两点读数口径，避免误判：
+
+- **客户端每 60s 打一行** `render.win`（窗口 fps/p95）与 `loop.win`（包数/重连数）、
+  `input.win`（sent/tapDisabled）。窗口 `frames=0` 说明显示休眠或渲染停摆，不是链路故障；
+  `tapDisabled` 增长说明输入 tap 被系统禁用（锁屏 / secure input / 回调超时），不是输入源问题。
+- **客户端 recv 超时 10s**（服务端心跳 1s），所以"断连次数"必须区分：
+  `monitor.tsv` 的 `reconnects` 是成功重连数，`read_errors` 含 10s 抖动触发的重连；
+  两者都高才是真链路问题。
+- 客户端渲染路径原先没有 `beginActivity` 断言，显示休眠会静默停掉渲染段，已补齐（与 server 同 options）。
+
 ## 9. 尚未覆盖
 
-- 真实 8 小时运行；
+- 输入连续性（8 小时长稳期间无人操作，只验证了 tap 存活）；
 - 睡眠/唤醒、拔插雷雳线、网络切换的恢复；
-- VNC 预登录救援（FileVault 已关闭、自动登录开启，重启链路尚未复测）；
-- macOS 升级后的 TCC 重新授权演练。
+- 锁屏界面能否用注入事件解锁（重启后服务恢复已验，见 §12；解锁本身未验证）；
+- VNC 预登录救援（自动登录已可用，预登录窗口未单独验证）；
+- macOS 升级后的 TCC 重新授权演练；
+- 音频隔离实测。
 
 ## 10. watchdog v1 误判与修复（2026-10-21）
 
@@ -175,3 +211,60 @@ watchdog --once → exit=0，vdscreen PID 不变
 ```
 
 v1 日志保留在 `~/Library/Logs/boltkvm-watchdog.log.old` 作为证据；当前运行的是修复后的 v2。
+
+## 11. 传输认证与监听范围（2026-10-22）
+
+原始实现 `bind(INADDR_ANY)` 且无任何握手校验：任何能连到 7474 的机器都能取画面并注入键鼠，与设计文档“雷雳直连使用配对密钥、不监听对外接口”不符。改动：
+
+- **监听范围**：`TCPListener` 增加 `--bind`，默认 `auto` —— 取 `getifaddrs` 里第一个 `bridge*` 接口的 IPv4；找不到就直接报错并提示显式指定。`--bind 0.0.0.0` 仍可用但会打警告。
+- **认证**：预共享密钥 + 挑战应答。服务端 accept 后发 `authChallenge`（32 字节 `SecRandomCopyBytes` 随机数），客户端回 `authResponse` = HMAC-SHA256(key, nonce)，服务端常数时间比较后回 `authOk`；不等长或超时（5s）一律断开。密钥来源 `--key` > `$BOLTKVM_KEY` > `~/.boltkvm-key`（64 位 hex 按原始字节解，其余按 UTF-8）。
+- **默认安全**：没有密钥且未显式 `--insecure` 时服务端拒绝启动；`--insecure` 会打一行警告。
+- 认证阶段会跳过非 `authResponse` 的包，因为客户端可能在看到 challenge 之前就发了 time-sync 请求。
+
+验证（2026-10-22，本机 + 雷雳桥各一轮）：
+
+| 场景 | 结果 |
+|---|---|
+| 无密钥、无 `--insecure` | 拒绝启动，提示补齐密钥 |
+| 正确密钥 | 两端 `auth ok`，8s 收到 157 帧（雷雳桥） |
+| 错误密钥 | 服务端 `auth failed ... Permission denied`，连接被重置 |
+| 客户端无密钥 | 客户端提示建 key 的三种方式后退出（EACCES） |
+| `--insecure` | 正常出流，日志有警告 |
+| 默认绑定 | `listening on bridge0 <bridge-ip>:7474`（仅雷雳桥） |
+
+仍存在的限制：链路是明文 TCP，密钥只解决“谁能连”，不解决“谁能看”；重放同一 nonce 无效，但密钥泄露即等于交出这台机器。
+
+## 12. 重启恢复验证（2026-10-22）
+
+触发方式：`ssh mini 'osascript -e "tell application \"System Events\" to restart"'`，无需 sudo，rc=0。
+
+| 阶段 | 结果 |
+|---|---|
+| 触发 → sshd 重新可用 | 约 25 s |
+| 自动登录 | FileVault Off、`autoLoginUser=shawn`；登录窗口过后直接进桌面会话（`who` 显示 console） |
+| 虚拟显示 | `io.github.lyondan.vdscreen` LaunchAgent 自动拉起，6016×3384 @60Hz，`Online: Yes` |
+| 看门狗 | `com.boltkvm.watchdog` 运行（`launchctl list` 可见，KeepAlive 生效） |
+| 服务端 | 从 ssh 执行 `open -a Terminal` 启动成功；`auth ok`；capture 正常出帧 |
+| 会话状态 | **锁屏**：`CGSSessionScreenIsLocked = true`。`com.shawn.autolock-after-boot` 在启动 30 s 后执行 `pmset displaysleepnow` |
+| 显示器休眠后 | 新会话报 `no display`（`SCShareableContent` 返回 0 个屏），重启服务端即恢复 |
+
+结论：**进程层与服务层的恢复是全自动的，恢复到"可用桌面"不是**——重启后停在锁屏，需要输入密码。
+
+同一轮补的修复（`Server.start()`）：取显示器前先用 `IOPMAssertionDeclareUserActivity` 唤醒显示器，最多重试 5 次（间隔 0.7 s），失败时错误信息提示 `caffeinate -disu`。该路径今天没有复现出失败，属于预防性改动。
+
+### 12.1 无人值守自启（同日第二轮重启）
+
+第一轮之后补了三件事并重测：服务端自启、守护、屏幕共享救援。
+
+| 尝试 | 结果 |
+|---|---|
+| LaunchAgent 直接托管 `boltkvm server` | **失败**：`Screen Recording permission missing`。TCC 归属是 Terminal（GUI app），launchd 拉起时责任方不是它 |
+| 登录项指向 `soak-start.command` | **成功**：重启后 Terminal 自动打开并起服务端，客户端直连出 465 帧 |
+| 服务端守护 | `soak-start.sh` 改 `while` 循环；`pkill` 后 3 秒自动重启（实测 10:30:29 杀、10:30:32 起） |
+| 单实例守卫 | PID 文件 + `kill -0`；重复执行脚本只打印 "another supervisor is already running" 并退出，避免重复打开时抢 7474 |
+| 屏幕共享 | 5900 可达，返回 `RFB 003.889`，锁屏态同样应答——这是不依赖 boltkvm 的解锁通道 |
+
+第二轮重启（10:29:17 引导，10:29:31 ssh 恢复）全自动完成：自动登录 → vdscreen/watchdog → 登录项起服务端 → 客户端出帧，无需人工介入。
+
+仍未验证：锁屏界面能否被注入事件解锁。需要真密码，且 macOS 对登录窗口的合成事件策略没有公开保证；现在的做法是不依赖它——解锁走屏幕共享。
+

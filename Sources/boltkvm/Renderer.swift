@@ -62,9 +62,22 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var loggedTexture = false
     private var frames = 0
     private var firstAt: UInt64 = 0
+    // Rolling window, reset by reportWindow() so a long run yields a time
+    // series (fps/P95 drift) instead of a single number at exit.
+    private var winFrames = 0
+    private var winLatencies: [Double] = []
+    private var winStart: UInt64 = 0
+    // Queueing delay scales with encoded frame size, so the alert line has to
+    // as well. Measured 2026-10-22 (4K drawable, 51 fps present ceiling):
+    // 25 KB/frame -> p95 35.9 ms, 89 KB -> 30.5 ms, 2480 KB -> 48.4 ms.
+    private var budgetMs: Double = 33
+    private var sloWindows = 0
+    private var sloHits = 0
+    private var tierBreaches = 0
 
     init(device: MTLDevice) throws {
         self.device = device
+        winStart = DispatchTime.now().uptimeNanoseconds
         guard let q = device.makeCommandQueue() else { throw NSError(domain: "render", code: 1) }
         queue = q
         view = MTKView(frame: .zero, device: device)
@@ -202,27 +215,89 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         let latency = Double(Int64(Date().timeIntervalSince1970 * 1_000_000) - captureMicros) / 1000.0
         lock.lock()
-        if captureMicros > 0 && latency > 0 && latency < 10_000 { latencies.append(latency) }
+        if captureMicros > 0 && latency > 0 && latency < 10_000 {
+            latencies.append(latency)
+            winLatencies.append(latency)
+        }
         frames += 1
+        winFrames += 1
         if firstAt == 0 { firstAt = DispatchTime.now().uptimeNanoseconds }
         lock.unlock()
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
+    /// Called by the receive loop each window with the average encoded frame
+    /// size. The 33 ms SLO stays the product target; this only sets the alert
+    /// line so a 1.2 Gbps ProRes stream stops flagging every single minute.
+    func setBudget(_ ms: Double) {
+        lock.lock(); budgetMs = ms; lock.unlock()
+    }
+
+    static func budget(forFrameKB kb: Double) -> Double {
+        if kb >= 512 { return 55 }
+        if kb >= 64 { return 40 }
+        return 33
+    }
+
     func report() {
+        // Copy under the lock: draw() keeps appending from the render thread,
+        // and reading the array outside the lock raced with it.
         lock.lock()
         let f = frames, first = firstAt
+        let sorted = latencies.sorted()
+        let budget = budgetMs
         lock.unlock()
         let e = first > 0 ? Double(DispatchTime.now().uptimeNanoseconds - first) / 1e9 : 0
-        let sorted = latencies.sorted()
         let p50 = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
         let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
         let maxv = sorted.last ?? 0
         log(String(format: "render frames=%d elapsed=%.2fs fps=%.1f drawable=%.0fx%.0f latency p50=%.1fms p95=%.1fms max=%.1fms",
                    f, e, e > 0 ? Double(f) / e : 0,
                    view.drawableSize.width, view.drawableSize.height, p50, p95, maxv))
-        if p95 > 33 { log("WARNING: capture→present P95 \(String(format: "%.1f", p95))ms exceeds 33ms budget") }
+        log(String(format: "SLO33 windows hit=%d/%d (%.0f%%) tierBreaches=%d",
+                   sloHits, sloWindows,
+                   sloWindows > 0 ? Double(sloHits) / Double(sloWindows) * 100 : 0, tierBreaches))
+        if p95 > budget { log("WARNING: capture→present P95 \(String(format: "%.1f", p95))ms exceeds tier budget \(String(format: "%.0f", budget))ms") }
+    }
+
+    /// Per-interval line for long runs: each call covers the frames drawn since
+    /// the previous call, so drift shows up as a series of 60s windows.
+    func reportWindow() {
+        lock.lock()
+        let now = DispatchTime.now().uptimeNanoseconds
+        let start = winStart == 0 ? now : winStart
+        let f = winFrames
+        let sorted = winLatencies.sorted()
+        winFrames = 0
+        winLatencies.removeAll(keepingCapacity: true)
+        winStart = now
+        let total = frames
+        lock.unlock()
+
+        lock.lock()
+        let budget = budgetMs
+        lock.unlock()
+        let e = Double(now - start) / 1e9
+        let p50 = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
+        let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+        let maxv = sorted.last ?? 0
+        log(String(format: "render.win elapsed=%.1fs frames=%d total=%d fps=%.1f drawable=%.0fx%.0f p50=%.1fms p95=%.1fms max=%.1fms budget=%.0fms",
+                   e, f, total, e > 0 ? Double(f) / e : 0,
+                   view.drawableSize.width, view.drawableSize.height, p50, p95, maxv, budget))
+        lock.lock()
+        if sorted.count > 0 {
+            sloWindows += 1
+            if p95 <= 33 { sloHits += 1 }
+            if p95 > budget { tierBreaches += 1 }
+        }
+        lock.unlock()
+        if sorted.count > 0 && p95 > budget {
+            log("WARNING: window P95 \(String(format: "%.1f", p95))ms exceeds tier budget \(String(format: "%.0f", budget))ms (SLO 33ms)")
+        }
+        if f == 0 {
+            log("WARNING: window drew 0 frames (display asleep, occluded, or decoder stalled)")
+        }
     }
 }
 
@@ -234,6 +309,8 @@ final class RenderSession: NSObject, NSApplicationDelegate {
     private var switchedMode = false
     var decoder: VideoDecoder?
     private(set) var inputCapture: InputCapture?
+    private var statsTimer: DispatchSourceTimer?
+    private var activity: NSObjectProtocol?
 
     func stopInput() {
         inputCapture?.stop()
@@ -257,6 +334,13 @@ final class RenderSession: NSObject, NSApplicationDelegate {
 
     func start(switchMode: Bool) {
         guard let device = MTLCreateSystemDefaultDevice() else { fatalError("no Metal device") }
+        // The server and pattern modes already assert this; the render client did
+        // not, so macOS was free to sleep the display mid-run, which stalls
+        // MTKView and silently zeroes the render leg of a long test.
+        activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .idleDisplaySleepDisabled, .latencyCritical],
+            reason: "boltkvm client render"
+        )
         do {
             let r = try Renderer(device: device)
             renderer = r
@@ -283,14 +367,32 @@ final class RenderSession: NSObject, NSApplicationDelegate {
             r.view.needsDisplay = true
             w.displayIfNeeded()
             log("render window ready drawable=\(r.view.drawableSize.width)x\(r.view.drawableSize.height) switched=\(switchedMode)")
+            // 60s cadence: one line per minute makes an 8h run a readable
+            // series (fps/P95 drift, input liveness) instead of a single tail.
+            let t = DispatchSource.makeTimerSource(queue: .main)
+            t.schedule(deadline: .now() + 60, repeating: 60)
+            t.setEventHandler { [weak self] in
+                guard let self else { return }
+                self.renderer?.reportWindow()
+                if let cap = self.inputCapture {
+                    log("input.win sent=\(cap.sentEvents) tapDisabled=\(cap.tapDisabledCount)")
+                } else {
+                    log("input.win active=0")
+                }
+            }
+            t.resume()
+            statsTimer = t
         } catch {
             log("renderer init failed: \(error)")
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        statsTimer?.cancel()
+        statsTimer = nil
         inputCapture?.stop()
         if switchedMode { modeSwitcher.restore() }
         renderer?.report()
+        if let activity { ProcessInfo.processInfo.endActivity(activity) }
     }
 }

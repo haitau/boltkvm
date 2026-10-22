@@ -1,5 +1,7 @@
 import Foundation
 import Darwin
+import CryptoKit
+import Security
 
 // MARK: - Wire format
 //
@@ -22,6 +24,9 @@ enum PacketType: UInt8 {
     case heartbeat = 3
     case timeSync = 4
     case input = 5
+    case authChallenge = 6
+    case authResponse = 7
+    case authOk = 8
 }
 
 struct PacketHeader {
@@ -208,6 +213,60 @@ extension Data {
     }
 }
 
+// MARK: - Auth
+//
+// The server listens on the Thunderbolt bridge only by default, and unless it is
+// started with --insecure it also requires a pre-shared key: it sends a 32-byte
+// nonce and expects HMAC-SHA256(key, nonce) back.
+//
+// Key resolution order: --key, $BOLTKVM_KEY, ~/.boltkvm-key (first non-empty
+// line). A 64-char hex string is decoded as raw bytes, anything else is hashed
+// as UTF-8 so a passphrase works too.
+
+func resolveAuthKey(_ args: [String]) -> Data? {
+    var candidates: [String] = []
+    let flag = argValue(args, "--key", "")
+    if !flag.isEmpty { candidates.append(flag) }
+    if let env = ProcessInfo.processInfo.environment["BOLTKVM_KEY"], !env.isEmpty { candidates.append(env) }
+    let path = (ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()) + "/.boltkvm-key"
+    if let text = try? String(contentsOfFile: path, encoding: .utf8) {
+        let line = (text.split(separator: "\n").first.map(String.init) ?? "").trimmingCharacters(in: .whitespaces)
+        if !line.isEmpty { candidates.append(line) }
+    }
+    guard let raw = candidates.first else { return nil }
+    if raw.count == 64, raw.allSatisfy({ $0.isHexDigit }) {
+        var out = Data(capacity: 32)
+        var i = raw.startIndex
+        while i < raw.endIndex {
+            let j = raw.index(i, offsetBy: 2)
+            guard let b = UInt8(raw[i..<j], radix: 16) else { return Data(raw.utf8) }
+            out.append(b)
+            i = j
+        }
+        return out
+    }
+    return Data(raw.utf8)
+}
+
+func authMAC(key: Data, nonce: Data) -> Data {
+    Data(HMAC<SHA256>.authenticationCode(for: nonce, using: SymmetricKey(data: key)))
+}
+
+func authMACMatches(_ a: Data, _ b: Data) -> Bool {
+    guard a.count == b.count else { return false }
+    var diff: UInt8 = 0
+    for (x, y) in zip(a, b) { diff |= x ^ y }
+    return diff == 0
+}
+
+func randomNonce(_ count: Int = 32) -> Data {
+    var d = Data(count: count)
+    d.withUnsafeMutableBytes { ptr in
+        if let base = ptr.baseAddress { _ = SecRandomCopyBytes(kSecRandomDefault, count, base) }
+    }
+    return d
+}
+
 // MARK: - TCP
 
 final class TCPConnection {
@@ -252,12 +311,64 @@ final class TCPConnection {
         return out
     }
 
+    func setRecvTimeout(_ seconds: Int) {
+        var tv = timeval(tv_sec: seconds, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    }
+
     func close() { Darwin.close(fd) }
+}
+
+struct BindTarget {
+    let addr: in_addr
+    let label: String
+}
+
+func ipv4String(_ a: in_addr) -> String {
+    var x = a
+    var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+    inet_ntop(AF_INET, &x, &buf, socklen_t(INET_ADDRSTRLEN))
+    return String(cString: buf)
+}
+
+/// "auto" picks the first address on a Thunderbolt bridge (`bridge*`), so the
+/// server is not reachable from Wi-Fi by default. Pass an explicit IPv4 address
+/// to override, e.g. `--bind 127.0.0.1` for same-host tests.
+func resolveBindAddress(_ spec: String) throws -> BindTarget {
+    if spec == "auto" {
+        var ifap: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifap) == 0, let head = ifap else {
+            throw NSError(domain: "boltkvm", code: 2001,
+                          userInfo: [NSLocalizedDescriptionKey: "getifaddrs failed; pass --bind <ipv4>"])
+        }
+        defer { freeifaddrs(ifap) }
+        var cur: UnsafeMutablePointer<ifaddrs>? = head
+        while let c = cur {
+            let name = String(cString: c.pointee.ifa_name)
+            if name.hasPrefix("bridge"), let sa = c.pointee.ifa_addr,
+               sa.pointee.sa_family == sa_family_t(AF_INET) {
+                let a = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+                return BindTarget(addr: a, label: "\(name) \(ipv4String(a))")
+            }
+            cur = c.pointee.ifa_next
+        }
+        throw NSError(domain: "boltkvm", code: 2002, userInfo: [NSLocalizedDescriptionKey:
+            "no Thunderbolt bridge address found; pass --bind 127.0.0.1 (loopback test) or --bind 0.0.0.0 (all interfaces)"])
+    }
+    var a = in_addr()
+    guard inet_pton(AF_INET, spec, &a) == 1 else {
+        throw NSError(domain: "boltkvm", code: 2003,
+                      userInfo: [NSLocalizedDescriptionKey: "invalid --bind address '\(spec)'"])
+    }
+    return BindTarget(addr: a, label: spec)
 }
 
 final class TCPListener {
     let fd: Int32
-    init(port: UInt16) throws {
+    let label: String
+    init(port: UInt16, bind spec: String = "auto") throws {
+        let target = try resolveBindAddress(spec)
+        label = target.label
         fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { throw POSIXError(.EIO) }
         var one: Int32 = 1
@@ -266,7 +377,7 @@ final class TCPListener {
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
-        addr.sin_addr = in_addr(s_addr: INADDR_ANY)
+        addr.sin_addr = target.addr
         let bindResult = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
