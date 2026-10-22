@@ -192,8 +192,8 @@ Packaging/
 | 2 | 默认改成 builtin，服务端按 displayID 精确采集，mini 上移走 vdscreen.app 与它的 LaunchAgent | **已完成 2026-10-22**：单块内建屏 3008×1692/6016×3384 HiDPI，客户端 588 帧 / 10 s（59 fps），服务端 `captured=480 fps=59.8`；`boltkvm displays` 只剩一块 | 0.5 天 |
 | 3 | 抽出 `BoltKVMCore`（Protocol/Server/Renderer/Audio/VirtualDisplay/Client/InputCapture/Watchdog 移入），CLI 变成 40 行调度器 | **已完成 2026-10-22**：`swift build` 通过，`cryptotest` PASS，`doctor` 四项全 PASS，客户端 587 帧 / 10 s、服务端 `fps=59.8 dropped=0` | 1–2 天 |
 | 4 | 单 app 骨架：角色选择、菜单栏常驻、client 全屏窗口 + 输入 + 连接面板 | **客户端已完成 2026-10-22**：`dist/BoltKVM.app` 首启选角色，连接面板连上 mini 后 decode 60.5 fps / render 55.4 fps（窗口 2400×1448）；服务端角色已实现但未在 mini 实测；输入延迟与全屏未实测 | 3–4 天 |
-| 5 | server 角色：无窗口菜单栏、状态项、权限引导、SMAppService 自启、单实例锁 | 菜单栏 + 权限引导已实现；`SMAppService` 与单实例锁未做 | 2–3 天 |
-| 6 | `Packaging/build-app.sh` + 图标 + 自签名证书 | 一条命令产出 BoltKVM.app；`codesign -dv` 身份稳定，重编译后 TCC 不丢 | 1–2 天 |
+| 5 | server 角色：无窗口菜单栏、状态项、权限引导、SMAppService 自启、单实例锁 | **已完成 2026-10-22（待联调）**：状态项 + 非模态权限引导（不再用模态框卡启动）、`SMAppService.mainApp` 开机自启开关、单实例锁（第二个实例激活旧实例后退出）。真正起服务要人工授权屏幕录制一次 | 2–3 天 |
+| 6 | `Packaging/build-app.sh` + 图标 + 自签名证书 | **已完成 2026-10-22**：`scripts/make-icon.swift` 代码画图标 → `AppIcon.icns`；`scripts/make-signing-identity.sh` 一键生成并信任 "BoltKVM Local"（无开发者账号、无 sudo）；`codesign -dvvv` 显示 CMS 签名 + hardened runtime（size=1678，非 adhoc） | 1–2 天 |
 
 合计约 **10–16 个工作日**。阶段 1–2 是纯收益（少一个进程、少一个 LaunchAgent），阶段 4–6 才是"像个 app"。
 
@@ -211,6 +211,19 @@ Packaging/
 ### 4.2 本地网络权限（macOS 15+）
 
 app 第一次连内网地址报 `No route to host`：macOS 15 起「本地网络」是独立 TCC 项，Info.plist 必须带 `NSLocalNetworkUsageDescription`，否则连接直接被拒，错误信息完全看不出是权限问题。补上后立刻 60 fps。ad-hoc 签名每次构建 cdhash 都变，等于每次都是新 app，权限要重给——这是阶段 6 自签名证书要解决的核心问题。
+
+### 4.3 签名身份与 TCC
+
+ad-hoc 签名（`-`）每次构建 cdhash 都变，macOS 把每个构建当成新 app，屏幕录制、本地网络、输入监控的授权全部作废——今天被这件事咬了三次。解法是用自己的代码签名证书：
+
+```bash
+./scripts/make-signing-identity.sh                  # 生成并信任 "BoltKVM Local"（用户域，不需要 sudo）
+BOLTKVM_CODESIGN_IDENTITY="BoltKVM Local" ./Packaging/build-app.sh
+```
+
+证书自签、没有 Team ID，但 TCC 认的是「bundle id + 证书叶」，同一张证书重复签名身份不变，授权就不再丢。`codesign -dvvv` 里的 `Signature size=1678` + `flags=0x10000(runtime)` 说明确实带上了签名。
+
+图标也是代码：`swift scripts/make-icon.swift Packaging/AppIcon.icns`，仓库里不放二进制素材。
 
 ## 5. 收益量化
 

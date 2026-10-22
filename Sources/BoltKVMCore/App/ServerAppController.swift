@@ -1,11 +1,14 @@
 import AppKit
 import Foundation
+import ServiceManagement
 
 /// Server role: no window, a menu bar item, and a listener. The heavy lifting is
 /// the same code the CLI runs — this only owns lifecycle and permissions.
 final class ServerAppController: NSObject {
     private var statusItem: NSStatusItem?
     private var startStopItem: NSMenuItem?
+    private var loginItem: NSMenuItem?
+    private var permissionItem: NSMenuItem?
     private var stateItem: NSMenuItem?
     private var detailItem: NSMenuItem?
 
@@ -18,13 +21,26 @@ final class ServerAppController: NSObject {
 
     func startAutomatically() {
         installStatusItem()
+        log("app: server role starting (screen recording granted: \(CGPreflightScreenCaptureAccess()))")
         guard CGPreflightScreenCaptureAccess() else {
-            setState("等待屏幕录制权限")
-            requestScreenRecording()
+            // Never block launch with a modal dialog: the menu bar is the only
+            // UI a server has, so the permission lives there too.
+            setState("需要屏幕录制权限", detail: "点「授权…」")
+            permissionItem?.isHidden = false
+            log("app: screen recording permission missing; waiting for the user")
             return
         }
+        permissionItem?.isHidden = true
         _ = AppKey.ensure()
         start()
+    }
+
+    /// Registers the app in the Screen Recording list and opens the pane. The
+    /// grant itself needs a human click; nothing here can fake it.
+    @objc private func openPermissions() {
+        _ = CGRequestScreenCaptureAccess()
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+        NSWorkspace.shared.open(url)
     }
 
     func shutdown() {
@@ -56,6 +72,16 @@ final class ServerAppController: NSObject {
         toggle.target = self
         menu.addItem(toggle)
         startStopItem = toggle
+        let permission = NSMenuItem(title: "授权…（屏幕录制）", action: #selector(openPermissions), keyEquivalent: "")
+        permission.target = self
+        permission.isHidden = true
+        menu.addItem(permission)
+        permissionItem = permission
+        let login = NSMenuItem(title: "开机自动启动", action: #selector(toggleLoginItem), keyEquivalent: "")
+        login.target = self
+        menu.addItem(login)
+        loginItem = login
+        updateLoginItem()
         let log = NSMenuItem(title: "打开日志", action: #selector(openLog), keyEquivalent: "")
         log.target = self
         menu.addItem(log)
@@ -89,20 +115,29 @@ final class ServerAppController: NSObject {
         running ? stop() : start()
     }
 
-    @objc private func openLog() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: AppLog.path))
+    @objc private func toggleLoginItem() {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            log("login item: \(error)")
+            let alert = NSAlert()
+            alert.messageText = "设置开机自启失败"
+            alert.informativeText = "\(error.localizedDescription)\n\nad-hoc 签名的 app 不能注册登录项，需要用自签名证书重新签名（见 Packaging/build-app.sh 的 BOLTKVM_CODESIGN_IDENTITY）。"
+            alert.runModal()
+        }
+        updateLoginItem()
     }
 
-    private func requestScreenRecording() {
-        let alert = NSAlert()
-        alert.messageText = "需要「屏幕录制」权限"
-        alert.informativeText = "BoltKVM 靠 ScreenCaptureKit 抓取屏幕。请在系统设置的「隐私与安全性 → 屏幕录制」里勾选 BoltKVM，然后回到菜单栏重新启动服务。"
-        alert.addButton(withTitle: "打开系统设置")
-        alert.addButton(withTitle: "稍后")
-        if alert.runModal() == .alertFirstButtonReturn {
-            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
-            NSWorkspace.shared.open(url)
-        }
+    private func updateLoginItem() {
+        loginItem?.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    }
+
+    @objc private func openLog() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: AppLog.path))
     }
 
     func start() {
@@ -138,6 +173,7 @@ final class ServerAppController: NSObject {
                 let listener = try TCPListener(port: port, bind: "auto")
                 self.listener = listener
                 self.setState("监听中", detail: "\(listener.label):\(port)")
+                log("app: listening on \(listener.label):\(port)")
                 while !Task.isCancelled {
                     let conn = try await acceptAsync(listener)
                     if Task.isCancelled { conn.close(); break }
@@ -148,6 +184,7 @@ final class ServerAppController: NSObject {
             } catch {
                 if !Task.isCancelled {
                     self.setState("启动失败", detail: error.localizedDescription)
+                    log("app: listener failed: \(error)")
                 }
             }
         }

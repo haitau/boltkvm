@@ -51,7 +51,14 @@ open dist/BoltKVM.app             # 首次启动选「被控端」还是「主�
 
 `Info.plist` 里的 `NSLocalNetworkUsageDescription` 是硬要求：macOS 15 起连内网地址属于「本地网络」权限，缺了会直接 `No route to host`。
 
-ad-hoc 签名（默认 `-`）每次构建 cdhash 都会变，TCC 会当成新 app、权限要重给；要固定身份就用自己的自签名证书并设 `BOLTKVM_CODESIGN_IDENTITY`。
+ad-hoc 签名（默认 `-`）每次构建 cdhash 都会变，TCC 会当成新 app、权限要重给。一次性建立稳定身份：
+
+```bash
+./scripts/make-signing-identity.sh                                   # 生成并信任 "BoltKVM Local"
+BOLTKVM_CODESIGN_IDENTITY="BoltKVM Local" ./Packaging/build-app.sh    # 之后每次这样构建
+```
+
+图标由 `swift scripts/make-icon.swift Packaging/AppIcon.icns` 生成，仓库不放二进制素材。
 
 ## 快速开始
 

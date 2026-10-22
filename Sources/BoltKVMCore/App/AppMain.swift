@@ -8,6 +8,16 @@ public enum AppMain {
     private static var delegateStore: AppDelegate?
 
     public static func run() {
+        // One instance per bundle: a second copy (login item + manual launch, or
+        // a stale helper) would fight over the port. Server role has no window,
+        // so the duplicate exits and just activates the running one.
+        if let id = Bundle.main.bundleIdentifier,
+           let other = NSRunningApplication.runningApplications(withBundleIdentifier: id)
+               .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
+            other.activate(options: [])
+            FileHandle.standardError.write(Data("another BoltKVM is already running (pid \(other.processIdentifier)); exiting\n".utf8))
+            exit(0)
+        }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         delegateStore = delegate
