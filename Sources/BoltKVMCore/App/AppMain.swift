@@ -64,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var chooser: RoleChooserController?
     private var clientController: ClientController?
     private var serverController: ServerAppController?
+    private var hostList: HostListController?
 
     private var roleMenu: NSMenu?
 
@@ -108,10 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.startAutomatically()
         case .client:
             NSApp.setActivationPolicy(.regular)
-            let controller = ClientController()
-            clientController = controller
-            controller.showWindow(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            // R1: start on the connection list, not on an empty video window.
+            HostStore.shared.migrateLegacySingleHost(Prefs.host, port: UInt16(Prefs.port))
+            showConnectionList()
         }
         updateRoleMenu()
     }
@@ -125,11 +125,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Closing the client window used to leave no way back: this is a menu bar
     /// app, so there is no Dock icon to click.
+    /// The connection list window (R1).
+    private func showConnectionList() {
+        if hostList == nil {
+            let controller = HostListController()
+            controller.onConnect = { [weak self] host in
+                self?.openSession(for: host)
+            }
+            controller.onClosed = { [weak self] in
+                guard let self else { return }
+                self.hostList = nil
+                if self.clientController?.window?.isVisible != true {
+                    NSApp.terminate(nil)
+                }
+            }
+            hostList = controller
+        }
+        hostList?.reload()
+        hostList?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func openSession(for host: SavedHost) {
+        clientController?.shutdown()
+        clientController = nil
+        let controller = ClientController(preset: host)
+        controller.onClosed = { [weak self] in
+            guard let self else { return }
+            self.clientController = nil
+            HostStore.shared.touch(id: host.id)
+            self.showConnectionList()
+        }
+        clientController = controller
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        hostList?.window?.orderOut(nil)
+    }
+
     @objc private func showClientWindow() {
         guard Prefs.role == .client else { return }
         if clientController == nil {
-            let controller = ClientController()
-            clientController = controller
+            showConnectionList()
+            return
         } else if let window = clientController?.window, !window.isVisible {
             // A closed window stays alive (isReleasedWhenClosed = false) but
             // showWindow alone does not bring it back.

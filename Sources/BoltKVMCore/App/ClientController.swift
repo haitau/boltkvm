@@ -29,7 +29,15 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     /// Live `fps · bitrate` label hosted in the toolbar's trailing edge.
     private let toolbarStatusLabel = NSTextField(labelWithString: "")
 
-    init() {
+    /// Set when the list window opens this controller: prefills the fields and
+    /// connects right away.
+    private let preset: SavedHost?
+    /// Called after the window closes, so the app can go back to the list instead
+    /// of quitting.
+    var onClosed: (() -> Void)?
+
+    init(preset: SavedHost? = nil) {
+        self.preset = preset
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -43,6 +51,11 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         build(in: window)
         window.center()
+        if let preset {
+            hostField.stringValue = preset.host
+            portField.stringValue = String(preset.port)
+            DispatchQueue.main.async { [weak self] in self?.connectPressed() }
+        }
     }
 
     @available(*, unavailable)
@@ -319,10 +332,8 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         // Closing the window *is* the disconnect (R4); for the client role the
         // app has nothing left to do, so it quits the way a document window would.
         session?.disconnect()
-        if Prefs.role == .client {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                NSApp.terminate(nil)
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.onClosed?()
         }
     }
 }

@@ -91,3 +91,15 @@
 "client.toolbar.missionControl.tip" = "Show the remote Mission Control";
 "client.toolbar.desktop" = "Desktop";
 "client.toolbar.desktop.tip" = "Show the remote desktop";
+"client.hosts.title" = "BoltKVM";
+"client.hosts.empty" = "No saved Macs yet — click ＋ to add one";
+"client.hosts.column" = "Remote Macs";
+"client.hosts.add" = "Add Remote Mac";
+"client.hosts.edit" = "Edit";
+"client.hosts.remove" = "Remove";
+"client.hosts.name" = "Name";
+"client.hosts.quality" = "Quality";
+"client.label.hostName" = "Display name";
+"quality.pixel" = "Pixel (lossless)";
+"quality.balanced" = "Balanced";
+"quality.smooth" = "Smooth";

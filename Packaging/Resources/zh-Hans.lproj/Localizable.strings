@@ -92,3 +92,15 @@
 "client.toolbar.missionControl.tip" = "显示远端调度中心（多桌面）";
 "client.toolbar.desktop" = "桌面";
 "client.toolbar.desktop.tip" = "让远端显示桌面";
+"client.hosts.title" = "BoltKVM";
+"client.hosts.empty" = "还没有保存的被控端，点 ＋ 添加";
+"client.hosts.column" = "被控端";
+"client.hosts.add" = "添加被控端";
+"client.hosts.edit" = "编辑";
+"client.hosts.remove" = "删除";
+"client.hosts.name" = "名称";
+"client.hosts.quality" = "画质";
+"client.label.hostName" = "显示名";
+"quality.pixel" = "像素（无损）";
+"quality.balanced" = "均衡";
+"quality.smooth" = "流畅";
