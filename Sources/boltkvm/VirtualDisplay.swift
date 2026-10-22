@@ -64,7 +64,7 @@ private func bkvDisplayLost(_ context: UnsafeMutableRawPointer?) {
 /// creation path pumps the main run loop while the system applies the mode.
 @MainActor
 func prepareVirtualDisplay(args: [String]) -> BuiltinVirtualDisplay? {
-    let requested = argValue(args, "--virtual-display", "external")
+    let requested = argValue(args, "--virtual-display", "builtin")
     guard let mode = VirtualDisplayMode(rawValue: requested) else {
         log("unknown --virtual-display=\(requested); expected external or builtin")
         exit(2)
@@ -81,8 +81,10 @@ func prepareVirtualDisplay(args: [String]) -> BuiltinVirtualDisplay? {
 
     let started = Date()
     guard let display = BuiltinVirtualDisplay(name: "boltKVM", width: logicalWidth, height: logicalHeight, hiDPI: hiDPI) else {
-        log("virtual display: system refused \(logicalWidth)x\(logicalHeight) (logical); another display with the same identity may be running")
-        exit(3)
+        // A display with this identity is already up (previous run, or vdscreen):
+        // capture whatever exists rather than refusing to start.
+        log("virtual display: system refused \(logicalWidth)x\(logicalHeight) (logical); capturing the existing display instead")
+        return nil
     }
     let took = String(format: "%.1fs", Date().timeIntervalSince(started))
     let backing = display.backingPixels().map { "\($0.width)x\($0.height)" } ?? "unknown"

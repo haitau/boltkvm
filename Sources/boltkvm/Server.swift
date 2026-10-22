@@ -17,6 +17,9 @@ final class Server: NSObject, SCStreamOutput {
     let codec: VideoCodec
     let connection: TCPConnection
     let dumpPath: String?
+    /// When the virtual display is ours, capture exactly that one instead of
+    /// guessing by area (the machine may also have a physical screen attached).
+    let preferredDisplayID: CGDirectDisplayID?
     let audioEnabled: Bool
     private var dumped = false
 
@@ -58,13 +61,14 @@ final class Server: NSObject, SCStreamOutput {
     private var startTime = DispatchTime.now().uptimeNanoseconds
 
     init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?,
-         audioEnabled: Bool = false) {
+         audioEnabled: Bool = false, preferredDisplayID: CGDirectDisplayID? = nil) {
         self.captureWidth = width
         self.audioEnabled = audioEnabled
         self.captureHeight = height
         self.codec = codec
         self.connection = connection
         self.dumpPath = dumpPath
+        self.preferredDisplayID = preferredDisplayID
         // HEVC needs ~4 frames in flight to sustain 60fps (its encoder
         // pipeline is ~20ms). ProRes is ~9ms, so two are enough and keep the
         // queue shorter.
@@ -156,7 +160,11 @@ final class Server: NSObject, SCStreamOutput {
             let m = CGDisplayCopyDisplayMode(d.displayID)
             return (m?.pixelWidth ?? d.width) * (m?.pixelHeight ?? d.height)
         }
-        guard let display = content.displays.max(by: { area($0) < area($1) }) else {
+        let chosen = preferredDisplayID.flatMap { id in content.displays.first { $0.displayID == id } }
+        if preferredDisplayID != nil && chosen == nil {
+            log("capture display \(preferredDisplayID!) not in SCShareableContent; falling back to largest")
+        }
+        guard let display = chosen ?? content.displays.max(by: { area($0) < area($1) }) else {
             throw NSError(domain: "boltkvm", code: 1, userInfo: [NSLocalizedDescriptionKey: "no display"])
         }
         let mode = CGDisplayCopyDisplayMode(display.displayID)

@@ -23,6 +23,8 @@ func usage() -> Never {
       boltkvm doctor [--role server|client]
       boltkvm inputprobe [--seconds 60] [--interval-ms 60000]
       boltkvm cryptotest      # 会话加密往返与篡改拒绝自测
+      boltkvm displays        # 列出显示器状态（active/asleep/refresh）
+                     [--display-id N]   # 强制采集指定显示器（调试用）
       boltkvm watchdog [--once] [--install] [--uninstall] [--interval 5]
       boltkvm selftest
       boltkvm pattern <png> [seconds]
@@ -133,6 +135,8 @@ struct BoltKVM {
             await runInputProbe(args)
         case "cryptotest":
             runCryptoTest()
+        case "displays":
+            runDisplays()
         case "pattern":
             await runPattern(args)
         case "client":
@@ -192,7 +196,10 @@ struct BoltKVM {
                 }
                 let audio = args.contains("--audio")
         let server = Server(width: width, height: height, codec: codec, connection: conn,
-                            dumpPath: dump.isEmpty ? nil : dump, audioEnabled: audio)
+                            dumpPath: dump.isEmpty ? nil : dump, audioEnabled: audio,
+                            preferredDisplayID: argInt(args, "--display-id", 0) != 0
+                                ? CGDirectDisplayID(argInt(args, "--display-id", 0))
+                                : virtualDisplay?.displayID)
                 do {
                     try await server.start()
                 } catch {
@@ -283,6 +290,31 @@ struct BoltKVM {
     /// Round-trips the session cipher: both directions, many packets, and the
     /// three failure modes that matter (tampered body, tampered header, wrong
     /// key). No network, no TCC — run it after touching the crypto code.
+    /// Every display with the flags that decide whether capture can keep up:
+    /// a sleeping or inactive display delivers frames only when content changes.
+    static func runDisplays() {
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(0, nil, &count) == .success else { return }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return }
+        print("displays=\(count)")
+        for id in ids.prefix(Int(count)) {
+            let mode = CGDisplayCopyDisplayMode(id)
+            let flags = [
+                CGDisplayIsActive(id) != 0 ? "active" : "inactive",
+                CGDisplayIsOnline(id) != 0 ? "online" : "offline",
+                CGDisplayIsAsleep(id) != 0 ? "ASLEEP" : "awake",
+                CGDisplayIsMain(id) != 0 ? "main" : "secondary",
+            ].joined(separator: " ")
+            print(String(format: "  id=%-3u %@ logical=%dx%d pixel=%dx%d refresh=%.0fHz bounds=%dx%d",
+                         id, flags,
+                         mode.map { $0.width } ?? 0, mode.map { $0.height } ?? 0,
+                         mode.map { $0.pixelWidth } ?? 0, mode.map { $0.pixelHeight } ?? 0,
+                         mode?.refreshRate ?? 0,
+                         Int(CGDisplayBounds(id).width), Int(CGDisplayBounds(id).height)))
+        }
+    }
+
     static func runCryptoTest() {
         let psk = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
         let nonce = Data((0..<32).map { _ in UInt8.random(in: 0...255) })

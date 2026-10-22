@@ -61,8 +61,8 @@ scp ~/.boltkvm-key <被控端>:~/.boltkvm-key     # 两端各存一份，权限 
 ### 2. 被控端准备
 
 ```bash
-# 虚拟显示（vdscreen 或其他 CGVirtualDisplay 实现），确认 3008×1692 HiDPI 生效
-vdscreen on 3008x1692
+# 虚拟显示由服务端自己创建（--virtual-display builtin，默认），不需要 vdscreen
+# 确认 HiDPI 生效：boltkvm displays  → 应看到 active/awake/Main + pixel=6016x3384
 
 # 保持显示器唤醒：显示休眠时 ScreenCaptureKit 会直接报 "no display"
 caffeinate -disu &
@@ -78,8 +78,8 @@ boltkvm server --width 3840 --height 2160 --port 7474 --seconds 0
 # 观察：出现 "capture started; waiting for frames" 才算 capture 正常
 # 绑定：默认 --bind auto，只监听雷雳桥（bridge*）地址；同机测试用 --bind 127.0.0.1
 # 音频：默认不传。需要转发时加 --audio（48 kHz 立体声，约 1.5 Mbps）
-# 虚拟屏：默认 external，假定 vdscreen/物理屏已经提供；加 --virtual-display builtin
-#         由本进程自己创建（--virtual-display-size 3008x1692 指定逻辑尺寸）
+# 虚拟屏：默认 builtin，由本进程创建；--virtual-display-size 3008x1692 指定逻辑尺寸，
+#         --virtual-display external 表示用现成的（vdscreen/物理屏），--virtual-display-lodpi 要 1:1
 ```
 
 ### 4. 起客户端（主控端）
@@ -108,7 +108,7 @@ scripts/rescue.sh --host <IP>                # 三条救援通道体检（ssh / 
 
 ```
 reboot ──25s──► ssh 可用 ──► 自动登录进桌面会话
-                                ├─ vdscreen / watchdog  LaunchAgent 自动拉起
+                                ├─ 服务端自己创建虚拟屏（不再需要 vdscreen）
                                 ├─ 登录项 soak-start.command → Terminal 里起服务端（守护循环）
                                 └─ 若停在锁屏 → 屏幕共享 vnc://<ip> 输入密码解锁
 ```
@@ -121,6 +121,7 @@ reboot ──25s──► ssh 可用 ──► 自动登录进桌面会话
 
 - **认证 + 加密**：预共享密钥 + HMAC-SHA256 挑战应答，握手后整条链路用 ChaCha20-Poly1305 密封（帧头作为 AAD 参与认证）。`--insecure` 是明文逃生口，会打警告；默认只绑雷雳桥，`--bind 0.0.0.0` 会监听所有网卡。密钥仍等于一台机器——没有前向保密。
 - **跨机更新二进制后可能被 AMFI 杀掉**：`scp` 过去的新二进制若启动即 137、无任何输出，在被控端跑一次 `codesign --force -s - ~/boltkvm` 即可。
+- **只能有一块虚拟屏**：两块 3008×1692 虚拟屏同时在线时，ScreenCaptureKit 会掉到 3–8 fps（两块都慢），单块则 57–60 fps。`boltkvm displays` 检查；若看到两块，杀掉旧进程或 `vdscreen off`
 - **残留服务端会让 capture 静默挂死**：`startCapture()` 不返回、不报错，客户端只收到心跳。起跑前必须 `pkill -f 'boltkvm server'`。
 - **`--seconds` 只结束会话，不结束进程**：到期后打 `session ended; accepting next client` 继续监听。
 - **锁屏会掐输入 tap**：会话级 `CGEventTap` 在 secure input 下被系统禁用，`tapEnable` 无效；`--input` 生效期间本机键鼠被全部吞掉，只有 ⌃⌥⌘Q 能退出。
