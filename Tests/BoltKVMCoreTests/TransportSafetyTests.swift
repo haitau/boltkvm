@@ -80,6 +80,37 @@ final class TransportSafetyTests: XCTestCase {
         receiver.close()
     }
 
+    /// After the ciphers are installed, a plaintext frame is a protocol error:
+    /// otherwise the flag byte (which is not MACed) decides whether a frame is
+    /// authenticated, and anyone on the link can inject input or video.
+    func testPlaintextFrameIsRejectedOnceEncrypted() throws {
+        let (sender, receiver) = makePair()
+        let key = SymmetricKey(size: .bits256)
+        receiver.setSessionCiphers(send: nil, recv: SessionCipher(key: key))
+
+        writeAll(sender.fd, packet(type: .input, flags: 0, ptsMicros: 0,
+                                   payload: Data([5, 1, 0, 0])))
+        XCTAssertThrowsError(try receiver.recvFrame()) { error in
+            XCTAssertEqual((error as? POSIXError)?.code, .EPROTO)
+        }
+        sender.close()
+        receiver.close()
+    }
+
+    /// A 20-byte header claiming a huge body must fail before the allocation.
+    func testOversizedPayloadIsRejected() throws {
+        let (sender, receiver) = makePair()
+        let header = PacketHeader(type: .frame, flags: 0, ptsMicros: 0,
+                                  payloadLength: 0xFFFF_FFFF).encode()
+        XCTAssertEqual(header.count, HEADER_SIZE)
+        writeAll(sender.fd, header)
+        XCTAssertThrowsError(try receiver.recvFrame()) { error in
+            XCTAssertEqual((error as? POSIXError)?.code, .EBADMSG)
+        }
+        sender.close()
+        receiver.close()
+    }
+
     func testCloseIsIdempotent() {
         let (conn, peer) = makePair()
         conn.close()

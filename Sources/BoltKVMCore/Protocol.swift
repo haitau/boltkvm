@@ -483,14 +483,27 @@ final class TCPConnection {
 
     /// Reads one frame and decrypts it when the encrypted flag is set. Used by
     /// everything that runs after the handshake.
+    /// No legitimate frame comes close: a 6016×3384 ProRes 422 frame is ~3 MB
+    /// and HEVC is far smaller. The cap keeps a single 20-byte header from
+    /// asking for a 4 GB allocation before authentication has even happened.
+    static let maxPayload = 16 << 20
+
     func recvFrame() throws -> (PacketHeader, Data) {
         let hd = try recvExact(HEADER_SIZE)
         guard let head = PacketHeader.decode(hd) else { throw POSIXError(.EBADMSG) }
+        guard head.payloadLength <= UInt32(Self.maxPayload) else {
+            throw POSIXError(.EBADMSG)
+        }
         let body = try recvExact(Int(head.payloadLength))
         if head.flags & FLAG_ENCRYPTED != 0 {
             guard let cipher = inCipher else { throw POSIXError(.EPROTO) }
             return (head, try cipher.open(header: hd, body: body))
         }
+        // Once the session ciphers are in place every frame must be sealed: the
+        // flag lives in the clear and is not covered by a MAC on plaintext
+        // frames, so accepting one would let anyone on the link inject input or
+        // forged video without knowing the password.
+        guard inCipher == nil else { throw POSIXError(.EPROTO) }
         return (head, body)
     }
 
