@@ -617,7 +617,10 @@ final class Server: NSObject, SCStreamOutput {
                             pending -= 1
                             queuedBytes -= length
                             dropped += 1
-                            if isKey && codec == .hevc { forceKeyframe = true }
+                            // Any dropped HEVC frame leaves a hole until the
+                            // next IDR (~1 s of artefacts), so ask for one
+                            // whether or not the dropped frame was a keyframe.
+                            if codec == .hevc { forceKeyframe = true }
                         } else {
                             sendQueue.async { [weak self] in
                                 guard let self else { return }
