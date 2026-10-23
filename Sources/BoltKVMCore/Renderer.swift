@@ -300,12 +300,23 @@ final class Renderer: NSObject, MTKViewDelegate {
         if captureMicros > 0 && latency > 0 && latency < 10_000 {
             latencies.append(latency)
             winLatencies.append(latency)
+            // Lifetime buffers are sorted on the main thread in report(): keep
+            // them bounded so a session left open for hours does not grow (and
+            // does not stall the UI when it finally reports).
+            if latencies.count > 20_000 { latencies.removeFirst(latencies.count - 20_000) }
+            if winLatencies.count > 20_000 { winLatencies.removeFirst(winLatencies.count - 20_000) }
         }
         if decodedMicros > 0 {
             let gap = Double(nowMicros - decodedMicros) / 1000.0
             let wait = Double(drawStartedMicros - decodedMicros) / 1000.0
-            if gap >= 0 && gap < 1_000 { presentGaps.append(gap) }
-            if wait >= 0 && wait < 1_000 { submitWait.append(wait) }
+            if gap >= 0 && gap < 1_000 {
+                presentGaps.append(gap)
+                if presentGaps.count > 20_000 { presentGaps.removeFirst(presentGaps.count - 20_000) }
+            }
+            if wait >= 0 && wait < 1_000 {
+                submitWait.append(wait)
+                if submitWait.count > 20_000 { submitWait.removeFirst(submitWait.count - 20_000) }
+            }
         }
         frames += 1
         winFrames += 1

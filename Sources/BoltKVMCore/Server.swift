@@ -512,16 +512,24 @@ final class Server: NSObject, SCStreamOutput {
         lock.lock()
         captured += 1
         feedTimes[Int64(pts.value)] = FeedStamp(host: now, wall: Int64(Date().timeIntervalSince1970 * 1_000_000))
+        // Bound the map even if a frame never reaches the encoder callback: at
+        // 60 fps an unbounded one is a slow leak for a session left open all day.
+        if feedTimes.count > 600, let oldest = feedTimes.keys.min() {
+            feedTimes.removeValue(forKey: oldest)
+        }
         let shouldDump = dumpPath != nil && !dumped && captured == 30
         if shouldDump { dumped = true }
         lock.unlock()
         if shouldDump { dumpFrame(pb) }
 
         if inFlight.wait(timeout: .now()) == .timedOut {
-            lock.lock(); dropped += 1; lock.unlock()
+            lock.lock(); dropped += 1; feedTimes.removeValue(forKey: Int64(pts.value)); lock.unlock()
             return
         }
-        guard let session else { return }
+        guard let session else {
+            lock.lock(); feedTimes.removeValue(forKey: Int64(pts.value)); lock.unlock()
+            return
+        }
         lock.lock()
         let force = forceKeyframe
         forceKeyframe = false
@@ -536,7 +544,7 @@ final class Server: NSObject, SCStreamOutput {
         )
         if st != noErr {
             inFlight.signal()
-            lock.lock(); dropped += 1; lock.unlock()
+            lock.lock(); dropped += 1; feedTimes.removeValue(forKey: Int64(pts.value)); lock.unlock()
         }
     }
 
