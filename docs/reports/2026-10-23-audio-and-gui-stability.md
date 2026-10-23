@@ -74,7 +74,10 @@
 - **错误**：整个日志只有一条 IMK 的无关警告
   （`error messaging the mach port for IMKCFRunLoopWakeUpReliable`），没有
   `session ended` / 重连 / 解码失败；
-- **服务端**：mini 侧全程 `fps≈31`、`dropped=0`，音频 1.5 Mbps 持续。
+- **服务端**：mini 侧全程 `fps≈31`、`dropped=0`，音频 1.5 Mbps 持续；
+- **SLO 33 ms 命中率**：13 个窗口全部 p95 > 33 ms（45.0–46.2 ms），**0/13**。
+  这是"开音频 + 窗口被遮挡"的组合，和 B5 里不带音频的 40–42 ms 相比没有改善——
+  33 ms 这个目标在 GUI 呈现路径上仍然不成立（见 B7）。
 
 ## 结论
 
