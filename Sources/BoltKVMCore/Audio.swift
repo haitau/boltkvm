@@ -70,16 +70,44 @@ final class AudioPlayer {
                 self.engine = engine
                 self.player = player
                 log("audio: playing to default output")
+                // Switching output device (headphones, display speakers, a
+                // session change) stops the engine; without this the rest of
+                // the session is silent.
+                NotificationCenter.default.addObserver(
+                    forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+                ) { [weak self] _ in
+                    guard let self, let engine = self.engine, let player = self.player else { return }
+                    guard !engine.isRunning else { return }
+                    do {
+                        try engine.start()
+                        player.play()
+                        log("audio: restarted after an output configuration change")
+                    } catch {
+                        log("audio: restart failed: \(error)")
+                    }
+                }
             } catch {
                 log("audio: engine start failed: \(error)")
             }
         }
     }
 
+    /// Guards every field touched by both the receive thread and the main
+    /// thread (`finish` runs on close), plus the in-flight buffer count.
+    private let lock = NSLock()
+    private var scheduled = 0
+    private var finished = false
+    /// More than ~5 s of queued audio means the output is not draining; older
+    /// audio is worse than no audio (it drifts further behind every second).
+    private let maxScheduled = 256
+
     /// Called for every `.audio` packet, in arrival order.
     func enqueue(_ data: Data) {
         let count = data.count / AudioPlayer.bytesPerFrame
         guard count > 0 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        guard !finished else { return }
         bytes += data.count
         frames += count
         windowFrames += count
@@ -96,7 +124,15 @@ final class AudioPlayer {
         }
 
         if let player, let buf = makeBuffer(data, frames: count) {
-            player.scheduleBuffer(buf, completionHandler: nil)
+            if scheduled < maxScheduled {
+                scheduled += 1
+                player.scheduleBuffer(buf) { [weak self] in
+                    guard let self else { return }
+                    self.lock.lock()
+                    self.scheduled -= 1
+                    self.lock.unlock()
+                }
+            }
         }
 
         // Track energy on the int16 samples so a silent capture is visible in
@@ -141,9 +177,12 @@ final class AudioPlayer {
     }
 
     func finish() {
+        lock.lock()
+        finished = true
         player?.stop()
         engine?.stop()
         file = nil  // AVAudioFile flushes to disk on deinit
+        lock.unlock()
         reportWindow(now: DispatchTime.now().uptimeNanoseconds)
         let rms = frames > 0 ? (sumSquares / Double(frames)).squareRoot() : 0
         let dbfs = rms > 0 ? 20 * log10(rms / 32768.0) : -120
