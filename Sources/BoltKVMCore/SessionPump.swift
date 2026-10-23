@@ -61,8 +61,8 @@ final class SessionPump {
             winPackets += 1
             winBytes += payload.count
             switch header.type {
-            case .command, .input, .config, .authExchange, .authResponse, .heartbeat:
-                break  // client never receives these, or they need no action
+            case .command, .input, .config, .authExchange, .authResponse, .heartbeat, .unknown:
+                break  // client never receives these, needs no action, or predates us
             case .authChallenge:
                 try onChallenge?(payload)
             case .authOk:

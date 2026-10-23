@@ -111,6 +111,30 @@ final class TransportSafetyTests: XCTestCase {
         receiver.close()
     }
 
+    /// A packet type this build does not know must be skipped, not treated as a
+    /// protocol error: that is what lets a new peer add packet types without
+    /// killing an older session.
+    func testUnknownPacketTypeIsSkipped() throws {
+        let (conn, peer) = makePair()
+        let pump = SessionPump(conn: conn, decoder: VideoDecoder())
+        var raw = Data()
+        raw.appendUInt32BE(BKVM_MAGIC)
+        raw.append(BKVM_VERSION)
+        raw.append(200)          // unknown type
+        raw.append(0)            // flags
+        raw.append(0)
+        raw.appendUInt32BE(3)    // payload length
+        raw.appendInt64BE(0)
+        raw.append(contentsOf: [1, 2, 3])
+        writeAll(peer.fd, raw)
+        peer.close()
+
+        XCTAssertThrowsError(try pump.run())  // EOF ends the loop
+        XCTAssertEqual(pump.packets, 1)
+        XCTAssertEqual(pump.lastType, .unknown)
+        conn.close()
+    }
+
     func testCloseIsIdempotent() {
         let (conn, peer) = makePair()
         conn.close()

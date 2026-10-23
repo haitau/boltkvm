@@ -24,6 +24,10 @@ let HEADER_SIZE = 20
 let FLAG_SUPPORTS_KEY_EXCHANGE: UInt8 = 1
 
 enum PacketType: UInt8 {
+    /// Not a real type: `decode` maps anything it does not know here so a newer
+    /// peer can add packet types without breaking an older one. Receivers skip
+    /// it after reading (and, if present, decrypting) the payload.
+    case unknown = 0
     case format = 1
     case frame = 2
     case heartbeat = 3
@@ -39,7 +43,7 @@ enum PacketType: UInt8 {
     /// server performs the action natively (see `RemoteAction`).
     case command = 10
     /// First packet after `authOk`: what the client wants streamed. Sent by new
-    /// clients only, so old servers simply ignore an unknown type.
+    /// clients only; a server that predates it sees `unknown` and skips it.
     case config = 11
     /// X25519 public key, one per direction, exchanged inside the already
     /// authenticated channel. Both sides re-key from the shared secret, so the
@@ -121,7 +125,10 @@ struct PacketHeader {
         let base = d.startIndex
         let magic = d.readUInt32BE(base)
         guard magic == BKVM_MAGIC, d[base + 4] == BKVM_VERSION else { return nil }
-        guard let type = PacketType(rawValue: d[base + 5]) else { return nil }
+        // Unknown types decode as `.unknown` rather than failing the whole
+        // frame: the payload is still length-prefixed, so the reader can skip
+        // it and keep the session alive across versions.
+        let type = PacketType(rawValue: d[base + 5]) ?? .unknown
         let flags = d[base + 6]
         let len = d.readUInt32BE(base + 8)
         let pts = d.readInt64BE(base + 12)
