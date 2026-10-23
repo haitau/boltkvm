@@ -165,8 +165,10 @@ final class ClientSession {
                 pump.onAudio = { [audio] payload in audio?.enqueue(payload) }
                 pump.onWindow = { window in
                     // The host is already in the connect bar; the toolbar only
-                    // carries the live numbers.
-                    self.onStats?(String(format: "%.0f fps · %.0f Mbps", window.fps, window.mbps))
+                    // carries the live numbers. This runs on the pump thread and
+                    // the handler touches NSTextFields, so hop to main.
+                    let text = String(format: "%.0f fps · %.0f Mbps", window.fps, window.mbps)
+                    DispatchQueue.main.async { self.onStats?(text) }
                 }
                 try pump.run()
             } catch {
