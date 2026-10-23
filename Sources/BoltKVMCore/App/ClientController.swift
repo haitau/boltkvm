@@ -103,6 +103,11 @@ final class ClientController: NSWindowController, NSWindowDelegate {
                 self.stopReportTimer(report: true)
             }
         }
+        session?.onEnd = { [weak self] in
+            guard let self else { return }
+            self.stopReportTimer(report: true)
+            self.refreshToolbarStatus()
+        }
         session?.onFormat = { [weak self] width, height in
             self?.fitWindowToRemote(width: width, height: height)
         }
@@ -233,6 +238,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
     deinit {
         chromeTimer?.invalidate()
+        reportTimer?.invalidate()
     }
 
     // MARK: - Actions

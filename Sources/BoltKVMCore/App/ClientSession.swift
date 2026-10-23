@@ -23,6 +23,9 @@ final class ClientSession {
 
     var onState: ((State) -> Void)?
     var onStats: ((String) -> Void)?
+    /// Fires after the connection task has fully unwound (success or failure),
+    /// so the window can stop its timers and offer 连接 again.
+    var onEnd: (() -> Void)?
 
     private(set) var renderer: Renderer
     private var task: Task<Void, Never>?
@@ -34,12 +37,33 @@ final class ClientSession {
     weak var inputView: NSView?
     private var audio: AudioPlayer?
     private var decoder: VideoDecoder?
+    private(set) var state: State = .idle
+    /// Bumped by every connect/disconnect. A detached task compares it after
+    /// each blocking step: a window closed or a role switched mid-connect must
+    /// not leave a live session behind that nobody can disconnect.
+    private var generation = 0
+    private let lifecycleLock = NSLock()
 
     init(renderer: Renderer) {
         self.renderer = renderer
     }
 
     var isActive: Bool { task != nil }
+
+    private func bumpGeneration() -> Int {
+        lifecycleLock.lock()
+        generation += 1
+        let g = generation
+        lifecycleLock.unlock()
+        return g
+    }
+
+    private func isCurrent(_ g: Int) -> Bool {
+        lifecycleLock.lock()
+        let ok = g == generation
+        lifecycleLock.unlock()
+        return ok
+    }
 
     /// What the server should stream, when the user picked a size for this host.
     var requestedConfig: SessionConfig?
@@ -48,6 +72,7 @@ final class ClientSession {
 
     func connect(host: String, port: UInt16, key: Data?, forwardInput: Bool, playAudio: Bool) {
         disconnect()
+        let gen = bumpGeneration()
         // --key on the CLI, $BOLTKVM_KEY, then ~/.boltkvm-key; the app never exits
         // when the key is missing, it just reports it in the status line.
         guard let sessionKey = key ?? resolveAuthKey([]) else {
@@ -58,7 +83,7 @@ final class ClientSession {
             audio = AudioPlayer(play: true, recordPath: nil)
         }
         task = Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
+            guard let self, self.isCurrent(gen) else { return }
             self.setState(.connecting)
             var gotAuthOk = false
             var sentAuthResponse = false
@@ -69,6 +94,7 @@ final class ClientSession {
                 // error the user would read as "the server is down".
                 var connection: TCPConnection?
                 for attempt in 1...3 {
+                    if Task.isCancelled || !self.isCurrent(gen) { return }
                     do {
                         connection = try tcpConnect(host: host, port: port)
                         break
@@ -79,6 +105,10 @@ final class ClientSession {
                     }
                 }
                 guard let c = connection else { return }
+                // The user may have closed the window while the handshake was
+                // settling; publishing the connection now would make it outlive
+                // the session that owns it.
+                guard self.isCurrent(gen), !Task.isCancelled else { c.close(); return }
                 self.conn = c
                 defer { c.close() }
                 try c.send(timeSyncRequest())
@@ -140,7 +170,7 @@ final class ClientSession {
                 }
                 try pump.run()
             } catch {
-                if !Task.isCancelled {
+                if !Task.isCancelled && self.isCurrent(gen) {
                     // A reset right after we answered the challenge almost always
                     // means the key is wrong: the server closes without a word.
                     if sentAuthResponse && !gotAuthOk {
@@ -151,6 +181,27 @@ final class ClientSession {
                     }
                 }
             }
+            self.finish(gen: gen)
+        }
+    }
+
+    /// Unwind a connection task: whatever ended it, the session must not stay
+    /// "active" with a dead connection and a timer still polling it.
+    private func finish(gen: Int) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isCurrent(gen) else { return }
+            self.task = nil
+            self.conn = nil
+            self.input?.stop()
+            self.input = nil
+            self.windowInput?.stop()
+            self.windowInput = nil
+            self.audio?.finish()
+            self.audio = nil
+            self.decoder = nil
+            self.onStats?("")
+            if case .failed = self.state {} else { self.setState(.idle) }
+            self.onEnd?()
         }
     }
 
@@ -203,6 +254,7 @@ final class ClientSession {
     }
 
     func disconnect() {
+        _ = bumpGeneration()
         task?.cancel()
         task = nil
         conn?.close()
@@ -224,7 +276,9 @@ final class ClientSession {
 
     private func setState(_ state: State) {
         DispatchQueue.main.async { [weak self] in
-            self?.onState?(state)
+            guard let self else { return }
+            self.state = state
+            self.onState?(state)
         }
     }
 }
