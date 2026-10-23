@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building BoltKVM $VERSION"
+
+      - name: Build, self-test, package
+        env:
+          BOLTKVM_HARDENED_RUNTIME: "0"
+        run: |
+          set -euo pipefail
+          swift build -c release
+          .build/release/boltkvm selftest
+          .build/release/boltkvm cryptotest
+          # Stamp the tag into the bundle so "which build is this" is answerable
+          # from Finder → Get Info.
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.ver.outputs.version }}" Packaging/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" Packaging/Info.plist
+          bash Packaging/build-app.sh
+          mkdir -p out
+          ditto -c -k --sequesterRsrc --keepParent dist/BoltKVM.app "out/BoltKVM-${{ steps.ver.outputs.version }}.zip"
+          shasum -a 256 "out/BoltKVM-${{ steps.ver.outputs.version }}.zip" > "out/BoltKVM-${{ steps.ver.outputs.version }}.zip.sha256"
+
+      - name: Sign with Developer ID (optional)
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CERT_P12:-}" ]; then
+            echo "No Developer ID certificate in secrets; shipping the ad-hoc build."
+            echo "Users will need: xattr -dr com.apple.quarantine /Applications/BoltKVM.app"
+            exit 0
+          fi
+          # Hardened runtime is deliberately *not* enabled: it breaks
+          # CGVirtualDisplay creation inside the app bundle (measured 2026-10-22),
+          # which is the whole point of the server role. That also means the build
+          # cannot be notarized today — see docs/releasing.md.
+          KEYCHAIN=build.keychain
+          security create-keychain -p actions "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p actions "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > cert.p12
+          security import cert.p12 -k "$KEYCHAIN" -P "${CERT_PASSWORD}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions "$KEYCHAIN" >/dev/null
+          BOLTKVM_CODESIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application}" bash Packaging/build-app.sh
+          rm -f "out/"*.zip "out/"*.sha256
+          ditto -c -k --sequesterRsrc --keepParent dist/BoltKVM.app "out/BoltKVM-${{ steps.ver.outputs.version }}.zip"
+          shasum -a 256 "out/BoltKVM-${{ steps.ver.outputs.version }}.zip" > "out/BoltKVM-${{ steps.ver.outputs.version }}.zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BoltKVM-${{ steps.ver.outputs.version }}
+          path: out/*
+          if-no-files-found: error
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: BoltKVM ${{ steps.ver.outputs.version }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', steps.ver.outputs.version) || github.ref_name }}
+          generate_release_notes: true
+          body: |
+            ## 安装
+
+            1. 下载 `BoltKVM-${{ steps.ver.outputs.version }}.zip`，解压后把 `BoltKVM.app` 拖进「应用程序」；
+            2. 首次打开若提示「无法验证开发者」：右键 → 打开，或执行
+               `xattr -dr com.apple.quarantine /Applications/BoltKVM.app`；
+            3. 被控端首次启动会生成 8 位连接密码，显示在「被控端」面板底部；
+               主控端在「编辑」里填一次即可。
+
+            ### 说明
+
+            - 构建未做公证（公证要求 hardened runtime，而 hardened runtime 会让
+              `CGVirtualDisplay` 创建失败，服务端就没有虚拟屏了）。因此首次打开需要
+              上面第 2 步；
+            - 每次构建的签名都不一样，macOS 的「屏幕录制」授权会重新询问——这是
+              TCC 按 cdhash 认应用的结果，不是 bug。
+          files: out/*
+          fail_on_unmatched_files: true

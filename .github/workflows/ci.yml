@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # The package targets macOS 15 (ScreenCaptureKit / MTKView APIs we rely on),
+    # so the runner has to ship a matching SDK.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version && sw_vers
+
+      - name: Build (release)
+        run: swift build -c release
+
+      - name: Protocol self-test
+        run: .build/release/boltkvm selftest
+
+      - name: Crypto self-test
+        run: .build/release/boltkvm cryptotest
+
+      - name: Package the app (ad-hoc signed)
+        run: bash Packaging/build-app.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BoltKVM-app
+          path: dist/BoltKVM.app
+          if-no-files-found: error
