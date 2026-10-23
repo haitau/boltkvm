@@ -28,9 +28,9 @@
 "client.label.stats" = "Connection status";
 "client.label.host" = "Host";
 "client.label.port" = "Port";
-"client.label.key" = "Key";
+"client.label.key" = "Password";
 "client.placeholder.host" = "e.g. 10.0.0.2";
-"client.placeholder.key" = "Empty uses ~/.boltkvm-key";
+"client.placeholder.key" = "8-character password from the server panel";
 "client.check.input" = "Forward input";
 "client.check.audio" = "Audio";
 "client.button.connect" = "Connect";
@@ -112,5 +112,6 @@
 "server.panel.close" = "Close";
 "server.menu.settings" = "Settings…";
 
-"server.panel.fingerprint" = "Local key fingerprint %@ (the client must show the same one, or auth fails)";
-"server.panel.nokey" = "No ~/.boltkvm-key: the server will refuse to start. Run `boltkvm keygen` here and copy the file to the other machine.";
+"server.panel.password" = "Connection password %@ (enter once on the client)";
+"server.panel.fingerprint" = "Fingerprint %@";
+"server.panel.nokey" = "No key yet: starting the server generates an 8-character connection password.";

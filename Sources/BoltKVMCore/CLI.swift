@@ -28,10 +28,18 @@ public enum CLI {
         let codec: VideoCodec = codecName == "prores" ? .prores422 : .hevc
         let bindSpec = argValue(args, "--bind", "auto")
         let insecure = args.contains("--insecure")
-        let authKey = resolveAuthKey(args)
+        var authKey = resolveAuthKey(args)
         if authKey == nil && !insecure {
-            log("refusing to start: no pre-shared key. Pass --key, set $BOLTKVM_KEY, or create ~/.boltkvm-key; use --insecure to override")
-            exit(2)
+            // Fresh install: nobody has a key yet, and copying one around is not
+            // an option on machines without SSH. Generate it here and let the
+            // operator read the password off the 被控端 panel.
+            if let generated = PSK.ensureKey(args: args) {
+                log("auth: generated connection password \(generated) (saved to ~/.boltkvm-key)")
+                authKey = Data(generated.utf8)
+            } else {
+                log("refusing to start: no pre-shared key and cannot create ~/.boltkvm-key; pass --key, set $BOLTKVM_KEY, or use --insecure")
+                exit(2)
+            }
         }
         if insecure { log("WARNING: --insecure — anyone who can reach this port controls the machine") }
         if let authKey { log("auth: key fingerprint \(PSK.fingerprint(authKey))") }
@@ -60,6 +68,10 @@ public enum CLI {
                     } catch {
                         log("auth failed: \(error); closing")
                         conn.close()
+                        // 8 characters is ~47 bits, so guessing is already out of
+                        // reach; the pause just keeps a stuck client from spinning
+                        // the CPU and slows anyone who tries anyway.
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
                         continue
                     }
                 }

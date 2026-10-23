@@ -28,9 +28,9 @@
 "client.label.stats" = "连接状态";
 "client.label.host" = "主机";
 "client.label.port" = "端口";
-"client.label.key" = "密钥";
+"client.label.key" = "连接密码";
 "client.placeholder.host" = "例如 10.0.0.2";
-"client.placeholder.key" = "留空用 ~/.boltkvm-key";
+"client.placeholder.key" = "被控端面板里的 8 位连接密码";
 "client.check.input" = "转发键鼠";
 "client.check.audio" = "音频";
 "client.button.connect" = "连接";
@@ -113,5 +113,6 @@
 "server.panel.close" = "关闭";
 "server.menu.settings" = "打开设置…";
 
-"server.panel.fingerprint" = "本机密钥指纹 %@（主控端连接时指纹必须一致，否则 auth failed）";
-"server.panel.nokey" = "未找到 ~/.boltkvm-key：服务端会拒绝启动。先在本机运行 `boltkvm keygen`，再把该文件复制到另一端。";
+"server.panel.password" = "连接密码 %@（主控端填一次即可）";
+"server.panel.fingerprint" = "指纹 %@";
+"server.panel.nokey" = "本机还没有密钥：点「启动服务」时会自动生成一个 8 位连接密码。";

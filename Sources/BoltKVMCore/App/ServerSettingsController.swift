@@ -100,7 +100,7 @@ final class ServerSettingsController: NSWindowController {
 
         hintLabel.font = .systemFont(ofSize: 11)
         hintLabel.textColor = .secondaryLabelColor
-        hintLabel.frame = NSRect(x: 24, y: 96, width: 430, height: 52)
+        hintLabel.frame = NSRect(x: 24, y: 84, width: 430, height: 64)
         content.addSubview(hintLabel)
 
         toggleButton.bezelStyle = .rounded
@@ -133,7 +133,10 @@ final class ServerSettingsController: NSWindowController {
         // matching fingerprints on both ends is the whole "sync" story.
         var hint = L.t("server.panel.hint")
         if let key = resolveAuthKey([]) {
-            hint += "\n" + L.f("server.panel.fingerprint", PSK.fingerprint(key))
+            if let stored = PSK.storedText(), PSK.isGeneratedPassword(stored) {
+                hint += "\n" + L.f("server.panel.password", stored)
+            }
+            hint += "  " + L.f("server.panel.fingerprint", PSK.fingerprint(key))
         } else {
             hint += "\n" + L.t("server.panel.nokey")
         }
