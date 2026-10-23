@@ -12,7 +12,7 @@
 | B7 | GUI 呈现路径多出 ~14ms | 解码 p95 25ms vs 端到端 p95 41ms，差额在 Metal 呈现 | 试 `drawableSize` 跟随窗口、纹理缓存复用、相同画面跳过上传 |
 | ~~P2-1~~ | ~~上屏 51 fps 天花板~~ | **已解决**：`displaySyncEnabled=false` 是根因，打开后 59.5 fps | 见 [present 同步修复](../reports/2026-10-22-present-sync-fix.md) |
 | ~~P2-2~~ | ~~SLO 33 ms 命中率 0%~~ | **60 秒窗口已达标**（P95 17.0 ms，命中 1/1），8 小时稳态待长跑确认 | 同上 |
-| P1-应用化 | 单 app + 角色选择 + 内建虚拟显示 | 阶段 1–6 完成；mini 已切到 app 部署并验证重启自愈；待做：app 模式下长时间稳定性、app 内输入/音频实测 | 见 [方案](2026-10-22-app-and-vdscreen-integration.md) |
+| P1-应用化 | 单 app + 角色选择 + 内建虚拟显示 | 阶段 1–6 完成；mini 已切到 app 部署并验证重启自愈；**app 模式 12 分钟稳定性与 app 内音频已实测**（2026-10-23） | 见 [方案](2026-10-22-app-and-vdscreen-integration.md) 与 [音频/稳定性报告](../reports/2026-10-23-audio-and-gui-stability.md) |
 | ~~P2-3~~ | ~~传输是明文 TCP~~ | **已解决**：ChaCha20-Poly1305 会话层，帧头作 AAD | 见 [传输加密](../reports/2026-10-22-transport-encryption.md) |
 | P1-连接管理 | 启动界面改为被控端列表、每台可编辑（分辨率）、记住登录密码 | R4/R5 完成；**R1 列表已完成并验证**；**R2 分辨率已实现**（config 包重建虚拟屏，CLI 双端验证）；画质假档位已删，R3 仍阻塞 | 见 [连接管理需求](2026-10-22-connection-manager.md) 与 [设计](2026-10-22-connection-manager-design.md)；R3 需服务端登录/解锁能力 |
 
