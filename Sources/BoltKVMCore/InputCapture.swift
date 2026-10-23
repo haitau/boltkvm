@@ -395,18 +395,18 @@ final class WindowInputCapture {
             return nil
         }
         guard let view, let window = view.window else { return event }
-        // Keyboard events carry no location, so "is the pointer over the picture"
-        // decides whether the remote or the local app gets them.
-        let inWindow: NSPoint
-        switch event.type {
-        case .keyDown, .keyUp, .flagsChanged:
-            inWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
-        default:
-            inWindow = event.locationInWindow
-        }
-        // Ask AppKit which view is under the pointer instead of converting
-        // coordinates by hand (window/view origins made that error-prone).
-        let hit = window.contentView?.hitTest(inWindow)
+        // "Is the pointer over the picture" decides whether the remote or the
+        // local app gets the event, and it has to come from the screen position:
+        // in fullscreen a click on the revealing toolbar reported
+        // `locationInWindow` y=42 (inside the video) instead of the toolbar band,
+        // so clicks meant for 调度中心/桌面 were forwarded to the remote and
+        // swallowed before AppKit could route them to the button.
+        let inWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        // Hit-test the theme frame, not the content view: fullscreen floats the
+        // toolbar above the content, and the content view answers "video" for a
+        // point AppKit would dispatch to the toolbar.
+        let root = window.contentView?.superview ?? window.contentView
+        let hit = root?.hitTest(inWindow)
         let inVideo = hit === view || hit?.isDescendant(of: view) == true
         let point = view.convert(inWindow, from: nil)
         // The picture is centred with black bars, so map only inside the picture:
