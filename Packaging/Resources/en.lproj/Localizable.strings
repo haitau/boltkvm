@@ -115,3 +115,9 @@
 "server.panel.password" = "Connection password %@ (enter once on the client)";
 "server.panel.fingerprint" = "Fingerprint %@";
 "server.panel.nokey" = "No key yet: starting the server generates an 8-character connection password.";
+
+"server.panel.rotate" = "New password…";
+"server.panel.rotate.confirm.title" = "Generate a new connection password?";
+"server.panel.rotate.confirm.body" = "Every client stops connecting until you enter the new password in its host editor.";
+"server.panel.rotate.done" = "New password: %@. The server is restarting with it.";
+"server.panel.rotate.failed" = "Rotation failed: %@";

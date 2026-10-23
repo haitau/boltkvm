@@ -116,3 +116,9 @@
 "server.panel.password" = "连接密码 %@（主控端填一次即可）";
 "server.panel.fingerprint" = "指纹 %@";
 "server.panel.nokey" = "本机还没有密钥：点「启动服务」时会自动生成一个 8 位连接密码。";
+
+"server.panel.rotate" = "重新生成密码…";
+"server.panel.rotate.confirm.title" = "重新生成连接密码？";
+"server.panel.rotate.confirm.body" = "所有主控端都会立刻连不上，直到你在它们的「编辑」面板里填入新密码。";
+"server.panel.rotate.done" = "已重新生成，新密码是 %@。服务正在用新密码重启。";
+"server.panel.rotate.failed" = "重新生成失败：%@";

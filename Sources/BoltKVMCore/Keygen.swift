@@ -66,6 +66,15 @@ enum PSK {
         return compact.count == 8 && compact.allSatisfy { alphabet.contains($0) }
     }
 
+    /// Writes a fresh password to `path` (0600) and returns it. Used by the panel's
+    /// "重新生成密码" button: rotating the key is exactly a new file plus a restart.
+    static func writeNewPassword(to path: String = defaultPath) throws -> String {
+        let password = makePassword()
+        try (password + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+        return password
+    }
+
     /// Creates `~/.boltkvm-key` when neither `--key`, `$BOLTKVM_KEY` nor the file
     /// provide one. Returns the password it wrote, or nil if a key already exists
     /// or writing failed. Never called with `--insecure`: that mode stays explicit.

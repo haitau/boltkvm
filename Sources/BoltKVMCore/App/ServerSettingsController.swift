@@ -17,6 +17,8 @@ final class ServerSettingsController: NSWindowController {
     private let qualityPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let portField = NSTextField(string: "")
     private let toggleButton = NSButton(title: "", target: nil, action: nil)
+    private let rotateButton = NSButton(title: L.t("server.panel.rotate"),
+                                        target: nil, action: nil)
     private let hintLabel = NSTextField(wrappingLabelWithString: L.t("server.panel.hint"))
 
     init(server: ServerAppController) {
@@ -110,10 +112,43 @@ final class ServerSettingsController: NSWindowController {
         toggleButton.frame = NSRect(x: 24, y: 24, width: 140, height: 30)
         content.addSubview(toggleButton)
 
+        rotateButton.bezelStyle = .rounded
+        rotateButton.target = self
+        rotateButton.action = #selector(rotatePassword)
+        rotateButton.frame = NSRect(x: 180, y: 24, width: 120, height: 30)
+        content.addSubview(rotateButton)
+
         let close = NSButton(title: L.t("server.panel.close"), target: self, action: #selector(closePanel))
         close.bezelStyle = .rounded
         close.frame = NSRect(x: 356, y: 24, width: 100, height: 30)
         content.addSubview(close)
+    }
+
+    /// Rotation breaks every stored client key, so it is confirmed first and then
+    /// the helper restarts with the new file (clients get `auth failed` until they
+    /// are given the new password).
+    @objc private func rotatePassword() {
+        let alert = NSAlert()
+        alert.messageText = L.t("server.panel.rotate.confirm.title")
+        alert.informativeText = L.t("server.panel.rotate.confirm.body")
+        alert.addButton(withTitle: L.t("server.panel.rotate"))
+        alert.addButton(withTitle: L.t("common.cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            let password = try PSK.writeNewPassword()
+            log("app: rotated connection password")
+            server?.restartForSettings()
+            reload()
+            let done = NSAlert()
+            done.messageText = L.f("server.panel.rotate.done", password)
+            done.addButton(withTitle: L.t("common.ok"))
+            done.runModal()
+        } catch {
+            let failed = NSAlert()
+            failed.messageText = L.f("server.panel.rotate.failed", error.localizedDescription)
+            failed.addButton(withTitle: L.t("common.ok"))
+            failed.runModal()
+        }
     }
 
     /// Called by the controller on every state change.
