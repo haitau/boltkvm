@@ -219,7 +219,7 @@ void BKVVirtualDisplaySetLostHandler(BKVVirtualDisplay *handle,
 
 void BKVVirtualDisplayDestroy(BKVVirtualDisplay *handle) {
     if (!handle) return;
-    handle->lostHandler = NULL;     // the block below must not call into a freed handle
+    handle->lostHandler = NULL;
     handle->lostContext = NULL;
     if (handle->display) {
         // The descriptor owns the termination block; clearing our function
@@ -228,5 +228,14 @@ void BKVVirtualDisplayDestroy(BKVVirtualDisplay *handle) {
         (void)display;              // released when this scope ends
         handle->display = NULL;
     }
-    free(handle);
+    // Deliberately not freed. The descriptor's termination block captured this
+    // pointer and the block runs on the main queue, so it can run *after* this
+    // function returns; reading lostHandler out of a freed block is a
+    // use-after-free, and because the next BKVVirtualDisplayCreate calloc()s the
+    // same size it usually gets this very chunk back — the stale block would
+    // then call the *new* display's handler (which is exit(3) in the server) or
+    // a garbage pointer. The struct is ~48 bytes and there is one per display
+    // creation (a handful per process), so leaking it is the cheap correct
+    // trade; BKVVirtualDisplayDestroy is idempotent per display because the
+    // Swift wrapper clears its handle.
 }
