@@ -160,20 +160,31 @@ final class Renderer: NSObject, MTKViewDelegate {
             float y = yTex.sample(s, in.uv).r;
             float2 c = cTex.sample(s, in.uv).rg;
             float yy, cb, cr;
+            // Video-range YCbCr needs *both* ranges expanded: luma 16..235 and
+            // chroma 16..240 around 128. Scaling only luma (what this used to
+            // do) leaves chroma 12% compressed, so every colour comes back
+            // duller — pure red lands at (231,6,7) instead of (255,0,0), which
+            // is exactly the "色彩不如直连屏" report.
             if (p.tenBit > 0.5) {
                 float y10 = y * 1023.0;
                 float2 c10 = c * 1023.0;
                 if (p.fullRange > 0.5) {
                     yy = y10 / 1023.0;
+                    cb = c10.x / 1023.0 - 0.5;
+                    cr = c10.y / 1023.0 - 0.5;
                 } else {
                     yy = (y10 - 64.0) / (940.0 - 64.0);
+                    cb = (c10.x - 512.0) / (960.0 - 64.0);
+                    cr = (c10.y - 512.0) / (960.0 - 64.0);
                 }
-                cb = c10.x / 1023.0 - 0.5;
-                cr = c10.y / 1023.0 - 0.5;
-            } else {
-                yy = p.fullRange > 0.5 ? y : (y - 16.0/255.0) * (255.0/219.0);
+            } else if (p.fullRange > 0.5) {
+                yy = y;
                 cb = c.x - 0.5;
                 cr = c.y - 0.5;
+            } else {
+                yy = (y - 16.0/255.0) * (255.0/219.0);
+                cb = (c.x - 128.0/255.0) * (255.0/224.0);
+                cr = (c.y - 128.0/255.0) * (255.0/224.0);
             }
             float r = yy + 1.5748 * cr;
             float g = yy - 0.1873 * cb - 0.4681 * cr;
@@ -189,6 +200,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         pipeline = try device.makeRenderPipelineState(descriptor: desc)
         super.init()
         view.delegate = self
+        // The shader outputs BT.709 primaries (what the capture side encodes);
+        // tag the layer so the compositor colour-matches instead of guessing.
+        (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
     }
 
