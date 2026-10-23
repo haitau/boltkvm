@@ -734,6 +734,15 @@ final class Server: NSObject, SCStreamOutput {
         let mbps = elapsed > 0 ? Double(b) * 8 / elapsed / 1e6 : 0
         let audioLine = audioEnabled ? String(format: " audio=%d pkts/%.1fMbps", audioPackets, elapsed > 0 ? Double(audioBytes) * 8 / elapsed / 1e6 : 0) : ""
         log(String(format: "stats captured=%d encoded=%d sent=%d dropped=%d key=%d fps=%.1f bitrate=%.1fMbps encLat=%.2fms", c, e, s, d, k, fps, mbps, lat) + audioLine)
+        // A virtual display that came up "asleep" gets ~1-2 fps from
+        // ScreenCaptureKit no matter what the remote is doing, which looks like
+        // "app 自动降帧" but is a capture-side state. Say which state it is in.
+        if fps < 10, let id = preferredDisplayID, id != 0 {
+            let asleep = CGDisplayIsAsleep(id) != 0
+            let active = CGDisplayIsActive(id) != 0
+            log("capture throttle: display=\(id) active=\(active) asleep=\(asleep) frames=\(c)")
+            if asleep { wakeDisplay() }
+        }
         if lat > 12 { log("WARNING: encode latency \(String(format: "%.1f", lat))ms exceeds 12ms budget") }
         if e > 0 && Double(d) / Double(e + d) > 0.01 { log("WARNING: drop ratio exceeds 1%") }
     }
