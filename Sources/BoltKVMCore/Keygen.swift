@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import Security
+import CommonCrypto
 
 /// Pre-shared key helpers.
 ///
@@ -19,9 +20,9 @@ import Security
 /// change was needed. Rotating it means `keygen --force` on the server and
 /// re-entering it on each client.
 enum PSK {
-    /// No lookalikes: 0/O, 1/l/I are absent, so a password read off a screen is
-    /// never ambiguous.
-    static let alphabet = Array("23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ")
+    /// Lowercase + digits, with the lookalikes removed (0/o, 1/l/i): a password
+    /// read off a screen or typed on another keyboard has no case to get wrong.
+    static let alphabet = Array("23456789abcdefghjkmnpqrstuvwxyz")
 
     /// 16 hex chars of SHA-256, grouped for readability: `A1B2 C3D4 E5F6 0789`.
     static func fingerprint(_ key: Data) -> String {
@@ -43,9 +44,7 @@ enum PSK {
             // install usable instead of dead.
             bytes = (0..<8).map { _ in UInt8.random(in: 0...255) }
         }
-        let chars = bytes.map { alphabet[Int($0) % alphabet.count] }
-        let half = chars.count / 2
-        return String(chars[..<half]) + "-" + String(chars[half...])
+        return String(bytes.map { alphabet[Int($0) % alphabet.count] })
     }
 
     static var defaultPath: String {
@@ -60,10 +59,38 @@ enum PSK {
         return line.isEmpty ? nil : line
     }
 
+    /// Whatever the user typed: no separators, no case. `K7M3-P9QX`, `k7m3 p9qx`
+    /// and `K7M3P9QX` all become the same password.
+    static func normalize(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .filter { !$0.isWhitespace && $0 != "-" && $0 != "_" }
+    }
+
     /// True when the string looks like a password this generator could produce.
     static func isGeneratedPassword(_ raw: String) -> Bool {
-        let compact = raw.replacingOccurrences(of: "-", with: "").trimmingCharacters(in: .whitespaces)
+        let compact = normalize(raw)
         return compact.count == 8 && compact.allSatisfy { alphabet.contains($0) }
+    }
+
+    /// The 8-character alphabet is only ~40 bits, which is fine online (one guess
+    /// per second) but weak offline if someone captures a handshake. Stretching it
+    /// with PBKDF2 makes each offline guess ~100 ms instead of ~1 µs, so an
+    /// 8-character password behaves like a much longer one in practice.
+    static func stretch(_ password: String) -> Data {
+        let salt = Array("boltkvm-psk-v1".utf8)
+        var out = [UInt8](repeating: 0, count: 32)
+        let input = Array(normalize(password).utf8)
+        let status = CCKeyDerivationPBKDF(CCPBKDFAlgorithm(kCCPBKDF2),
+                                          input, input.count,
+                                          salt, salt.count,
+                                          CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
+                                          120_000,
+                                          &out, out.count)
+        if status != kCCSuccess {
+            return Data(SHA256.hash(data: Data(input)))
+        }
+        return Data(out)
     }
 
     /// Writes a fresh password to `path` (0600) and returns it. Used by the panel's

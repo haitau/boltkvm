@@ -19,6 +19,10 @@ final class ServerSettingsController: NSWindowController {
     private let toggleButton = NSButton(title: "", target: nil, action: nil)
     private let rotateButton = NSButton(title: L.t("server.panel.rotate"),
                                         target: nil, action: nil)
+    private let copyButton = NSButton(title: L.t("server.panel.copy"), target: nil, action: nil)
+    /// What `copyButton` puts on the pasteboard (nil when the key is not a
+    /// generated password, e.g. an old 64-hex file).
+    private var currentPassword: String?
     private let hintLabel = NSTextField(wrappingLabelWithString: L.t("server.panel.hint"))
 
     init(server: ServerAppController) {
@@ -112,6 +116,12 @@ final class ServerSettingsController: NSWindowController {
         toggleButton.frame = NSRect(x: 24, y: 24, width: 140, height: 30)
         content.addSubview(toggleButton)
 
+        copyButton.bezelStyle = .rounded
+        copyButton.target = self
+        copyButton.action = #selector(copyPassword)
+        copyButton.frame = NSRect(x: 24, y: 56, width: 130, height: 24)
+        content.addSubview(copyButton)
+
         rotateButton.bezelStyle = .rounded
         rotateButton.target = self
         rotateButton.action = #selector(rotatePassword)
@@ -122,6 +132,15 @@ final class ServerSettingsController: NSWindowController {
         close.bezelStyle = .rounded
         close.frame = NSRect(x: 356, y: 24, width: 100, height: 30)
         content.addSubview(close)
+    }
+
+    /// Typing 8 characters on another keyboard is the annoying part, so make the
+    /// panel's password one click away (selecting the hint text also works).
+    @objc private func copyPassword() {
+        guard let password = currentPassword else { return }
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(password, forType: .string)
     }
 
     /// Rotation breaks every stored client key, so it is confirmed first and then
@@ -167,15 +186,19 @@ final class ServerSettingsController: NSWindowController {
         // same bytes), so at least show which key this machine will accept:
         // matching fingerprints on both ends is the whole "sync" story.
         var hint = L.t("server.panel.hint")
+        currentPassword = nil
         if let key = resolveAuthKey([]) {
             if let stored = PSK.storedText(), PSK.isGeneratedPassword(stored) {
-                hint += "\n" + L.f("server.panel.password", stored)
+                let normalized = PSK.normalize(stored)
+                currentPassword = normalized
+                hint += "\n" + L.f("server.panel.password", normalized)
             }
             hint += "  " + L.f("server.panel.fingerprint", PSK.fingerprint(key))
         } else {
             hint += "\n" + L.t("server.panel.nokey")
         }
         hintLabel.stringValue = hint
+        copyButton.isHidden = currentPassword == nil
         let current = Prefs.serverDisplaySize
         resolutionPopup.removeAllItems()
         var labels: [(String, String)] = []

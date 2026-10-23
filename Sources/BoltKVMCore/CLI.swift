@@ -35,7 +35,9 @@ public enum CLI {
             // operator read the password off the 被控端 panel.
             if let generated = PSK.ensureKey(args: args) {
                 log("auth: generated connection password \(generated) (saved to ~/.boltkvm-key)")
-                authKey = Data(generated.utf8)
+                // Re-resolve through the normal path so the generated password gets
+                // the same stretching a client will apply to what the user types.
+                authKey = resolveAuthKey(args)
             } else {
                 log("refusing to start: no pre-shared key and cannot create ~/.boltkvm-key; pass --key, set $BOLTKVM_KEY, or use --insecure")
                 exit(2)

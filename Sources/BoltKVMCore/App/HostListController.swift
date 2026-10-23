@@ -286,7 +286,11 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
             HostListController.rememberCustomResolution(custom)
         }
         let account = "\(hostField.stringValue):\(port)"
-        let keyText = keyField.stringValue
+        // Normalise what the user typed: `K7M3-P9QX`, `k7m3 p9qx` and `k7m3p9qx`
+        // are the same password, and the file should hold the canonical form.
+        let keyText = PSK.isGeneratedPassword(keyField.stringValue)
+            ? PSK.normalize(keyField.stringValue)
+            : keyField.stringValue
         let hasKey = !keyText.isEmpty
         if hasKey {
             HostSecrets.set(keyText, account: account)

@@ -29,7 +29,7 @@
 "client.label.host" = "主机";
 "client.label.port" = "端口";
 "client.label.key" = "连接密码";
-"client.placeholder.key" = "被控端面板里的 8 位连接密码";
+"client.placeholder.key" = "被控端面板里的 8 位连接密码（可点「复制」）";
 "client.check.input" = "转发键鼠";
 "client.check.audio" = "音频";
 "client.button.connect" = "连接";
@@ -110,6 +110,7 @@
 "server.menu.settings" = "打开设置…";
 
 "server.panel.password" = "连接密码 %@（主控端填一次即可）";
+"server.panel.copy" = "复制连接密码";
 "server.panel.fingerprint" = "指纹 %@";
 "server.panel.nokey" = "本机还没有密钥：点「启动服务」时会自动生成一个 8 位连接密码。";
 

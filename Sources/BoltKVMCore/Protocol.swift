@@ -294,6 +294,11 @@ func resolveAuthKey(_ args: [String]) -> Data? {
         if !line.isEmpty { candidates.append(line) }
     }
     guard let raw = candidates.first else { return nil }
+    // A generated connection password (8 chars, no separators) is stretched: see
+    // PSK.stretch for why. The normalisation also makes `K7M3-P9QX` == `k7m3p9qx`.
+    if PSK.isGeneratedPassword(raw) {
+        return PSK.stretch(raw)
+    }
     if raw.count == 64, raw.allSatisfy({ $0.isHexDigit }) {
         var out = Data(capacity: 32)
         var i = raw.startIndex
