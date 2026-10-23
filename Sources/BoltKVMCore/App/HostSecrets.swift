@@ -1,6 +1,6 @@
 import Foundation
 
-/// Per-host pre-shared keys, stored as 0600 files next to `hosts.json`.
+/// Per-host pre-shared keys, stored as 0600 files under `BoltKVM/keys/`.
 ///
 /// Deliberately not Keychain: every build re-signs the app, and a Keychain item's
 /// ACL is tied to the code signature, so each rebuild looks like a different app
@@ -19,15 +19,26 @@ enum HostSecrets {
     }
 
     /// Account names come from `host:port`; ":" is legal in a file name but
-    /// confusing in Finder, so it becomes "_".
+    /// confusing in Finder, so it becomes "_". Everything outside a small
+    /// whitelist is dropped: the account field is user input, and a name like
+    /// `../../notes` must not escape this directory.
     private static func url(for account: String) -> URL {
-        directory.appendingPathComponent(account.replacingOccurrences(of: ":", with: "_"))
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_")
+        var name = String(account.map { allowed.contains($0) ? $0 : "_" })
+        while name.hasPrefix(".") { name.removeFirst() }
+        if name.isEmpty { name = "host" }
+        return directory.appendingPathComponent(name)
     }
 
     @discardableResult
     static func set(_ secret: String, account: String) -> Bool {
         let path = url(for: account)
         do {
+            // Create with 0600 instead of writing first and correcting it: a
+            // chmod that fails after the write leaves the key world-readable
+            // while the caller still believes it was stored.
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
             try Data(secret.utf8).write(to: path, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
             return true

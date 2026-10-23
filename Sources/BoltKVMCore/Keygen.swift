@@ -14,7 +14,7 @@ import CommonCrypto
 ///    saved per host (`keys/<host>_<port>`, 0600) and reused afterwards;
 /// 3. both ends print the same fingerprint, which is how you confirm they agree.
 ///
-/// The password is 8 characters from a 58-symbol alphabet (~46.8 bits). That is
+/// The password is 8 characters from a 31-symbol alphabet (~40 bits). That is
 /// fine for the Thunderbolt-bridge threat model (reaching the port already needs
 /// physical access) and it is a *passphrase* to `resolveAuthKey`, so no protocol
 /// change was needed. Rotating it means `keygen --force` on the server and
@@ -175,7 +175,10 @@ extension CLI {
             log("keygen: cannot write \(path): \(error.localizedDescription)")
             exit(1)
         }
-        let key = Data(password.utf8)
+        // The handshake uses the stretched key, so the fingerprint shown here has
+        // to be the stretched one too: otherwise "both ends must show the same
+        // fingerprint" can never hold.
+        let key = PSK.stretch(password)
         print("wrote \(path) (0600)")
         print("connection password \(password)")
         print("fingerprint \(PSK.fingerprint(key))")

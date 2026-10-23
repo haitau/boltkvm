@@ -440,8 +440,13 @@ final class ServerAppController: NSObject {
         if logHandle == nil {
             // O_APPEND, not createFile: truncating here wiped the app's own
             // startup lines, and its stderr FILE keeps its old offset.
-            let fd = open(AppLog.path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
-            if fd >= 0 { logHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true) }
+            // 0600: this file also receives the helper's own log lines, which
+            // have contained key material (a generated password) in the past.
+            let fd = open(AppLog.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
+            if fd >= 0 {
+                _ = fchmod(fd, 0o600)  // fix an existing file created 0644
+                logHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+            }
         }
         let handle = pipe.fileHandleForReading
         handle.readabilityHandler = { [weak self] h in

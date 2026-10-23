@@ -34,7 +34,10 @@ public enum CLI {
             // an option on machines without SSH. Generate it here and let the
             // operator read the password off the 被控端 panel.
             if let generated = PSK.ensureKey(args: args) {
-                log("auth: generated connection password \(generated) (saved to ~/.boltkvm-key)")
+                // Not the password itself: this log ends up in a file on the
+                // remote machine (the app redirects helper output into
+                // ~/Library/Logs/BoltKVM.log). The panel shows it on demand.
+                log("auth: generated a new connection password (saved to ~/.boltkvm-key; the 被控端 panel shows it)")
                 // Re-resolve through the normal path so the generated password gets
                 // the same stretching a client will apply to what the user types.
                 authKey = resolveAuthKey(args)
@@ -71,7 +74,7 @@ public enum CLI {
                     } catch {
                         log("auth failed: \(error); closing")
                         conn.close()
-                        // 8 characters is ~47 bits, so guessing is already out of
+                        // 8 characters from a 31-symbol alphabet is ~40 bits, so guessing is already out of
                         // reach; the pause just keeps a stuck client from spinning
                         // the CPU and slows anyone who tries anyway.
                         try? await Task.sleep(nanoseconds: 1_000_000_000)
