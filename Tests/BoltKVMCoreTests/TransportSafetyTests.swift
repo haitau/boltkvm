@@ -135,6 +135,40 @@ final class TransportSafetyTests: XCTestCase {
         conn.close()
     }
 
+    /// The input payload layout is a wire format: offsets, endianness and the
+    /// 48-byte size are shared with the server's injector. Round-trip plus a
+    /// byte-level check so a field reorder cannot slip through.
+    func testInputEventLayoutRoundTrips() throws {
+        let ev = InputEvent(type: .rightMouseDown, keyCode: 0x1234, flags: 0x100000,
+                            x: 0.25, y: 0.75, button: 1,
+                            scrollX: 2.5, scrollY: -3.5, phase: 2, momentum: 1, isRepeat: true)
+        let d = ev.encode()
+        XCTAssertEqual(d.count, 48)
+        XCTAssertEqual(d[0], InputEventType.rightMouseDown.rawValue)
+        XCTAssertEqual(d[1], 0x12)  // big-endian UInt16 keyCode
+        XCTAssertEqual(d[2], 0x34)
+        // big-endian UInt64 flags: 0x100000 = 1 << 20 -> the 0x10 lands at byte 8
+        XCTAssertEqual(Array(d[3..<8]), [0, 0, 0, 0, 0])
+        XCTAssertEqual(d[8], 0x10)
+        XCTAssertEqual(d[27], 1)    // button
+        XCTAssertEqual(d[44], 2)    // phase
+        XCTAssertEqual(d[45], 1)    // momentum
+        XCTAssertEqual(d[46], 1)    // isRepeat
+        let back = try XCTUnwrap(InputEvent.decode(d))
+        XCTAssertEqual(back.type, ev.type)
+        XCTAssertEqual(back.keyCode, ev.keyCode)
+        XCTAssertEqual(back.flags, ev.flags)
+        XCTAssertEqual(back.x, ev.x)
+        XCTAssertEqual(back.y, ev.y)
+        XCTAssertEqual(back.button, ev.button)
+        XCTAssertEqual(back.scrollX, ev.scrollX)
+        XCTAssertEqual(back.scrollY, ev.scrollY)
+        XCTAssertEqual(back.phase, ev.phase)
+        XCTAssertEqual(back.momentum, ev.momentum)
+        XCTAssertEqual(back.isRepeat, ev.isRepeat)
+        XCTAssertNil(InputEvent.decode(d.prefix(47)))
+    }
+
     func testCloseIsIdempotent() {
         let (conn, peer) = makePair()
         conn.close()
