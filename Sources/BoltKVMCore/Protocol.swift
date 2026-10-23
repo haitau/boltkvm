@@ -370,6 +370,11 @@ func deriveSessionKeys(psk: Data, nonce: Data,
 final class SessionCipher {
     private let key: SymmetricKey
     private var counter: UInt64 = 0
+    /// The counter must advance exactly once per sealed frame and in the same
+    /// order the bytes hit the wire; two senders on one connection would
+    /// otherwise reuse a nonce (fatal for ChaCha20-Poly1305) or hand the peer
+    /// counters in the wrong order.
+    private let lock = NSLock()
 
     init(key: SymmetricKey) { self.key = key }
 
@@ -384,6 +389,8 @@ final class SessionCipher {
     }
 
     func seal(_ frame: Data) -> Data {
+        lock.lock()
+        defer { lock.unlock() }
         guard frame.count >= HEADER_SIZE else { return frame }
         var header = Data(frame.prefix(HEADER_SIZE))
         let body = Data(frame.dropFirst(HEADER_SIZE))
@@ -398,6 +405,8 @@ final class SessionCipher {
     }
 
     func open(header: Data, body: Data) throws -> Data {
+        lock.lock()
+        defer { lock.unlock() }
         guard body.count >= 16 else { throw POSIXError(.EBADMSG) }
         let ct = Data(body.dropLast(16))
         let tag = Data(body.suffix(16))
@@ -424,11 +433,16 @@ final class TCPConnection {
     /// protocol point (right after authOk) so the nonce counters stay aligned.
     var outCipher: SessionCipher?
     var inCipher: SessionCipher?
+    private var closed = false
+    private let closeLock = NSLock()
 
     func send(_ data: Data) throws {
-        let wire = outCipher.map { $0.seal(data) } ?? data
+        // Sealing must happen under the same lock as the write: encrypting
+        // outside it lets two senders number the frames in one order and write
+        // them in another, which the peer rejects as a bad MAC.
         sendLock.lock()
         defer { sendLock.unlock() }
+        let wire = outCipher.map { $0.seal(data) } ?? data
         try wire.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             guard let base = raw.baseAddress else { return }
             var sent = 0
@@ -485,7 +499,26 @@ final class TCPConnection {
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     }
 
-    func close() { Darwin.close(fd) }
+    /// Idempotent, and it wakes a reader blocked in `recv` before the fd goes
+    /// away. Without the `shutdown` a cancelled session can leave its reader
+    /// thread asleep on a descriptor number that a later connection reuses.
+    func close() {
+        closeLock.lock()
+        defer { closeLock.unlock() }
+        guard !closed else { return }
+        closed = true
+        Darwin.shutdown(fd, SHUT_RDWR)
+        Darwin.close(fd)
+    }
+
+    /// Installs the session ciphers as one step so a heartbeat or frame send
+    /// can never observe a half re-keyed connection.
+    func setSessionCiphers(send: SessionCipher?, recv: SessionCipher?) {
+        sendLock.lock()
+        outCipher = send
+        sendLock.unlock()
+        inCipher = recv
+    }
 }
 
 struct BindTarget {

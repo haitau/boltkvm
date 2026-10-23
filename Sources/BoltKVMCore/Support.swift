@@ -132,8 +132,8 @@ func authenticateServer(conn: TCPConnection, key: Data,
             try conn.send(packet(type: .authOk, ptsMicros: 0, payload: payload))
             // Auth ok is the last plaintext packet: everything after it is sealed.
             let keys = deriveSessionKeys(psk: key, nonce: nonce)
-            conn.inCipher = SessionCipher(key: keys.c2s)
-            conn.outCipher = SessionCipher(key: keys.s2c)
+            conn.setSessionCiphers(send: SessionCipher(key: keys.s2c),
+                                   recv: SessionCipher(key: keys.c2s))
             return try awaitClientUpgrade(conn: conn, key: key, nonce: nonce)
         }
     }
@@ -194,8 +194,8 @@ private func installSessionKeys(conn: TCPConnection, psk: Data, nonce: Data, ext
     // Both roles install at the same protocol point, but each direction has its
     // own key: the client sends with c2s and reads with s2c, the server the other
     // way round. Swapping them makes the first re-keyed packet fail to decrypt.
-    conn.outCipher = SessionCipher(key: client ? keys.c2s : keys.s2c)
-    conn.inCipher = SessionCipher(key: client ? keys.s2c : keys.c2s)
+    conn.setSessionCiphers(send: SessionCipher(key: client ? keys.c2s : keys.s2c),
+                           recv: SessionCipher(key: client ? keys.s2c : keys.c2s))
 }
 
 /// Installs the session ciphers once the server confirms auth. Both sides set
@@ -212,8 +212,8 @@ func enableClientEncryption(conn: TCPConnection, nonce: Data?, forwardSecrecy: B
 func enableClientEncryption(conn: TCPConnection, nonce: Data, key: Data,
                             forwardSecrecy: Bool = false) throws {
     let keys = deriveSessionKeys(psk: key, nonce: nonce)
-    conn.outCipher = SessionCipher(key: keys.c2s)
-    conn.inCipher = SessionCipher(key: keys.s2c)
+    conn.setSessionCiphers(send: SessionCipher(key: keys.c2s),
+                           recv: SessionCipher(key: keys.s2c))
     guard forwardSecrecy else { return }
 
     let pair = Curve25519.KeyAgreement.PrivateKey()
