@@ -99,10 +99,11 @@ func prepareVirtualDisplay(args: [String]) -> BuiltinVirtualDisplay? {
     // activity it can sit ASLEEP, and a sleeping display produces no frames.
     wakeDisplay()
     guard let display else {
-        // Capture whatever exists rather than refusing to start; the CLI logs the
-        // reason (identity conflict) from the C layer.
-        log("virtual display: system refused \(logicalWidth)x\(logicalHeight) (logical); capturing the existing display instead")
-        return nil
+        // Do not fall back to the physical screen: the whole point of the
+        // builtin display is that the operator's own desktop stays private.
+        // Exiting hands the problem to the supervisor, which retries.
+        log("virtual display: system refused \(logicalWidth)x\(logicalHeight) (logical) after 10 retries; exiting instead of streaming the local desktop")
+        exit(3)
     }
     let took = String(format: "%.1fs", Date().timeIntervalSince(started))
     let backing = display.backingPixels().map { "\($0.width)x\($0.height)" } ?? "unknown"

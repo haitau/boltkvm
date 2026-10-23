@@ -33,8 +33,10 @@ enum Watchdog {
         p.standardError = pipe
         do {
             try p.run()
-            p.waitUntilExit()
+            // Drain first: waiting for exit before reading deadlocks once the
+            // child writes more than the pipe buffer.
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
             return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
             return nil
