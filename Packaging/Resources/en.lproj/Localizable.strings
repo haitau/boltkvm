@@ -50,6 +50,8 @@
 "server.status.connected" = "Connected";
 "server.status.starting" = "Starting…";
 "server.status.restarting" = "Exited, restarting in 3s";
+"server.status.blocked.detail" = "another BoltKVM instance is running";
+"server.status.code" = "exit code %d";
 "server.status.needsPermission" = "Screen Recording required";
 "server.status.port" = "Port %d";
 "server.status.stats" = "%@ fps · port %d";

@@ -513,11 +513,11 @@ final class ServerAppController: NSObject {
             process = nil
             log("app: helper refused to start: another server instance owns the lock")
             guard wanted else {
-                setState(L.t("server.status.blocked"), detail: "another instance is running")
+                setState(L.t("server.status.blocked"), detail: L.t("server.status.blocked.detail"))
                 return
             }
             reapOrphanHelpers()
-            setState(L.t("server.status.restarting"), detail: "code 9")
+            setState(L.t("server.status.restarting"), detail: L.f("server.status.code", 9))
             let work = DispatchWorkItem { [weak self] in
                 guard let self, self.wanted else { return }
                 self.launch()
@@ -533,7 +533,7 @@ final class ServerAppController: NSObject {
         guard wanted else { return }
         // The CLI relies on the supervisor loop; in the app role restarts are the
         // app's job. A small delay keeps a crash loop from spinning.
-        setState(L.t("server.status.restarting"), detail: "code \(status)")
+        setState(L.t("server.status.restarting"), detail: L.f("server.status.code", Int(status)))
         log("app: helper exited with \(status); restarting in 3s")
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.wanted else { return }

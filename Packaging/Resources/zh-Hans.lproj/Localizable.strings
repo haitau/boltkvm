@@ -50,6 +50,8 @@
 "server.status.connected" = "已连接";
 "server.status.starting" = "启动中…";
 "server.status.restarting" = "已退出，3 秒后重启";
+"server.status.blocked.detail" = "另一个 BoltKVM 实例正在运行";
+"server.status.code" = "退出码 %d";
 "server.status.needsPermission" = "需要屏幕录制权限";
 "server.status.port" = "端口 %d";
 "server.status.stats" = "%@ fps · 端口 %d";
