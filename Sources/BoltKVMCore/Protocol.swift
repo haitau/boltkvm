@@ -429,6 +429,12 @@ final class TCPConnection {
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     }
 
+    /// Session reads give up after this long without a packet. The client pings
+    /// every 3 s and the server heartbeats every 1 s, so silence means the link
+    /// is gone — without it a peer that vanishes (sleep, unplug, crash) leaves
+    /// the reader blocked in `recv` forever.
+    static let sessionRecvTimeout = 10
+
     /// Nil until the handshake completes; both ends install them at the same
     /// protocol point (right after authOk) so the nonce counters stay aligned.
     var outCipher: SessionCipher?

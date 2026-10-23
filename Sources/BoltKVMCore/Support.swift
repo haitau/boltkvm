@@ -220,7 +220,11 @@ func enableClientEncryption(conn: TCPConnection, nonce: Data, key: Data,
     try conn.send(packet(type: .authExchange, ptsMicros: 0,
                          payload: Data(pair.publicKey.rawRepresentation)))
     conn.setRecvTimeout(2)
-    defer { conn.setRecvTimeout(0) }
+    // After the handshake the client expects a heartbeat every second and pings
+    // every three; a ten second silence means the peer is gone. Without this the
+    // reader can sit in `recv` forever after an unplug or sleep and the window
+    // keeps claiming it is streaming.
+    defer { conn.setRecvTimeout(TCPConnection.sessionRecvTimeout) }
     let (head, body) = try conn.recvFrame()
     guard head.type == .authExchange, body.count == 32 else { throw POSIXError(.EPROTO) }
     let peer = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: body)

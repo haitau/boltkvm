@@ -41,6 +41,15 @@ final class SessionPump {
     /// error so the caller can decide whether it means "wrong key" (CLI/app
     /// state) or an ordinary disconnect.
     func run(deadline: DispatchTime? = nil) throws {
+        // Keep-alive in the client→server direction: the server's read loop only
+        // sees input when the user acts, so without a periodic packet an idle
+        // session would look dead to a read timeout.
+        let ping = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "boltkvm.clock.ping"))
+        ping.schedule(deadline: .now() + 3, repeating: 3)
+        ping.setEventHandler { [conn] in _ = try? conn.send(timeSyncRequest()) }
+        ping.resume()
+        defer { ping.cancel() }
+
         var winPackets = 0, winFrames = 0, winBytes = 0
         var last = DispatchTime.now().uptimeNanoseconds
         var lastLong = last
