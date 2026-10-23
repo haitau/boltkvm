@@ -85,11 +85,16 @@
 "common.cancel" = "Cancel";
 "menu.remote" = "Remote";
 "menu.remote.missionControl" = "Mission Control";
+"menu.remote.showDesktop" = "Desktop";
 
 "client.toolbar.app" = "App";
 "client.toolbar.missionControl" = "Mission Control";
 "client.toolbar.missionControl.tip" = "Show the remote Mission Control";
 "client.remote.needInput" = "Turn on Forward input for this host first — otherwise there is no way back";
+"client.toolbar.desktop" = "Desktop";
+"client.toolbar.desktop.tip" = "Show the remote desktop";
+"client.toolbar.desktop.restore" = "Restore Windows";
+"client.toolbar.desktop.restore.tip" = "Bring the windows that were moved aside back";
 "client.hosts.title" = "BoltKVM";
 "client.hosts.empty" = "No saved Macs yet — click ＋ to add one";
 "client.hosts.column" = "Remote Macs";

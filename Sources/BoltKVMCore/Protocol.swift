@@ -113,6 +113,10 @@ enum RemoteAction: UInt8 {
     case appWindows = 3
     case spaceLeft = 4
     case spaceRight = 5
+    /// Restore the windows that `.showDesktop` moved aside. The Dock exposes
+    /// this as an explicit state (`showdesktop.set 0`), so the client never has
+    /// to guess what the remote is currently showing.
+    case hideDesktop = 6
 }
 
 struct PacketHeader {

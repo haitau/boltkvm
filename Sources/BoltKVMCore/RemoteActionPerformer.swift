@@ -24,11 +24,22 @@ private let dockNotify: CoreDockSendNotificationFn? = {
 }()
 
 @discardableResult
-private func sendDockNotification(_ name: String) -> Bool {
+private func sendDockNotification(_ name: String, argument: Int32 = 0) -> Bool {
     guard let dockNotify else { return false }
-    let status = dockNotify(name as CFString, 0)
-    if status != 0 { log("command: \(name) returned \(status)") }
+    let status = dockNotify(name as CFString, argument)
+    if status != 0 { log("command: \(name) \(argument) returned \(status)") }
     return status == 0
+}
+
+/// `com.apple.showdesktop.awake` is a *toggle*: call it twice and the windows
+/// come back, which reads as "the button did the wrong thing". The Dock also
+/// understands `com.apple.showdesktop.set` with an explicit 1/0, measured on
+/// macOS 15: set 1 twice keeps the desktop shown, set 0 restores the windows.
+private func setDesktopShown(_ shown: Bool) -> Bool {
+    let flag: Int32 = shown ? 1 : 0
+    guard sendDockNotification("com.apple.showdesktop.set", argument: flag) else { return false }
+    log("command: showDesktop set \(flag) via dock notification")
+    return true
 }
 
 func performRemoteAction(_ action: RemoteAction) {
@@ -46,11 +57,21 @@ func performRemoteAction(_ action: RemoteAction) {
         }
         postShortcut(.appWindows)
     case .showDesktop:
+        if setDesktopShown(true) { return }
+        // Old Dock: fall back to the toggle, which at least shows the desktop
+        // when it was not already shown.
         if sendDockNotification("com.apple.showdesktop.awake") {
-            log("command: showDesktop via dock notification")
+            log("command: showDesktop via awake toggle")
             return
         }
         postShortcut(.showDesktop)
+    case .hideDesktop:
+        if setDesktopShown(false) { return }
+        if sendDockNotification("com.apple.showdesktop.awake") {
+            log("command: hideDesktop via awake toggle")
+            return
+        }
+        log("command: hideDesktop unsupported on this Dock")
     case .spaceLeft:
         postShortcut(.spaceLeft)
     case .spaceRight:

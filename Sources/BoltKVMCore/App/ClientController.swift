@@ -31,6 +31,10 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private static let tbStatus = NSToolbarItem.Identifier("boltkvm.status")
     /// Live `fps · bitrate` label hosted in the toolbar's trailing edge.
     private let toolbarStatusLabel = NSTextField(labelWithString: "")
+    /// "桌面" becomes "还原窗口" after the remote moved its windows aside, so the
+    /// second press does what the title says instead of toggling the remote back.
+    private var desktopButton: NSButton?
+    private var desktopHidden = false
 
     /// Set when the list window opens this controller: prefills the fields and
     /// connects right away.
@@ -113,6 +117,8 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         session?.onEnd = { [weak self] in
             guard let self else { return }
             self.stopReportTimer(report: true)
+            self.desktopHidden = false
+            self.updateDesktopButton()
             self.refreshToolbarStatus()
         }
         session?.onFormat = { [weak self] width, height, color in
@@ -173,16 +179,11 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         // Control and Show Desktop (com.apple.expose.front.awake) is accepted and
         // then does nothing here; the keyboard route needs Accessibility, the
         // AppleScript route needs Automation, and this app gets neither.
-        // Show Desktop used to live here too. It is gone on purpose: on macOS 15
-        // every non-interactive route to it is a no-op. The Dock notification
-        // (com.apple.showdesktop.awake) is accepted (status 0) and does nothing;
-        // the WindowManager accepts AXShowDesktop/AXHideDesktop (status 0) but
-        // leaves its own HideDesktop flag at 0; synthetic F11 is filtered like
-        // every other system shortcut. A button that cannot act is worse than no
-        // button, so Mission Control is the only remote system action left.
         let entries: [(String, String, String, Selector)] = [
             (L.t("client.toolbar.missionControl"), "square.grid.2x2",
              L.t("client.toolbar.missionControl.tip"), #selector(showMissionControl)),
+            (L.t("client.toolbar.desktop"), "display",
+             L.t("client.toolbar.desktop.tip"), #selector(showDesktop)),
         ]
         for (title, symbol, tip, action) in entries {
             let button = NSButton(title: title, target: self, action: action)
@@ -193,6 +194,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             button.font = .systemFont(ofSize: 11)
             button.toolTip = tip
             stack.addArrangedSubview(button)
+            if action == #selector(showDesktop) { desktopButton = button }
         }
         stack.setFrameSize(stack.fittingSize)
         return stack
@@ -364,7 +366,20 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     }
 
     /// Show Desktop.
+    @objc func showDesktop() {
+        desktopHidden.toggle()
+        updateDesktopButton()
+        session?.sendCommand(desktopHidden ? .showDesktop : .hideDesktop)
+    }
 
+    private func updateDesktopButton() {
+        guard let button = desktopButton else { return }
+        button.title = desktopHidden ? L.t("client.toolbar.desktop.restore")
+                                     : L.t("client.toolbar.desktop")
+        button.toolTip = desktopHidden ? L.t("client.toolbar.desktop.restore.tip")
+                                       : L.t("client.toolbar.desktop.tip")
+        button.image = toolbarImage(desktopHidden ? "macwindow.on.rectangle" : "display")
+    }
 
     @objc func toggleFullScreenAction(_ sender: Any?) {
         window?.toggleFullScreen(sender)

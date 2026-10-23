@@ -287,10 +287,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// control menu. They travel over the input channel, so no new protocol.
     private func buildRemoteMenu() -> NSMenu {
         let menu = NSMenu(title: L.t("menu.remote"))
-        // No App Exposé or Show Desktop entry: see ClientController
-        // .remoteActionsView for why neither can be triggered here.
-        let entries: [String] = ["menu.remote.missionControl"]
-        let actions: [Selector] = [#selector(remoteMissionControl)]
+        // No App Exposé entry: see ClientController.remoteActionsView for why.
+        let entries: [String] = [
+            "menu.remote.missionControl",
+            "menu.remote.showDesktop",
+        ]
+        let actions: [Selector] = [#selector(remoteMissionControl),
+                                   #selector(remoteShowDesktop)]
         for (key, action) in zip(entries, actions) {
             let item = NSMenuItem(title: L.t(key), action: action, keyEquivalent: "")
             item.target = self
@@ -300,6 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func remoteMissionControl() { clientController?.showMissionControl() }
+    @objc private func remoteShowDesktop() { clientController?.showDesktop() }
 
     private func updateRoleMenu() {
         guard let roleMenu else { return }

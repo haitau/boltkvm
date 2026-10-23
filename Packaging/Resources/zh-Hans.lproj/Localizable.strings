@@ -86,11 +86,16 @@
 "common.cancel" = "取消";
 "menu.remote" = "远程";
 "menu.remote.missionControl" = "调度中心";
+"menu.remote.showDesktop" = "桌面";
 
 "client.toolbar.app" = "App";
 "client.toolbar.missionControl" = "调度中心";
 "client.toolbar.missionControl.tip" = "显示远端调度中心（多桌面）";
 "client.remote.needInput" = "先在编辑面板打开「转发键鼠」，否则进得去出不来";
+"client.toolbar.desktop" = "桌面";
+"client.toolbar.desktop.tip" = "让远端显示桌面";
+"client.toolbar.desktop.restore" = "还原窗口";
+"client.toolbar.desktop.restore.tip" = "把挪到一边的窗口放回来（再按一次「桌面」重新挪开）";
 "client.hosts.title" = "BoltKVM";
 "client.hosts.empty" = "还没有保存的被控端，点 ＋ 添加";
 "client.hosts.column" = "被控端";
