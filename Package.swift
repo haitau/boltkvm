@@ -34,6 +34,14 @@ let package = Package(
         ),
         // The single app bundle. Packaging/build-app.sh turns this into
         // BoltKVM.app; the role is chosen at first run, not by which binary.
+        // Pure-logic regression tests (wire format, crypto, key handling). They
+        // need XCTest, which ships with Xcode — CLI-only machines cannot run
+        // them, hence `boltkvm selftest` stays as the dependency-free fallback.
+        .testTarget(
+            name: "BoltKVMCoreTests",
+            dependencies: ["BoltKVMCore"],
+            path: "Tests/BoltKVMCoreTests"
+        ),
         .executableTarget(
             name: "BoltKVMApp",
             dependencies: ["BoltKVMCore"],

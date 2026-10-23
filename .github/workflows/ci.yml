@@ -24,6 +24,9 @@ jobs:
       - name: Build (release)
         run: swift build -c release
 
+      - name: Regression tests (XCTest)
+        run: ./scripts/test.sh
+
       - name: Protocol self-test
         run: .build/release/boltkvm selftest
 

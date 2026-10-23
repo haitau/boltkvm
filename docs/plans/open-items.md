@@ -16,7 +16,7 @@
 | ~~P2-3~~ | ~~传输是明文 TCP~~ | **已解决**：ChaCha20-Poly1305 会话层，帧头作 AAD | 见 [传输加密](../reports/2026-10-22-transport-encryption.md) |
 | P1-发布 | GitHub Actions 自动发布 | **已配好未实跑**：`ci.yml`（build + selftest + cryptotest + 打包 artifact）、`release.yml`（tag `v*` → 构建、写版本号、zip + sha256、Developer ID 或 ad-hoc 签名、建 Release） | 需要 push 一个 tag 才能在 GitHub 上验证；公证受 hardened runtime ↔ CGVirtualDisplay 冲突阻塞，见 [发布流程](../releasing.md) |
 | P1-密码 | 连接密码自动生成与轮换 | **已完成 2026-10-23**：服务端首启自动生成 8 位口令（60 秒内可读、0600），面板显示 + 「重新生成密码…」按钮（二次确认、重启 helper、弹窗给出新密码） | 实测旧密码 0 帧、`auth failed`，新密码 `auth ok` |
-| B8 | 收流循环重复 | CLI `Client.swift` 与 app `ClientSession.swift` 各有一份 recv/decode/stats 循环（约 200 行重复） | 抽一层共享 pipeline；改动面大，等有回归手段再做 |
+| B8 | 收流循环重复 | CLI `Client.swift` 与 app `ClientSession.swift` 各有一份 recv/decode/stats 循环（约 200 行重复） | 抽一层共享 pipeline；2026-10-23 起有 `swift test`（26 个协议/加密/口令用例）兜底，具备动手条件 |
 | P1-连接管理 | 启动界面改为被控端列表、每台可编辑（分辨率）、记住登录密码 | R4/R5 完成；**R1 列表已完成并验证**；**R2 分辨率已实现**（config 包重建虚拟屏，CLI 双端验证）；画质假档位已删，R3 仍阻塞 | 见 [连接管理需求](2026-10-22-connection-manager.md) 与 [设计](2026-10-22-connection-manager-design.md)；R3 需服务端登录/解锁能力 |
 
 ## 不列入·默认通过（2026-10-22 决定）

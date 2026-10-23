@@ -150,7 +150,10 @@ boltkvm server --width 3840 --height 2160 --port 7474 --seconds 0
 boltkvm client --host <被控端地址> --port 7474 --seconds 28800 \
   --render --switch-mode --input --reconnect
 
-# 自测（不需要任何权限，CI 也跑这两个）
+# 回归测试（需要 Xcode 的 XCTest；CLT-only 机器会自动退化成下面两个自测）
+scripts/test.sh
+
+# 自测（不需要任何权限，CI 也跑这三个）
 boltkvm selftest      # 协议编解码、边界
 boltkvm cryptotest    # 加密往返 + 篡改检测
 boltkvm displays      # 当前显示：active/awake/Main、像素与逻辑尺寸
