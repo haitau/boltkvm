@@ -330,6 +330,8 @@ final class Server: NSObject, SCStreamOutput {
     /// button still down (clicks then behave as drags, and a stuck ⌃ turns the
     /// next click into a right click). Release everything we may have posted.
     private func releaseInjectedInput() {
+        injectLock.lock()
+        defer { injectLock.unlock() }
         let point = lastMousePoint ?? CGPoint(x: displayBounds.midX, y: displayBounds.midY)
         // Release the keys we actually pressed (either hand), not just the left
         // ones: a right ⌘ held at disconnect would stay down otherwise.
@@ -376,6 +378,10 @@ final class Server: NSObject, SCStreamOutput {
     /// (not just the bit) is what lets a right-hand ⌃ be released by its own
     /// key up instead of being mistaken for the left one.
     private var heldModifiers = Set<CGKeyCode>()
+    /// `inject()` runs on the reader thread, `releaseInjectedInput()` can be
+    /// called from the send queue when a write fails; without this a release
+    /// can be followed by a late key-down and leave the remote stuck.
+    private let injectLock = NSLock()
 
     private func modifierBit(of key: CGKeyCode) -> UInt64 {
         Self.modifierKeys.first { $0.key == key }?.bit ?? 0
@@ -418,6 +424,8 @@ final class Server: NSObject, SCStreamOutput {
     }
 
     private func inject(_ ev: InputEvent) {
+        injectLock.lock()
+        defer { injectLock.unlock() }
         let p = CGPoint(
             x: displayBounds.minX + ev.x * displayBounds.width,
             y: displayBounds.minY + ev.y * displayBounds.height
