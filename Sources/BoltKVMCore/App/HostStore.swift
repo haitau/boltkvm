@@ -16,12 +16,15 @@ struct SavedHost: Codable, Identifiable, Equatable {
     /// nil keeps the old global preference; the editor sets these explicitly.
     var forwardInput: Bool?
     var audio: Bool?
+    /// 0 = standard BT.709 8-bit, 1 = wide-gamut 10-bit P3. nil keeps the
+    /// default, so hosts written by older builds keep working.
+    var color: UInt8?
     var lastConnected: Date?
 
     init(id: UUID = UUID(), name: String, host: String, port: UInt16 = 7474,
          pskAccount: String? = nil, width: Int? = nil, height: Int? = nil,
          forwardInput: Bool? = nil, audio: Bool? = nil,
-         lastConnected: Date? = nil) {
+         color: UInt8? = nil, lastConnected: Date? = nil) {
         self.id = id
         self.name = name
         self.host = host
@@ -31,11 +34,12 @@ struct SavedHost: Codable, Identifiable, Equatable {
         self.height = height
         self.forwardInput = forwardInput
         self.audio = audio
+        self.color = color
         self.lastConnected = lastConnected
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, host, port, width, height, forwardInput, audio, lastConnected
+        case id, name, host, port, width, height, forwardInput, audio, color, lastConnected
         case pskAccount
         /// Written by the earlier Keychain-backed build; read once, then re-encoded
         /// under the new name.
@@ -52,6 +56,7 @@ struct SavedHost: Codable, Identifiable, Equatable {
         height = try c.decodeIfPresent(Int.self, forKey: .height)
         forwardInput = try c.decodeIfPresent(Bool.self, forKey: .forwardInput)
         audio = try c.decodeIfPresent(Bool.self, forKey: .audio)
+        color = try c.decodeIfPresent(UInt8.self, forKey: .color)
         lastConnected = try c.decodeIfPresent(Date.self, forKey: .lastConnected)
         pskAccount = try c.decodeIfPresent(String.self, forKey: .pskAccount)
             ?? c.decodeIfPresent(String.self, forKey: .legacyPSK)
@@ -67,6 +72,7 @@ struct SavedHost: Codable, Identifiable, Equatable {
         try c.encodeIfPresent(height, forKey: .height)
         try c.encodeIfPresent(forwardInput, forKey: .forwardInput)
         try c.encodeIfPresent(audio, forKey: .audio)
+        try c.encodeIfPresent(color, forKey: .color)
         try c.encodeIfPresent(lastConnected, forKey: .lastConnected)
         try c.encodeIfPresent(pskAccount, forKey: .pskAccount)
     }

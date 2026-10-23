@@ -21,6 +21,8 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     /// Pixel size of the stream, kept so the percentage can be recomputed when
     /// the window resizes (full screen is how you get back to 100%).
     private var remotePixelSize = NSSize.zero
+    /// Colour pipeline the stream is actually using, shown as "P3" when wide.
+    private var streamColor = ColorMode.standard
     private var chromeTimer: Timer?
     private var appliedFullScreen: Bool?
     private var didLogInvisibleWindow = false
@@ -113,8 +115,11 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             self.stopReportTimer(report: true)
             self.refreshToolbarStatus()
         }
-        session?.onFormat = { [weak self] width, height in
-            self?.fitWindowToRemote(width: width, height: height)
+        session?.onFormat = { [weak self] width, height, color in
+            guard let self else { return }
+            self.streamColor = color
+            self.refreshToolbarStatus()
+            self.fitWindowToRemote(width: width, height: height)
         }
         session?.onStats = { [weak self] text in
             guard let self else { return }
@@ -267,8 +272,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             .flatMap { HostSecrets.get(account: $0) }
             .flatMap { resolveAuthKey(["--key", $0]) }
         session.inputView = renderer?.view
+        let color = (host.color ?? 0) == ColorMode.wide.rawValue ? ColorMode.wide : .standard
         if let width = host.width, let height = host.height, width > 0, height > 0 {
-            session.requestedConfig = SessionConfig(width: width, height: height, quality: 1)
+            session.requestedConfig = SessionConfig(width: width, height: height, quality: 1, color: color)
         } else {
             session.requestedConfig = nil
         }
@@ -320,6 +326,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         if !statsText.isEmpty { parts.append(statsText) }
         if session?.isActive == true, scalePercent < 100 {
             parts.append("\(scalePercent)%")
+        }
+        if session?.isActive == true, streamColor == .wide {
+            parts.append("P3")
         }
         toolbarStatusLabel.stringValue = parts.joined(separator: " · ")
     }

@@ -68,7 +68,7 @@ final class ClientSession: @unchecked Sendable {
     /// What the server should stream, when the user picked a size for this host.
     var requestedConfig: SessionConfig?
     /// Real stream size, reported once the server describes its format.
-    var onFormat: ((Int, Int) -> Void)?
+    var onFormat: ((Int, Int, ColorMode) -> Void)?
 
     func connect(host: String, port: UInt16, key: Data?, forwardInput: Bool, playAudio: Bool) {
         disconnect()
@@ -147,6 +147,7 @@ final class ClientSession: @unchecked Sendable {
                     // Ask for the size the connection list chose *before*
                     // anything else: the server reads exactly one frame here.
                     if supportsConfig, let requested = self.requestedConfig {
+                        log("sending config \(requested.width)x\(requested.height) quality=\(requested.quality) colour=\(requested.color)")
                         try? c.send(packet(type: .config, payload: requested.encode()))
                     }
                     // Encrypted ping: proves the client→server direction
@@ -155,7 +156,10 @@ final class ClientSession: @unchecked Sendable {
                 }
                 pump.onFormat = { format in
                     let size = (format.width, format.height)
-                    DispatchQueue.main.async { self.onFormat?(size.0, size.1) }
+                    DispatchQueue.main.async {
+                        self.renderer.setColorMode(format.color)
+                        self.onFormat?(size.0, size.1, format.color)
+                    }
                     self.setState(.streaming)
                     if wantInput {
                         wantInput = false

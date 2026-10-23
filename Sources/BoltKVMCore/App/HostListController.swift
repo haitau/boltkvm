@@ -246,6 +246,11 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         inputCheck.state = (host?.forwardInput ?? Prefs.forwardInput) ? .on : .off
         let audioCheck = NSButton(checkboxWithTitle: L.t("client.check.audio"), target: nil, action: nil)
         audioCheck.state = (host?.audio ?? Prefs.audio) ? .on : .off
+        // Colour is per host: it changes what the *server* captures, so it
+        // cannot be a global preference shared with a standard-gamut machine.
+        let colorPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+        colorPopUp.addItems(withTitles: [L.t("client.color.standard"), L.t("client.color.wide")])
+        colorPopUp.selectItem(at: (host?.color ?? 0) == ColorMode.wide.rawValue ? 1 : 0)
 
         // Manual frames: an NSGridView/NSStackView accessory tripped the Swift
         // compiler here ("failed to produce diagnostic"), and this form is fixed
@@ -256,6 +261,7 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
             (L.t("client.label.port"), portField),
             (L.t("client.hosts.resolution"), resolution),
             (L.t("client.label.key"), keyField),
+            (L.t("client.hosts.color"), colorPopUp),
         ]
         rows.append(("", inputCheck))
         rows.append(("", audioCheck))
@@ -301,6 +307,7 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         let keyAccount = hasKey ? account : nil
         let forwardsInput = inputCheck.state == .on
         let playsAudio = audioCheck.state == .on
+        let color = colorPopUp.indexOfSelectedItem == 1 ? ColorMode.wide.rawValue : ColorMode.standard.rawValue
         if var existing = host {
             existing.name = name
             existing.host = hostField.stringValue
@@ -310,12 +317,13 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
             existing.pskAccount = keyAccount
             existing.forwardInput = forwardsInput
             existing.audio = playsAudio
+            existing.color = color
             store.update(existing)
         } else {
             store.add(SavedHost(name: name, host: hostField.stringValue, port: port,
                                 pskAccount: keyAccount,
                                 width: size.0, height: size.1,
-                                forwardInput: forwardsInput, audio: playsAudio))
+                                forwardInput: forwardsInput, audio: playsAudio, color: color))
         }
         reload()
     }
