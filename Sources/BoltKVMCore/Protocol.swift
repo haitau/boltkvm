@@ -9,8 +9,8 @@ import Security
 //   magic(4) version(1) type(1) flags(1) reserved(1) payloadLength(4) ptsMicros(8)
 // Multi-byte integers are big-endian.
 //
-// type=1 format: width(4) height(4) paramCount(1) [paramLen(2) paramBytes]...
-// type=2 frame:  raw HEVC AVCC stream (length-prefixed NAL units), no extra header
+// type=1 format: width(4) height(4) codec(4) paramCount(1) [paramLen(2) paramBytes]...
+// type=2 frame:  frame data encoded per format.codec (HEVC is AVCC), no extra header
 //
 // flags bit0: keyframe (frame packets only)
 

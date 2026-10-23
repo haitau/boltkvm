@@ -10,8 +10,8 @@
 ## 核心目标
 
 - **像素等价**：按被控端的真实像素尺寸 1:1 上屏，主控端不做二次缩放，文字不发糊。
-- **低延迟交互**：两个分档 SLO——**解码链路（采集→解码）P95 < 33 ms**，**GUI 端到端
-  （输入到上屏）P95 < 50 ms**；按帧大小分档告警。
+- **低延迟交互**：两个 SLO——**解码链路（采集→解码）P95 < 33 ms**，**GUI 呈现
+  （采集→上屏，不含输入反向上行）P95 < 50 ms**；GUI 是平档 50 ms，不按帧大小分档。
 - **音频不打扰**：默认不传音频，不劫持主控端系统输出；需要时再开。
 - **单向无回环**：主控端只捕获输入与渲染，被控端只采集屏幕与注入输入，拓扑上不可能形成
   两台机器互相控制的死循环。
@@ -23,14 +23,14 @@
 | 像素等价 | SSIM > 0.98 | SSIM 0.984 | 达标 |
 | 解码吞吐 | 60 fps | **57.6–58.0 fps** | 达标 |
 | 解码链路延迟 | P95 < 33 ms | P95 **25.4–27.0 ms** | 达标（20 个窗口全部命中 SLO33） |
-| GUI 端到端延迟 | P95 < 50 ms | P50 **31 ms**、P95 **33 ms**（帧间隔采样，含呈现管线；2026-10-23 改按到帧泵送） | 达标（余量 17 ms，见 [B5](docs/reports/2026-10-23-b5-latency.md)） |
+| GUI 采集→上屏延迟 | P95 < 50 ms | P50 **31.0 ms**、P95 **33.2 ms**、60.0 fps（到帧泵送） | 达标（余量约 17 ms，见 [B5](docs/reports/2026-10-23-b5-latency.md)） |
 | 稳定性 | 8 小时不断连 | 8h00m01s：0 断连、0 解码失败、0 看门狗重建 | 达标 |
 | 音频 | 默认零字节 | 默认不传；开启后 1.54 Mbps、−34 dBFS，12 分钟 RSS 134→135 MB | 达标（可选） |
 | 输入连续性 | 8 小时不丢事件 | 8h 内 466 次转发、tap 失效 0（CLI 客户端；GUI 客户端未做长跑） | 部分达标 |
 
 两条路径分开统计，别混着看：解码链路能进 33 ms；app 的呈现管线原来还要等显示链路的下一次
-tick（平均 8 ms），改成"到帧就泵一次 draw"后这段排队消失，GUI 端到端 P95 从 40–42 ms 降到
-33 ms 量级。报告
+tick（平均 8 ms），改成"到帧就泵一次 draw"后这段排队消失，GUI 采集→上屏 P95 从 40–42 ms 降到
+33.2 ms。报告
 [B5 延迟](docs/reports/2026-10-23-b5-latency.md)、
 [音频与 GUI 稳定性](docs/reports/2026-10-23-audio-and-gui-stability.md)。
 
@@ -56,6 +56,7 @@ CGEvent 注入              ◄── 输入与音频 ──────── C
 ## app（推荐用法）
 
 ```bash
+swift build -c release      # 先产出 .build/release/boltkvm，build-app.sh 要拷它
 ./Packaging/build-app.sh    # 产出 dist/BoltKVM.app
 open dist/BoltKVM.app       # 首次启动选角色，之后菜单「角色」随时切换
 ```
@@ -78,7 +79,9 @@ open dist/BoltKVM.app       # 首次启动选角色，之后菜单「角色」�
   隐藏，鼠标移到顶部才出现（和系统屏幕共享一致）；
 - 关掉窗口就是断开连接；
 - 键鼠只在画面区域内转发：把指针移出画面（或窗口）时，已经按下的键和鼠标键会**立刻在远端
-  抬起**，不会出现"Ctrl 卡在远端、之后左键全变右键"；断线时被控端也会主动抬起所有注入的键。
+  抬起**，不会出现"Ctrl 卡在远端、之后左键全变右键"；每次注入前还会按事件的修饰键 flags
+  对齐远端（缺的补按下、多的补抬起），所以丢一个 `flagsChanged` 也不会把 ⌘ 点击变成右键；
+  断线时被控端也会主动抬起所有注入的键。
 
 界面中英双语，跟随系统语言（`Packaging/Resources/{en,zh-Hans}.lproj/Localizable.strings`，
 代码里没有硬编码文案）。
@@ -89,7 +92,7 @@ open dist/BoltKVM.app       # 首次启动选角色，之后菜单「角色」�
 |---|---|---|
 | 被控端 | 屏幕录制 | ScreenCaptureKit 采集；缺了服务起不来 |
 | 被控端 | 辅助功能 | 把键鼠注入系统；缺了只告警，画面照常 |
-| 主控端 | 无 TCC | 键鼠用窗口内本地事件监听，只有指针在画面上时才转发；连接时系统会弹「本地网络」提示，允许即可 |
+| 主控端 | 本地网络（macOS 15+） | 连内网地址要这项授权；键鼠转发用窗口内本地事件监听、不需要 TCC（被控端注入另需辅助功能） |
 
 `Info.plist` 里的 `NSLocalNetworkUsageDescription` 是硬要求：macOS 15 起连内网地址属于
 「本地网络」权限，缺了直接 `No route to host`。
@@ -98,7 +101,7 @@ open dist/BoltKVM.app       # 首次启动选角色，之后菜单「角色」�
 
 ```bash
 ./scripts/make-signing-identity.sh                                  # 生成并信任 "BoltKVM Local"
-BOLTKVM_CODESIGN_IDENTITY="BoltKVM Local" ./Packaging/build-app.sh   # 之后都这样构建
+BOLTKVM_CODESIGN_IDENTITY="BoltKVM Local" ./Packaging/build-app.sh   # 同样先 swift build -c release
 ```
 
 图标由 `swift scripts/make-icon.swift Packaging/AppIcon.icns` 生成，仓库不放二进制素材。
@@ -144,8 +147,8 @@ swift build -c release
 
 ### 4. 连接
 
-双击列表项或按「连接」。换分辨率/画质在编辑面板里改，下一帧生效（服务端重建虚拟屏并重启
-服务约 2 秒）。
+双击列表项或按「连接」。分辨率在编辑面板里改，下一帧生效（服务端重建虚拟屏并重启服务约
+2 秒）；画质不在客户端配置里，改被控端菜单的「画面质量」（标准 / 清晰）。
 
 ## CLI（无 GUI、脚本化、长跑验收）
 
@@ -160,11 +163,13 @@ boltkvm client --host <被控端地址> --port 7474 --seconds 28800 \
   --render --switch-mode --input --reconnect
 
 # 回归测试（需要 Xcode 的 XCTest；CLT-only 机器会自动退化成下面两个自测）
-scripts/test.sh
+scripts/test.sh            # 47 个 XCTest
 
-# 自测（不需要任何权限，CI 也跑这三个）
+# CI 跑三步：scripts/test.sh + 下面两条自测（都不需要任何权限）
 boltkvm selftest      # 协议编解码、边界
 boltkvm cryptotest    # 加密往返 + 篡改检测
+
+# 只在本地用的排查工具（CI 不跑）
 boltkvm displays      # 当前显示：active/awake/Main、像素与逻辑尺寸
 boltkvm keygen        # 打印/生成连接密码与指纹
 ```
@@ -180,7 +185,7 @@ boltkvm keygen        # 打印/生成连接密码与指纹
 ```
 
 客户端每 60 秒输出三行：`render.win`（fps/p50/p95）、`input.win`（事件数/tap 失效次数）、
-`loop.win`（包数/重连/Mbps），退出时输出 `SLO33 windows hit=N/M`。
+`loop.win`（包数/重连/Mbps），退出时输出 `SLO windows hit=N/M`（budget=50ms）。
 
 长跑配套脚本：
 
@@ -217,7 +222,7 @@ reboot ──► ssh 可用 ──► 自动登录进桌面会话
 
 ## 已知限制
 
-- **GUI 端到端 P95 约 33 ms（SLO 50 ms）**：解码链路 25–27 ms，呈现排队已压到 0；再往下要
+- **GUI 采集→上屏 P95 33.2 ms（SLO 50 ms）**：解码链路 25–27 ms，呈现排队已压到 0；再往下要
   换呈现方式（零拷贝、绕开合成器），收益也就几毫秒，见
   [B5](docs/reports/2026-10-23-b5-latency.md)。
 - **口令泄露等于机器泄露**：认证是预共享口令，泄露后对方可以主动连上来（已录下的历史流量
@@ -262,7 +267,8 @@ reboot ──► ssh 可用 ──► 自动登录进桌面会话
 - macOS 15+，Apple Silicon；
 - 两台机器之间的雷雳连接（雷雳网桥），或任意可达的 IP 网络（`--bind 0.0.0.0`，不推荐）；
 - Swift 6 / Xcode Command Line Tools（只有从源码构建才需要，装 release 的用户不需要）；
-- 被控端：屏幕录制（必需）、辅助功能（输入注入）。
+- 被控端：屏幕录制（必需）、辅助功能（输入注入）；
+- 主控端：本地网络（macOS 15+，连内网地址）。
 
 ## 贡献
 

@@ -126,6 +126,9 @@ received frames=... lastType=heartbeat
 
 实现：接收循环每 60s 用窗口内 `winBytes/winFrames` 算平均帧大小，`Renderer.budget(forFrameKB:)` 选档写入渲染器；`render.win` 行携带 `budget=XXms`，只在超过分档预算时告警；退出时另打一行 `SLO33 windows hit=N/M` 保留 33ms 产品口的命中率。
 
+> **口径更新（2026-10-23）**：分档已删除，GUI SLO 改为 50ms 平档（采集→上屏，不含输入上行）。
+> 本文的 33/40/55ms 与 `SLO33` 都是历史口径。
+
 ## 7. 5 分钟短稳
 
 - server forever + client 300s；

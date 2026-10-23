@@ -87,7 +87,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var winStart: UInt64 = 0
     // GUI SLO is 50 ms capture→present (decode has its own 33 ms target). The
     // old 33 ms tier here fired a warning every window once the SLO was split;
-    // 2026-10-23: GUI P95 is 33 ms with the draw pump, so 50 leaves headroom.
+    // 2026-10-23: GUI P95 is 33.2 ms with the draw pump, so 50 leaves headroom.
     private var budgetMs: Double = 50
     private var sloWindows = 0
     private var sloHits = 0

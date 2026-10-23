@@ -7,7 +7,7 @@
 - **密钥来源**：复用认证用的 PSK。服务端挑战里的 32 字节随机 nonce 直接当 HKDF 盐，所以不需要额外往返；每次连接密钥都不同。
 - **两个方向两把钥**：`HKDF-SHA256(psk, salt=nonce, info="boltkvm c2s"/"boltkvm s2c")`，避免双向同钥绕开 nonce 复用风险。
 - **算法**：ChaCha20-Poly1305（CryptoKit），每包 16 字节 tag。
-- **Nonce**：64 位计数器放在 12 字节 nonce 的低 8 位。TCP 有序，两端在同一协议点（authOk 之后）同时装密钥，计数器天然对齐，不需要重放窗口。
+- **Nonce**：64 位计数器放在 12 字节 nonce 的低 8 字节（即后 8 字节）。TCP 有序，两端在同一协议点（authOk 之后）同时装密钥，计数器天然对齐，不需要重放窗口。
 - **帧头保持明文**：头里有 magic/type/length，是分帧必需的；把它作为 AEAD 的 AAD 参与认证，所以改 type 或改长度都会校验失败。
 - **载荷长度**：`payloadLength` 字段写的是密文+tag 的长度，接收端据此读取。
 
@@ -59,3 +59,11 @@ client                          server
 .build/release/boltkvm client --host <bridge-ip> --port 7474 --seconds 6
 # 期望：auth ok → time sync rtt=... → received frames > 0
 ```
+
+## 后记（2026-10-23）：前向保密已实现
+
+上面"不做前向保密"是当时的结论，保留不改。现在 `authExchange` 包（类型 12）在 `authOk`
+之后交换 X25519 临时公钥，会话密钥改由 `PSK ‖ X25519 共享密钥` 经 HKDF 派生；录下的流量
+在口令事后泄露时也解不开。实现与取舍见 [ADR-0004 后记](../adr/0004-psk-over-pairing-code.md)，
+包定义见 `Sources/BoltKVMCore/Protocol.swift` 的 `.authExchange`。`--insecure` 仍是明文
+逃生口，这一条不变。

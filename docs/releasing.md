@@ -26,8 +26,8 @@ git push origin v0.2.0        # 只有"发布"才需要 push
 
 ## 合并前：CI
 
-`.github/workflows/ci.yml` 在 `push main` / PR 上跑同样的构建 + 两个自测 + 打包，产物作为
-artifact 上传（ad-hoc 签名，不可直接分发）。
+`.github/workflows/ci.yml` 在 `push main` / PR 上跑构建 + `scripts/test.sh`（47 个 XCTest）+
+`selftest` / `cryptotest` + 打包，产物作为 artifact 上传（ad-hoc 签名，不可直接分发）。
 
 ## 签名与公证的现状（重要）
 

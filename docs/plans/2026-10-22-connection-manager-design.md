@@ -23,7 +23,8 @@ struct SavedHost: Codable, Identifiable {
 - 画质字段已删除（2026-10-23）：它当初只是占位，服务端根本没有对应能力，留着等于假承诺。
   真正的画面质量开关在**服务端菜单**里（画面质量 → 标准 / 清晰），见 `ServerAppController`；
 - 分辨率在界面里是具体数值（预设 1280×720…3840×2160 + 自定义），自定义尺寸记在
-  `UserDefaults` 的 `hosts.customResolutions`；仍然只存不生效，等 R2 的 config 包；
+  `UserDefaults` 的 `hosts.customResolutions`；R2 已实现（2026-10-23）：连接时随 `config`
+  包下发，服务端按请求尺寸重建虚拟屏；
 - 首次由服务端自动生成：`--key`/`$BOLTKVM_KEY`/`~/.boltkvm-key` 全空时，服务端在启动前
   生成 8 位口令（小写字母+数字，去掉 `0/o/1/l/i`，无连字符）写入 0600 文件，并显示在被控端
   面板；口令先经 PBKDF2-SHA256 12 万次拉伸再用作密钥，输入侧忽略大小写/连字符/空格；主控端在「编辑」里填一次即可（按台保存）。不用 SSH、不用手工 openssl；
@@ -49,14 +50,17 @@ struct SavedHost: Codable, Identifiable {
 现状：分辨率是服务端启动参数（`--width/--height` 决定采集尺寸，`--virtual-display-size`
 决定虚拟屏逻辑尺寸）。客户端连接时无法影响——现在可以了。
 
-协议：`authOk` 之后客户端发的**第一个包**是 `config`（`PacketType.config = 11`），载荷 8 字节：
+协议：`authOk` 之后，客户端先发 `authExchange`（X25519，仅服务端声明支持时；见
+`PacketType.authExchange = 12`），之后才发 `config`（`PacketType.config = 11`），载荷 8 字节。
+超时分两段：客户端等 `authExchange` 回复 2s；服务端读第一个包 2s，`authExchange` 之后的
+`config` 再给 1s。
 
 ```
 u16 width, u16 height, u8 quality, u8 reserved, u16 reserved
 // quality: 0 = standard（采集宽封顶 3840）, 1 = pixel（采集 = 2×逻辑）
 ```
 
-服务端（`CLI.runServer`）在认证后带 1 秒读超时读这一包：
+服务端在认证后按上面的两段超时读这两个包：
 
 1. 收到 `config` 且尺寸与现有虚拟屏不同 → 销毁旧虚拟屏、按请求尺寸重建，采集尺寸按
    quality 重新算（pixel=2×，standard=≤3840），然后才开始推流；
