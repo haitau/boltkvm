@@ -17,6 +17,41 @@ private func inputTapCallback(
 /// Captures local HID events and forwards them to the controlled Mac.
 /// While active, all captured events are swallowed so the local Mac does not
 /// also react (needed for ⌘Tab / ⌘Space / ⌃↑).
+/// Input writes never run on the caller's thread. An event that has to wait for
+/// the socket is already stale, so a full backlog drops it instead of freezing
+/// the main thread (a single `send` can block for up to 2 s on SO_SNDTIMEO).
+/// Release packets bypass the cap: dropping one would strand a key or button
+/// down on the remote.
+final class InputSender {
+    private let conn: TCPConnection
+    private let queue = DispatchQueue(label: "boltkvm.input.send", qos: .userInteractive)
+    private let lock = NSLock()
+    private var backlog = 0
+    private let maxBacklog = 64
+    var onError: ((Error) -> Void)?
+
+    init(conn: TCPConnection) { self.conn = conn }
+
+    func send(_ pkt: Data, critical: Bool = false) {
+        lock.lock()
+        if !critical && backlog >= maxBacklog {
+            lock.unlock()
+            return
+        }
+        backlog += 1
+        lock.unlock()
+        queue.async { [weak self] in
+            guard let self else { return }
+            defer {
+                self.lock.lock()
+                self.backlog -= 1
+                self.lock.unlock()
+            }
+            do { try self.conn.send(pkt) } catch { self.onError?(error) }
+        }
+    }
+}
+
 final class InputCapture {
     private let conn: TCPConnection
     private var tap: CFMachPort?
@@ -27,6 +62,14 @@ final class InputCapture {
     private let statsLock = NSLock()
     private let displayBounds: CGRect
     private let tapLocation: CGEventTapLocation
+    private lazy var sender: InputSender = {
+        let sender = InputSender(conn: conn)
+        sender.onError = { [weak self] error in
+            log("input: send failed: \(error)")
+            DispatchQueue.main.async { self?.stop() }
+        }
+        return sender
+    }()
 
     init(conn: TCPConnection, tapLocation: CGEventTapLocation = .cgSessionEventTap) {
         self.conn = conn
@@ -165,14 +208,9 @@ final class InputCapture {
         }
 
         guard let ev else { return Unmanaged.passUnretained(event) }
-        do {
-            let pkt = packet(type: .input, ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000), payload: ev.encode())
-            try conn.send(pkt)
-            statsLock.lock(); sent += 1; statsLock.unlock()
-        } catch {
-            log("input: send failed: \(error)")
-            stop()
-        }
+        let pkt = packet(type: .input, ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000), payload: ev.encode())
+        sender.send(pkt)
+        statsLock.lock(); sent += 1; statsLock.unlock()
         return nil // swallow locally
     }
 }
@@ -184,6 +222,14 @@ final class InputCapture {
 /// is mapped onto.
 final class WindowInputCapture {
     private let conn: TCPConnection
+    private lazy var sender: InputSender = {
+        let sender = InputSender(conn: conn)
+        sender.onError = { [weak self] error in
+            log("input: send failed: \(error)")
+            DispatchQueue.main.async { self?.stop() }
+        }
+        return sender
+    }()
     private weak var view: NSView?
     /// Aspect ratio of the picture (letterboxed inside the view); nil before the
     /// first frame arrives, in which case the whole view is used.
@@ -258,14 +304,9 @@ final class WindowInputCapture {
         let pkt = packet(type: .input,
                          ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000),
                          payload: ev.encode())
-        do {
-            try conn.send(pkt)
-            sent += 1
-            if sent % 60 == 0 { log("input: forwarded=\(sent)") }
-        } catch {
-            log("input: send failed: \(error)")
-            stop()
-        }
+        sender.send(pkt)
+        sent += 1
+        if sent % 60 == 0 { log("input: forwarded=\(sent)") }
     }
 
     /// Modifiers the local side has already released but the remote still holds
@@ -308,15 +349,15 @@ final class WindowInputCapture {
     private func releaseRemoteOnStop() {
         let flags: UInt64 = 0
         for code in forwardedKeys {
-            try? conn.send(packet(type: .input, ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000),
-                                  payload: InputEvent(type: .keyUp, keyCode: code, flags: flags,
-                                                      x: lastPoint.x, y: lastPoint.y).encode()))
+            sender.send(packet(type: .input, ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000),
+                               payload: InputEvent(type: .keyUp, keyCode: code, flags: flags,
+                                                   x: lastPoint.x, y: lastPoint.y).encode()), critical: true)
         }
         for button in forwardedButtons {
             let type: InputEventType = button == 0 ? .leftMouseUp : (button == 1 ? .rightMouseUp : .otherMouseUp)
-            try? conn.send(packet(type: .input, ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000),
-                                  payload: InputEvent(type: type, flags: flags,
-                                                      x: lastPoint.x, y: lastPoint.y, button: button).encode()))
+            sender.send(packet(type: .input, ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000),
+                               payload: InputEvent(type: type, flags: flags,
+                                                   x: lastPoint.x, y: lastPoint.y, button: button).encode()), critical: true)
         }
     }
 
