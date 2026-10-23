@@ -26,7 +26,7 @@ git push origin v0.2.0
 `.github/workflows/ci.yml` 在每次推送 `main` 或发起 PR 时执行：
 
 1. `swift build -c release` 编译；
-2. `scripts/test.sh` 运行 48 个 XCTest 单元测试；
+2. `scripts/test.sh` 运行 49 个 XCTest 单元测试；
 3. 运行 `selftest` 与 `cryptotest`；
 4. 执行 `Packaging/build-app.sh` 组装应用并上传为构建产物（Artifact）。
 

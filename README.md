@@ -140,7 +140,7 @@ defaults write io.github.boltkvm server.audio -bool true
 .build/release/boltkvm client --host <被控端地址> --port 7474 --seconds 28800 \
   --render --switch-mode --input --reconnect
 
-# 运行测试套件（含 48 个 XCTest 单元测试；仅装 CLT 的机器会自动回退到 CLI 自测）
+# 运行测试套件（含 49 个 XCTest 单元测试；仅装 CLT 的机器会自动回退到 CLI 自测）
 ./scripts/test.sh
 
 # 协议与加密自测（无需任何系统权限）

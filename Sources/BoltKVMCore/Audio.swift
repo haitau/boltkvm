@@ -102,56 +102,68 @@ final class AudioPlayer: @unchecked Sendable {
     private let maxScheduled = 256
 
     /// Called for every `.audio` packet, in arrival order.
+    ///
+    /// `lock` guards counters only: no AVAudio call may run while it is held.
+    /// `AVAudioPlayerNode.stop()` synchronously drains the completion queue, and
+    /// our completion handler takes this lock — holding it across stop() is a
+    /// guaranteed deadlock (it hung the app on window close).
     func enqueue(_ data: Data) {
         let count = data.count / AudioPlayer.bytesPerFrame
         guard count > 0 else { return }
         lock.lock()
-        defer { lock.unlock() }
-        guard !finished else { return }
+        guard !finished else { lock.unlock(); return }
         bytes += data.count
         frames += count
         windowFrames += count
         windowBytes += data.count
 
-        if let file {
-            guard let buf = makeBuffer(data, frames: count) else { return }
-            do { try file.write(from: buf) } catch {
-                if !loggedWriteError {
-                    loggedWriteError = true
-                    log("audio: write failed: \(error)")
-                }
+        let fileSink = file
+        let playerSink = player
+        let shouldSchedule = playerSink != nil && scheduled < maxScheduled
+        if shouldSchedule { scheduled += 1 }
+        lock.unlock()
+
+        var buf: AVAudioPCMBuffer?
+        if fileSink != nil || shouldSchedule {
+            buf = makeBuffer(data, frames: count)
+        }
+
+        if let fileSink, let buf {
+            do { try fileSink.write(from: buf) } catch {
+                lock.lock()
+                let first = !loggedWriteError
+                loggedWriteError = true
+                lock.unlock()
+                if first { log("audio: write failed: \(error)") }
             }
         }
 
-        if let player, let buf = makeBuffer(data, frames: count) {
-            if scheduled < maxScheduled {
-                scheduled += 1
-                player.scheduleBuffer(buf) { [weak self] in
-                    guard let self else { return }
-                    self.lock.lock()
-                    self.scheduled -= 1
-                    self.lock.unlock()
-                }
+        if shouldSchedule, let playerSink, let buf {
+            playerSink.scheduleBuffer(buf) { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                self.scheduled -= 1
+                self.lock.unlock()
             }
         }
 
         // Track energy on the int16 samples so a silent capture is visible in
         // the log without anyone having to listen.
+        var acc = 0.0
         data.withUnsafeBytes { raw in
             let samples = raw.bindMemory(to: Int16.self)
-            var acc = 0.0
             for s in samples {
                 let v = Double(s)
                 acc += v * v
             }
-            sumSquares += acc
-            windowSumSquares += acc
         }
-
         let now = DispatchTime.now().uptimeNanoseconds
-        if now - windowStart >= 60_000_000_000 {
-            reportWindow(now: now)
-        }
+        lock.lock()
+        sumSquares += acc
+        windowSumSquares += acc
+        let due = now - windowStart >= 60_000_000_000
+        lock.unlock()
+        if due { reportWindow(now: now) }
     }
 
     private func makeBuffer(_ data: Data, frames: Int) -> AVAudioPCMBuffer? {
@@ -164,27 +176,44 @@ final class AudioPlayer: @unchecked Sendable {
     }
 
     private func reportWindow(now: UInt64) {
+        lock.lock()
         let secs = Double(now - windowStart) / 1e9
         let n = max(1, windowFrames)
         let rms = (windowSumSquares / Double(n)).squareRoot()
-        let dbfs = rms > 0 ? 20 * log10(rms / 32768.0) : -120
         let kbps = secs > 0 ? Double(windowBytes) * 8 / secs / 1e6 : 0
-        log(String(format: "audio.win frames=%d rms=%.1f dBFS mbps=%.2f", windowFrames, dbfs, kbps))
+        let framesInWindow = windowFrames
         windowStart = now
         windowFrames = 0
         windowBytes = 0
         windowSumSquares = 0
+        lock.unlock()
+        let dbfs = rms > 0 ? 20 * log10(rms / 32768.0) : -120
+        log(String(format: "audio.win frames=%d rms=%.1f dBFS mbps=%.2f", framesInWindow, dbfs, kbps))
     }
 
     func finish() {
         lock.lock()
+        if finished { lock.unlock(); return }
         finished = true
+        let player = self.player
+        let engine = self.engine
+        let file = self.file
+        self.player = nil
+        self.engine = nil
+        self.file = nil
+        lock.unlock()
+
+        // Outside the lock: stop() drains the completion queue, which takes it.
         player?.stop()
         engine?.stop()
-        file = nil  // AVAudioFile flushes to disk on deinit
-        lock.unlock()
+        _ = file  // released here; AVAudioFile flushes to disk on deinit
+
         reportWindow(now: DispatchTime.now().uptimeNanoseconds)
+        lock.lock()
+        let frames = self.frames
+        let bytes = self.bytes
         let rms = frames > 0 ? (sumSquares / Double(frames)).squareRoot() : 0
+        lock.unlock()
         let dbfs = rms > 0 ? 20 * log10(rms / 32768.0) : -120
         let secs = Double(frames) / AudioPlayer.sampleRate
         log(String(format: "audio done frames=%d (%.1fs) rms=%.1f dBFS kb=%.0f",
