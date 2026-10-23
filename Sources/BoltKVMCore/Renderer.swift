@@ -66,6 +66,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var latest: CVPixelBuffer?
     private var latestCaptureMicros: Int64 = 0
     private var drawScheduled = false
+    /// GPU time per presented frame (submit → command buffer completion), in ms.
+    private var drawTimes: [Double] = []
     private let useDisplayLink: Bool
     /// Decode-completion time of the buffer currently queued, so the report can
     /// separate "decode" from "waiting for a drawable / submit".
@@ -319,7 +321,16 @@ final class Renderer: NSObject, MTKViewDelegate {
         enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         enc.endEncoding()
         cmd.present(drawable)
-        cmd.addCompletedHandler { [inFlight] _ in inFlight.signal() }
+        cmd.addCompletedHandler { [inFlight, weak self] _ in
+            if let self {
+                let ms = Double(Int64(Date().timeIntervalSince1970 * 1_000_000) - drawStartedMicros) / 1000
+                self.lock.lock()
+                self.drawTimes.append(ms)
+                if self.drawTimes.count > 20_000 { self.drawTimes.removeFirst(self.drawTimes.count - 20_000) }
+                self.lock.unlock()
+            }
+            inFlight.signal()
+        }
         cmd.commit()
 
         let nowMicros = Int64(Date().timeIntervalSince1970 * 1_000_000)
@@ -401,6 +412,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         let start = winStart == 0 ? now : winStart
         let f = winFrames
         let sorted = winLatencies.sorted()
+        let draws = drawTimes.sorted()
+        drawTimes.removeAll(keepingCapacity: true)
         winFrames = 0
         winLatencies.removeAll(keepingCapacity: true)
         winStart = now
@@ -413,9 +426,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int((Double(sorted.count) * 0.95).rounded(.up)) - 1)]
         let maxv = sorted.last ?? 0
         logSplit()
-        log(String(format: "render.win elapsed=%.1fs frames=%d total=%d fps=%.1f drawable=%.0fx%.0f p50=%.1fms p95=%.1fms max=%.1fms budget=%.0fms",
+        let d50 = draws.isEmpty ? 0 : draws[draws.count / 2]
+        let d95 = draws.isEmpty ? 0 : draws[min(draws.count - 1, Int((Double(draws.count) * 0.95).rounded(.up)) - 1)]
+        log(String(format: "render.win elapsed=%.1fs frames=%d total=%d fps=%.1f drawable=%.0fx%.0f p50=%.1fms p95=%.1fms max=%.1fms gpu p50=%.1fms p95=%.1fms budget=%.0fms",
                    e, f, total, e > 0 ? Double(f) / e : 0,
-                   view.drawableSize.width, view.drawableSize.height, p50, p95, maxv, budget))
+                   view.drawableSize.width, view.drawableSize.height, p50, p95, maxv, d50, d95, budget))
         lock.lock()
         if sorted.count > 0 {
             sloWindows += 1
