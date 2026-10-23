@@ -144,7 +144,10 @@ func authenticateServer(conn: TCPConnection, key: Data,
 /// clients do, old ones go straight to `config` or stay silent). Both paths are
 /// handled here so the caller only sees the resulting session.
 private func awaitClientUpgrade(conn: TCPConnection, key: Data, nonce: Data) throws -> SessionConfig? {
-    conn.setRecvTimeout(1)
+    // Same 2 s budget as the client's wait for the reply: if we gave up earlier
+    // we would start the session while the client still expects an authExchange
+    // reply, and that packet would arrive as garbage mid-stream.
+    conn.setRecvTimeout(2)
     defer { conn.setRecvTimeout(0) }
     guard let (head, body) = try? conn.recvFrame() else { return nil }
 
