@@ -65,7 +65,17 @@ final class Renderer: NSObject, MTKViewDelegate {
     private let lock = NSLock()
     private var latest: CVPixelBuffer?
     private var latestCaptureMicros: Int64 = 0
-    private var drawPending = false
+    private var drawScheduled = false
+    private let useDisplayLink: Bool
+    /// Decode-completion time of the buffer currently queued, so the report can
+    /// separate "decode" from "waiting for a drawable / submit".
+    private var pendingDecodedMicros: Int64 = 0
+    private var presentGaps: [Double] = []
+    private var submitWait: [Double] = []
+    /// Deliberately one fewer permit than drawables: the semaphore must never
+    /// use up the last free drawable, or `currentDrawable` blocks the main
+    /// thread for a refresh (measured up to 1 s) instead of dropping a frame.
+    private let inFlight = DispatchSemaphore(value: 2)
     private var latencies: [Double] = []
     private var loggedTexture = false
     private var frames = 0
@@ -75,10 +85,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var winFrames = 0
     private var winLatencies: [Double] = []
     private var winStart: UInt64 = 0
-    // Queueing delay scales with encoded frame size, so the alert line has to
-    // as well. Measured 2026-10-22 (4K drawable, 51 fps present ceiling):
-    // 25 KB/frame -> p95 35.9 ms, 89 KB -> 30.5 ms, 2480 KB -> 48.4 ms.
-    private var budgetMs: Double = 33
+    // GUI SLO is 50 ms capture→present (decode has its own 33 ms target). The
+    // old 33 ms tier here fired a warning every window once the SLO was split;
+    // 2026-10-23: GUI P95 is 33 ms with the draw pump, so 50 leaves headroom.
+    private var budgetMs: Double = 50
     private var sloWindows = 0
     private var sloHits = 0
     private var tierBreaches = 0
@@ -91,7 +101,14 @@ final class Renderer: NSObject, MTKViewDelegate {
         view = MTKView(frame: .zero, device: device)
         view.colorPixelFormat = .bgra8Unorm
         view.framebufferOnly = true
-        view.isPaused = false
+        // Two ways to get a frame on screen. The display link (isPaused=false)
+        // ticks at 60 Hz, so a frame that arrives just after a tick waits up to
+        // 16.7 ms for the next one (8.3 ms on average). That wait is most of the
+        // gap between decode P95 and capture→present P95. Pumping the draw from
+        // `submit` removes it; the compositor still syncs to the display, so the
+        // picture cannot tear. BOLTKVM_DISPLAY_LINK=1 restores the old pacing.
+        useDisplayLink = (ProcessInfo.processInfo.environment["BOLTKVM_DISPLAY_LINK"] ?? "0") == "1"
+        view.isPaused = !useDisplayLink
         view.enableSetNeedsDisplay = false
         // Experiment knobs for the 51 fps present ceiling; defaults keep the
         // shipping behaviour (no vsync, 60 fps cap, system drawable count).
@@ -104,6 +121,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         // P95 up. Keep it on; BOLTKVM_DISPLAY_SYNC=0 restores the old behaviour.
         let sync = (env["BOLTKVM_DISPLAY_SYNC"] ?? "1") != "0"
         (view.layer as? CAMetalLayer)?.displaySyncEnabled = sync
+        // Last-resort timeout instead of an indefinite block if every drawable
+        // is somehow taken.
+        (view.layer as? CAMetalLayer)?.allowsNextDrawableTimeout = true
         if let n = Int(env["BOLTKVM_DRAWABLES"] ?? ""), n > 0 {
             (view.layer as? CAMetalLayer)?.maximumDrawableCount = n
         }
@@ -182,32 +202,48 @@ final class Renderer: NSObject, MTKViewDelegate {
         return pictureAspect
     }
 
-    func submit(_ pb: CVPixelBuffer, captureLocalMicros: Int64) {
+    func submit(_ pb: CVPixelBuffer, captureLocalMicros: Int64,
+                decodedLocalMicros: Int64 = 0) {
         lock.lock()
         latest = pb
         latestCaptureMicros = captureLocalMicros
-        drawPending = true
+        pendingDecodedMicros = decodedLocalMicros
+        let schedule = !useDisplayLink && !drawScheduled
+        if schedule { drawScheduled = true }
         lock.unlock()
+        guard schedule else { return }
+        // `submit` runs on the VT callback thread; MTKView only wants main.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock(); self.drawScheduled = false; self.lock.unlock()
+            self.view.draw()
+        }
     }
 
     func draw(in view: MTKView) {
         lock.lock()
         guard let pb = latest else { lock.unlock(); return }
         let captureMicros = latestCaptureMicros
+        let decodedMicros = pendingDecodedMicros
         latest = nil
-        drawPending = false
         lock.unlock()
+        let drawStartedMicros = Int64(Date().timeIntervalSince1970 * 1_000_000)
 
+        guard inFlight.wait(timeout: .now()) == .success else { return }
         guard let drawable = view.currentDrawable,
               let rpd = view.currentRenderPassDescriptor,
               let cache = textureCache,
               let cmd = queue.makeCommandBuffer(),
-              let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return }
+              let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else {
+            inFlight.signal()
+            return
+        }
 
         guard CVPixelBufferGetPlaneCount(pb) >= 2 else {
             log("render: non-planar pixel buffer format \(CVPixelBufferGetPixelFormatType(pb))")
             enc.endEncoding()
             cmd.present(drawable)
+            cmd.addCompletedHandler { [inFlight] _ in inFlight.signal() }
             cmd.commit()
             return
         }
@@ -231,6 +267,7 @@ final class Renderer: NSObject, MTKViewDelegate {
               let cTex = CVMetalTextureGetTexture(cRef) else {
             enc.endEncoding()
             cmd.present(drawable)
+            cmd.addCompletedHandler { [inFlight] _ in inFlight.signal() }
             cmd.commit()
             return
         }
@@ -254,13 +291,21 @@ final class Renderer: NSObject, MTKViewDelegate {
         enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         enc.endEncoding()
         cmd.present(drawable)
+        cmd.addCompletedHandler { [inFlight] _ in inFlight.signal() }
         cmd.commit()
 
-        let latency = Double(Int64(Date().timeIntervalSince1970 * 1_000_000) - captureMicros) / 1000.0
+        let nowMicros = Int64(Date().timeIntervalSince1970 * 1_000_000)
+        let latency = Double(nowMicros - captureMicros) / 1000.0
         lock.lock()
         if captureMicros > 0 && latency > 0 && latency < 10_000 {
             latencies.append(latency)
             winLatencies.append(latency)
+        }
+        if decodedMicros > 0 {
+            let gap = Double(nowMicros - decodedMicros) / 1000.0
+            let wait = Double(drawStartedMicros - decodedMicros) / 1000.0
+            if gap >= 0 && gap < 1_000 { presentGaps.append(gap) }
+            if wait >= 0 && wait < 1_000 { submitWait.append(wait) }
         }
         frames += 1
         winFrames += 1
@@ -270,18 +315,14 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
-    /// Called by the receive loop each window with the average encoded frame
-    /// size. The 33 ms SLO stays the product target; this only sets the alert
-    /// line so a 1.2 Gbps ProRes stream stops flagging every single minute.
+    /// The GUI SLO is flat: 50 ms capture→present regardless of frame size. The
+    /// per-size tiers were a workaround for the single 33 ms target that was
+    /// retired when decode and GUI got separate numbers (2026-10-23).
     func setBudget(_ ms: Double) {
         lock.lock(); budgetMs = ms; lock.unlock()
     }
 
-    static func budget(forFrameKB kb: Double) -> Double {
-        if kb >= 512 { return 55 }
-        if kb >= 64 { return 40 }
-        return 33
-    }
+    static func budget(forFrameKB _: Double) -> Double { 50 }
 
     func report() {
         // Copy under the lock: draw() keeps appending from the render thread,
@@ -298,10 +339,28 @@ final class Renderer: NSObject, MTKViewDelegate {
         log(String(format: "render frames=%d elapsed=%.2fs fps=%.1f drawable=%.0fx%.0f latency p50=%.1fms p95=%.1fms max=%.1fms",
                    f, e, e > 0 ? Double(f) / e : 0,
                    view.drawableSize.width, view.drawableSize.height, p50, p95, maxv))
-        log(String(format: "SLO33 windows hit=%d/%d (%.0f%%) tierBreaches=%d",
+        logSplit()
+        log(String(format: "SLO windows hit=%d/%d (%.0f%%) budget=%.0fms tierBreaches=%d",
                    sloHits, sloWindows,
-                   sloWindows > 0 ? Double(sloHits) / Double(sloWindows) * 100 : 0, tierBreaches))
+                   sloWindows > 0 ? Double(sloHits) / Double(sloWindows) * 100 : 0,
+                   budget, tierBreaches))
         if p95 > budget { log("WARNING: capture→present P95 \(String(format: "%.1f", p95))ms exceeds tier budget \(String(format: "%.0f", budget))ms") }
+    }
+
+    /// decode→submit gap and its queueing part; called by both the 60 s window
+    /// line and the exit report so the split shows up in normal logs.
+    private func logSplit() {
+        lock.lock()
+        let gaps = presentGaps.sorted()
+        let waits = submitWait.sorted()
+        presentGaps.removeAll(keepingCapacity: true)
+        submitWait.removeAll(keepingCapacity: true)
+        lock.unlock()
+        guard !gaps.isEmpty else { return }
+        let g95 = gaps[min(gaps.count - 1, Int(Double(gaps.count) * 0.95))]
+        let w95 = waits.isEmpty ? 0 : waits[min(waits.count - 1, Int(Double(waits.count) * 0.95))]
+        log(String(format: "render split decode→submit p95=%.1fms (queue wait p95=%.1fms) pumped=%@",
+                   g95, w95, useDisplayLink ? "no" : "yes"))
     }
 
     /// Per-interval line for long runs: each call covers the frames drawn since
@@ -325,18 +384,19 @@ final class Renderer: NSObject, MTKViewDelegate {
         let p50 = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
         let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
         let maxv = sorted.last ?? 0
+        logSplit()
         log(String(format: "render.win elapsed=%.1fs frames=%d total=%d fps=%.1f drawable=%.0fx%.0f p50=%.1fms p95=%.1fms max=%.1fms budget=%.0fms",
                    e, f, total, e > 0 ? Double(f) / e : 0,
                    view.drawableSize.width, view.drawableSize.height, p50, p95, maxv, budget))
         lock.lock()
         if sorted.count > 0 {
             sloWindows += 1
-            if p95 <= 33 { sloHits += 1 }
+            if p95 <= budget { sloHits += 1 }
             if p95 > budget { tierBreaches += 1 }
         }
         lock.unlock()
         if sorted.count > 0 && p95 > budget {
-            log("WARNING: window P95 \(String(format: "%.1f", p95))ms exceeds tier budget \(String(format: "%.0f", budget))ms (SLO 33ms)")
+            log("WARNING: window P95 \(String(format: "%.1f", p95))ms exceeds the \(String(format: "%.0f", budget))ms GUI SLO")
         }
         if f == 0 {
             log("WARNING: window drew 0 frames (display asleep, occluded, or decoder stalled)")

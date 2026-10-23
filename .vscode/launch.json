@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:boltkvm}",
+            "name": "Debug boltkvm",
+            "target": "boltkvm",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug boltkvm"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:boltkvm}",
+            "name": "Release boltkvm",
+            "target": "boltkvm",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release boltkvm"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:boltkvm}",
+            "name": "Debug BoltKVMApp",
+            "target": "BoltKVMApp",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug BoltKVMApp"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:boltkvm}",
+            "name": "Release BoltKVMApp",
+            "target": "BoltKVMApp",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release BoltKVMApp"
+        }
+    ]
+}

@@ -210,7 +210,9 @@ final class VideoDecoder {
                 if syncRTT < 50 && latency > 0 && latency < 10_000 { latencies.append(latency) }
             }
             let captureLocal = serverMicros - offset
-            renderer?.submit(imageBuffer, captureLocalMicros: captureLocal)
+            let decodedLocal = Int64(Date().timeIntervalSince1970 * 1_000_000)
+            renderer?.submit(imageBuffer, captureLocalMicros: captureLocal,
+                             decodedLocalMicros: decodedLocal)
         } else {
             dropped += 1
         }

@@ -9,7 +9,7 @@
 | ~~P0-3~~ | ~~输入连续性 8 小时~~ | **已跑完**（2026-10-22 夜）：466 次转发、tap 失效 0、重连 0、96/96 采样存活、dropped=0；但用的是 CLI 客户端（~24fps），延迟结论不能代表 GUI | 见 [夜间报告](../reports/2026-10-22-night-run.md) |
 | B5 | 延迟 SLO 的同口径复测 | **已完成 2026-10-23**：SLO 拆成两档后，解码 57.6fps/p95 25.4ms 命中 33ms；GUI 端到端 50fps/p95 40–42ms（开音频 46.2ms）在 50ms 档内 | 见 [B5 报告](../reports/2026-10-23-b5-latency.md) |
 | B6 | 服务端 fps 跟随客户端反压 | 客户端渲染慢时服务端 `stats` 从 57 掉到 36，`caffeinate -u` 不恢复；不是服务端衰减 | 想要"服务端恒定 60fps + 客户端丢帧"的话，得让发送侧有界队列主动丢帧而不是阻塞 encode |
-| B7 | GUI 呈现路径多出 ~14ms | 解码 p95 25ms vs 端到端 p95 41ms，差额在 Metal 呈现 | 试 `drawableSize` 跟随窗口、纹理缓存复用、相同画面跳过上传 |
+| ~~B7~~ | ~~GUI 呈现路径多出 ~14ms~~ | **已完成 2026-10-23**：根因不是 Metal 管线，是显示链路（60Hz tick）让每帧平均多等 8ms。改成到帧就泵一次 `view.draw()`，并用 2 个在飞帧的信号量保证 `currentDrawable` 不阻塞 | 60fps 下 p50 35.8→31.0ms、p95 37.6→33.2ms；`BOLTKVM_DISPLAY_LINK=1` 可复现旧口径 |
 | ~~P2-1~~ | ~~上屏 51 fps 天花板~~ | **已解决**：`displaySyncEnabled=false` 是根因，打开后 59.5 fps | 见 [present 同步修复](../reports/2026-10-22-present-sync-fix.md) |
 | ~~P2-2~~ | ~~SLO 33 ms 命中率 0%~~ | **60 秒窗口已达标**（P95 17.0 ms，命中 1/1），8 小时稳态待长跑确认 | 同上 |
 | P1-应用化 | 单 app + 角色选择 + 内建虚拟显示 | 阶段 1–6 完成；mini 已切到 app 部署并验证重启自愈；**app 模式 12 分钟稳定性与 app 内音频已实测**（2026-10-23） | 见 [方案](2026-10-22-app-and-vdscreen-integration.md) 与 [音频/稳定性报告](../reports/2026-10-23-audio-and-gui-stability.md) |
