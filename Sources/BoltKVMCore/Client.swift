@@ -57,17 +57,29 @@ final class VideoDecoder {
     }
 
     func configure(_ f: StreamFormat) throws {
+        guard (1...16384).contains(f.width), (1...16384).contains(f.height) else {
+            throw NSError(domain: "boltkvm", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "bad stream size \(f.width)x\(f.height)"])
+        }
         var fmt: CMFormatDescription?
         if f.codec == .hevc {
-            var keep = f.parameterSets
+            // Copy the parameter sets into buffers we own: the pointers from
+            // `Data.withUnsafeBytes` are only valid inside that closure, and an
+            // empty parameter set would hand VideoToolbox a nil base address.
+            let keep = f.parameterSets.filter { !$0.isEmpty }
+            guard !keep.isEmpty else {
+                throw NSError(domain: "boltkvm", code: -2,
+                              userInfo: [NSLocalizedDescriptionKey: "no HEVC parameter sets"])
+            }
             var pointers: [UnsafePointer<UInt8>] = []
             var sizes: [Int] = []
+            var buffers: [UnsafeMutablePointer<UInt8>] = []
+            defer { buffers.forEach { $0.deallocate() } }
             for ps in keep {
-                ps.withUnsafeBytes { raw in
-                    if let base = raw.baseAddress {
-                        pointers.append(base.assumingMemoryBound(to: UInt8.self))
-                    }
-                }
+                let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: max(1, ps.count))
+                ps.copyBytes(to: buf, count: ps.count)
+                buffers.append(buf)
+                pointers.append(UnsafePointer(buf))
                 sizes.append(ps.count)
             }
             let st: OSStatus = pointers.withUnsafeBufferPointer { pbuf in
@@ -152,7 +164,9 @@ final class VideoDecoder {
         lock.lock(); let syncRTT = clockSyncRTTms; lock.unlock()
         if syncRTT < 50 {
             let recvLatency = Double(Int64(Date().timeIntervalSince1970 * 1_000_000) - (ptsMicros - offset)) / 1000.0
-            if recvLatency > 0 && recvLatency < 10_000 { recvLatencies.append(recvLatency) }
+            if recvLatency > 0 && recvLatency < 10_000 {
+                lock.lock(); recvLatencies.append(recvLatency); lock.unlock()
+            }
         }
         var bb: CMBlockBuffer?
         let bst = CMBlockBufferCreateWithMemoryBlock(
@@ -225,16 +239,21 @@ final class VideoDecoder {
     }
 
     func report() {
+        // Snapshot under the same lock the decode path appends with: sorting a
+        // shared Array while another thread appends to it can trap, and these
+        // arrays grow for the whole session (60 fps → 216k entries per hour).
         lock.lock()
         let d = decoded, dr = dropped
         let e = elapsed
+        let sorted = latencies.sorted()
+        let rsorted = recvLatencies.sorted()
+        latencies.removeAll(keepingCapacity: true)
+        recvLatencies.removeAll(keepingCapacity: true)
         lock.unlock()
         let fps = e > 0 ? Double(d) / e : 0
-        let sorted = latencies.sorted()
         let p50 = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
         let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
         let maxv = sorted.last ?? 0
-        let rsorted = recvLatencies.sorted()
         let rp50 = rsorted.isEmpty ? 0 : rsorted[rsorted.count / 2]
         let rp95 = rsorted.isEmpty ? 0 : rsorted[min(rsorted.count - 1, Int(Double(rsorted.count) * 0.95))]
         log(String(format: "decode decoded=%d failed=%d elapsed=%.3fs fps=%.1f recv p50=%.1fms p95=%.1fms decodeLatency p50=%.1fms p95=%.1fms max=%.1fms", d, dr, e, fps, rp50, rp95, p50, p95, maxv))
