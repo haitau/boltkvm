@@ -413,6 +413,11 @@ final class TCPConnection {
         self.fd = fd
         var one: Int32 = 1
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
+        // A client that stops reading must not pin a sender thread (and the
+        // frames queued behind it) forever; 2 s is ~1000x the time a 200 KB
+        // frame needs on the bridge.
+        var tv = timeval(tv_sec: 2, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     }
 
     /// Nil until the handshake completes; both ends install them at the same
@@ -427,10 +432,18 @@ final class TCPConnection {
         try wire.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             guard let base = raw.baseAddress else { return }
             var sent = 0
+            var stalls = 0
             while sent < raw.count {
                 let n = Darwin.send(fd, base.advanced(by: sent), raw.count - sent, 0)
-                if n > 0 { sent += n; continue }
-                if n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) { continue }
+                if n > 0 { sent += n; stalls = 0; continue }
+                if n < 0 && errno == EINTR { continue }
+                if n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // SO_SNDTIMEO fired: the peer is not draining. Give it one
+                    // more window, then fail the session instead of blocking.
+                    stalls += 1
+                    if stalls > 1 { throw POSIXError(.ETIMEDOUT) }
+                    continue
+                }
                 throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
             }
         }

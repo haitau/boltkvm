@@ -34,6 +34,13 @@ final class Server: NSObject, SCStreamOutput {
     private var stream: SCStream?
     private var session: VTCompressionSession?
     private let sendQueue = DispatchQueue(label: "boltkvm.send")
+    /// Frames allowed to sit between encoder output and the socket. Above this
+    /// the newest frame is dropped: a slow client must cost quality, not memory
+    /// (a stalled client used to queue ~190 MB/s until the process died).
+    private let sendCap = 4
+    private let sendByteCap = 8 << 20
+    private var queuedBytes = 0
+    private var forceKeyframe = false
     private let lock = NSLock()
 
     private var inFlight: DispatchSemaphore
@@ -283,7 +290,15 @@ final class Server: NSObject, SCStreamOutput {
                         }
                     }
                 } catch {
-                    log("session: read loop ended: \(error)")
+                    // A connection closed by the write side (send timeout,
+                    // client quit) surfaces here as EBADF/ECONNRESET; that is
+                    // an ordinary disconnect, not something worth a log line.
+                    if let e = error as? POSIXError,
+                       e.code == .EBADF || e.code == .ECONNRESET || e.code == .ENOTCONN || e.code == .EPIPE {
+                        log("session: client disconnected")
+                    } else {
+                        log("session: read loop ended: \(error)")
+                    }
                     self.signalDisconnect()
                     break
                 }
@@ -410,10 +425,17 @@ final class Server: NSObject, SCStreamOutput {
             return
         }
         guard let session else { return }
+        lock.lock()
+        let force = forceKeyframe
+        forceKeyframe = false
+        lock.unlock()
+        let props: CFDictionary? = force
+            ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
+            : nil
         let st = VTCompressionSessionEncodeFrame(
             session, imageBuffer: pb,
             presentationTimeStamp: pts, duration: CMTime(value: 1, timescale: 60),
-            frameProperties: nil, sourceFrameRefcon: nil, infoFlagsOut: nil
+            frameProperties: props, sourceFrameRefcon: nil, infoFlagsOut: nil
         )
         if st != noErr {
             inFlight.signal()
@@ -522,21 +544,32 @@ final class Server: NSObject, SCStreamOutput {
                         latencyCount += 1
                         micros = feed.wall
                     }
-                    if closed { pending += 0 } else { pending += 1 }
                     bytes += length
-                    if closed { dropped += 1 }
-                    else if pending > 3 && !isKey {
-                        pending -= 1
+                    if closed {
                         dropped += 1
                     } else {
-                        sendQueue.async { [weak self] in
-                            guard let self else { return }
-                            do {
-                                try self.connection.send(packet(type: .frame, flags: isKey ? 1 : 0, ptsMicros: micros, payload: data))
-                                self.lock.lock(); self.sent += 1; self.pending -= 1; self.lock.unlock()
-                            } catch {
-                                self.lock.lock(); self.pending -= 1; self.closed = true; self.lock.unlock()
-                                self.signalDisconnect()
+                        pending += 1
+                        queuedBytes += length
+                        if pending > sendCap || queuedBytes > sendByteCap {
+                            // Congested: drop this frame instead of letting the
+                            // send queue grow. ProRes frames are independent;
+                            // HEVC keyframes come every 60 frames, so dropping
+                            // one costs ~1 s of artefacts and we ask the encoder
+                            // for a fresh keyframe right away.
+                            pending -= 1
+                            queuedBytes -= length
+                            dropped += 1
+                            if isKey && codec == .hevc { forceKeyframe = true }
+                        } else {
+                            sendQueue.async { [weak self] in
+                                guard let self else { return }
+                                do {
+                                    try self.connection.send(packet(type: .frame, flags: isKey ? 1 : 0, ptsMicros: micros, payload: data))
+                                    self.lock.lock(); self.sent += 1; self.pending -= 1; self.queuedBytes -= length; self.lock.unlock()
+                                } catch {
+                                    self.lock.lock(); self.pending -= 1; self.queuedBytes -= length; self.closed = true; self.lock.unlock()
+                                    self.signalDisconnect()
+                                }
                             }
                         }
                     }
