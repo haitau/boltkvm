@@ -24,7 +24,10 @@ struct SavedHost: Codable, Identifiable {
   真正的画面质量开关在**服务端菜单**里（画面质量 → 标准 / 清晰），见 `ServerAppController`；
 - 分辨率在界面里是具体数值（预设 1280×720…3840×2160 + 自定义），自定义尺寸记在
   `UserDefaults` 的 `hosts.customResolutions`；仍然只存不生效，等 R2 的 config 包；
-- 首次生成用 `boltkvm keygen`（写 0600 文件并打印 SHA-256 指纹前 8 字节），两端比对指纹
+- 首次由服务端自动生成：`--key`/`$BOLTKVM_KEY`/`~/.boltkvm-key` 全空时，服务端在启动前
+  生成 8 位口令（58 字符表，去掉 `0/O/1/l/I`，约 46.8 位）写入 0600 文件，并显示在被控端
+  面板；主控端在「编辑」里填一次即可（按台保存）。不用 SSH、不用手工 openssl；
+- 首次生成也可以用 `boltkvm keygen`（写 0600 文件并打印 SHA-256 指纹前 8 字节），两端比对指纹
   即确认是同一把；服务端启动时、客户端握手时都会把指纹写进日志；
 - PSK 只存**文件名**（`host:port`），内容写入
   `~/Library/Application Support/BoltKVM/keys/<host>_<port>`，权限 0600，不落 JSON。
