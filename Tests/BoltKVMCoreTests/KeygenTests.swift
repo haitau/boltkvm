@@ -148,6 +148,13 @@ final class KeygenTests: XCTestCase {
         XCTAssertNotEqual(key, PSK.stretch(hex))
     }
 
+    func testShortKeyKeepsEndsAndHidesMiddle() {
+        let key = String(repeating: "0123456789abcdef", count: 4)
+        let short = PSK.shortKey(key)
+        XCTAssertEqual(short, "01234567…abcdef")
+        XCTAssertEqual(PSK.shortKey("k7m3p9qx"), "k7m3p9qx")
+    }
+
     func testWriteStaticKeyReplacesFileWithMode0600() throws {
         let path = NSTemporaryDirectory() + "boltkvm-static-\(UUID().uuidString)"
         let key = try PSK.writeStaticKey(to: path)

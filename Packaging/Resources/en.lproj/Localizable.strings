@@ -115,7 +115,7 @@
 
 "server.panel.rotate" = "New password…";
 "server.panel.static" = "256-bit key…";
-"server.panel.staticKey" = "Static key %@ (paste these 64 characters on the client)";
+"server.panel.staticKey" = "Static key %@ (copy the whole value)";
 "server.panel.static.confirm.title" = "Switch to a 256-bit key?";
 "server.panel.static.confirm.body" = "Generates a 64-character hex key, writes it to ~/.boltkvm-key and restarts the server. Every client has to paste it into the connection-password field before it can connect again.";
 "server.panel.static.done" = "Switched to a 256-bit key:\n%@\n\nPaste these 64 characters into the client's password field.";

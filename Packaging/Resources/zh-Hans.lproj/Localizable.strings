@@ -116,7 +116,7 @@
 
 "server.panel.rotate" = "重新生成密码…";
 "server.panel.static" = "256 位密钥…";
-"server.panel.staticKey" = "静态密钥 %@（主控端要粘贴这 64 个字符）";
+"server.panel.staticKey" = "静态密钥 %@（复制后整段粘贴）";
 "server.panel.static.confirm.title" = "改用 256 位密钥？";
 "server.panel.static.confirm.body" = "会生成一个 64 位十六进制密钥写进 ~/.boltkvm-key 并重启服务。所有主控端都要把它粘进「连接密码」栏才能再次连接。";
 "server.panel.static.done" = "已切换到 256 位密钥：\n%@\n\n主控端把这 64 个字符填进「连接密码」即可。";

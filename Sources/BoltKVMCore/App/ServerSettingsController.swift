@@ -229,7 +229,7 @@ final class ServerSettingsController: NSWindowController {
                 hint += "\n" + L.f("server.panel.password", normalized)
             } else if let stored = PSK.storedText(), PSK.isStaticKey(stored) {
                 currentPassword = stored
-                hint += "\n" + L.f("server.panel.staticKey", stored)
+                hint += "\n" + L.f("server.panel.staticKey", PSK.shortKey(stored))
             }
             hint += "  " + L.f("server.panel.fingerprint", PSK.fingerprint(key))
         } else {

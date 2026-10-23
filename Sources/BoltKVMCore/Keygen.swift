@@ -92,6 +92,13 @@ enum PSK {
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Middle-truncated form for the settings panel: 64 characters do not fit
+    /// next to the fingerprint, and the copy button carries the full value.
+    static func shortKey(_ key: String) -> String {
+        guard key.count > 20 else { return key }
+        return String(key.prefix(8)) + "…" + String(key.suffix(6))
+    }
+
     /// Replaces the key file with a fresh static key. Same 0600 file the rest of
     /// the code reads, so nothing else has to know which kind it is.
     @discardableResult
