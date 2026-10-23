@@ -20,6 +20,9 @@ final class ServerSettingsController: NSWindowController {
     private let rotateButton = NSButton(title: L.t("server.panel.rotate"),
                                         target: nil, action: nil)
     private let copyButton = NSButton(title: L.t("server.panel.copy"), target: nil, action: nil)
+    /// Advanced alternative to the 8-character password: a 256-bit key for people
+    /// who would rather paste 64 hex characters than a 40-bit password.
+    private let staticButton = NSButton(title: L.t("server.panel.static"), target: nil, action: nil)
     /// What `copyButton` puts on the pasteboard (nil when the key is not a
     /// generated password, e.g. an old 64-hex file).
     private var currentPassword: String?
@@ -122,6 +125,12 @@ final class ServerSettingsController: NSWindowController {
         copyButton.frame = NSRect(x: 24, y: 56, width: 130, height: 24)
         content.addSubview(copyButton)
 
+        staticButton.bezelStyle = .rounded
+        staticButton.target = self
+        staticButton.action = #selector(useStaticKey)
+        staticButton.frame = NSRect(x: 180, y: 56, width: 150, height: 24)
+        content.addSubview(staticButton)
+
         rotateButton.bezelStyle = .rounded
         rotateButton.target = self
         rotateButton.action = #selector(rotatePassword)
@@ -170,6 +179,32 @@ final class ServerSettingsController: NSWindowController {
         }
     }
 
+    /// Swaps the 8-character password for a 256-bit key. Same effect as rotation
+    /// (every client needs the new value), so it gets the same confirmation.
+    @objc private func useStaticKey() {
+        let alert = NSAlert()
+        alert.messageText = L.t("server.panel.static.confirm.title")
+        alert.informativeText = L.t("server.panel.static.confirm.body")
+        alert.addButton(withTitle: L.t("server.panel.static"))
+        alert.addButton(withTitle: L.t("common.cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            let key = try PSK.writeStaticKey()
+            log("app: switched to a 256-bit static key")
+            server?.restartForSettings()
+            reload()
+            let done = NSAlert()
+            done.messageText = L.f("server.panel.static.done", key)
+            done.addButton(withTitle: L.t("common.ok"))
+            done.runModal()
+        } catch {
+            let failed = NSAlert()
+            failed.messageText = L.f("server.panel.rotate.failed", error.localizedDescription)
+            failed.addButton(withTitle: L.t("common.ok"))
+            failed.runModal()
+        }
+    }
+
     /// Called by the controller on every state change.
     func updateStatus(_ text: String, connected: Bool, needsPermission: Bool) {
         statusLabel.stringValue = text
@@ -192,6 +227,9 @@ final class ServerSettingsController: NSWindowController {
                 let normalized = PSK.normalize(stored)
                 currentPassword = normalized
                 hint += "\n" + L.f("server.panel.password", normalized)
+            } else if let stored = PSK.storedText(), PSK.isStaticKey(stored) {
+                currentPassword = stored
+                hint += "\n" + L.f("server.panel.staticKey", stored)
             }
             hint += "  " + L.f("server.panel.fingerprint", PSK.fingerprint(key))
         } else {

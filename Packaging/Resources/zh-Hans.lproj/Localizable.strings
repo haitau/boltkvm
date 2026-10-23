@@ -115,6 +115,12 @@
 "server.panel.nokey" = "本机还没有密钥：点「启动服务」时会自动生成一个 8 位连接密码。";
 
 "server.panel.rotate" = "重新生成密码…";
+"server.panel.static" = "256 位密钥…";
+"server.panel.staticKey" = "静态密钥 %@（主控端要粘贴这 64 个字符）";
+"server.panel.static.confirm.title" = "改用 256 位密钥？";
+"server.panel.static.confirm.body" = "会生成一个 64 位十六进制密钥写进 ~/.boltkvm-key 并重启服务。所有主控端都要把它粘进「连接密码」栏才能再次连接。";
+"server.panel.static.done" = "已切换到 256 位密钥：\n%@\n\n主控端把这 64 个字符填进「连接密码」即可。";
+"client.hosts.keyHint" = "口令可以是 8 位连接密码，也可以是被控端「256 位密钥…」给出的 64 位十六进制密钥。";
 "server.panel.rotate.confirm.title" = "重新生成连接密码？";
 "server.panel.rotate.confirm.body" = "所有主控端都会立刻连不上，直到你在它们的「编辑」面板里填入新密码。";
 "server.panel.rotate.done" = "已重新生成，新密码是 %@。服务正在用新密码重启。";

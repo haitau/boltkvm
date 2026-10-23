@@ -213,6 +213,7 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
     private func presentEditor(host: SavedHost?) {
         let alert = NSAlert()
         alert.messageText = host == nil ? L.t("client.hosts.add") : L.t("client.hosts.edit")
+        alert.informativeText = L.t("client.hosts.keyHint")
         alert.addButton(withTitle: L.t("common.ok"))
         alert.addButton(withTitle: L.t("common.cancel"))
 

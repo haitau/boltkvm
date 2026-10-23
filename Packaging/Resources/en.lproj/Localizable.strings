@@ -114,6 +114,12 @@
 "server.panel.nokey" = "No key yet: starting the server generates an 8-character connection password.";
 
 "server.panel.rotate" = "New password…";
+"server.panel.static" = "256-bit key…";
+"server.panel.staticKey" = "Static key %@ (paste these 64 characters on the client)";
+"server.panel.static.confirm.title" = "Switch to a 256-bit key?";
+"server.panel.static.confirm.body" = "Generates a 64-character hex key, writes it to ~/.boltkvm-key and restarts the server. Every client has to paste it into the connection-password field before it can connect again.";
+"server.panel.static.done" = "Switched to a 256-bit key:\n%@\n\nPaste these 64 characters into the client's password field.";
+"client.hosts.keyHint" = "The password is either the 8-character connection password or the 64-character hex key shown by the host's “256-bit key…” button.";
 "server.panel.rotate.confirm.title" = "Generate a new connection password?";
 "server.panel.rotate.confirm.body" = "Every client stops connecting until you enter the new password in its host editor.";
 "server.panel.rotate.done" = "New password: %@. The server is restarting with it.";

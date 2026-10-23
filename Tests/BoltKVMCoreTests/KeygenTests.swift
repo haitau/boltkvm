@@ -113,4 +113,48 @@ final class KeygenTests: XCTestCase {
         writeKeyFile("  " + String(repeating: "d4", count: 32) + "  ")
         XCTAssertEqual(resolveAuthKey([]), Data(repeating: 0xD4, count: 32))
     }
+
+    // MARK: - 256-bit static key
+
+    func testIsStaticKeyOnlyAccepts64Hex() {
+        XCTAssertTrue(PSK.isStaticKey(String(repeating: "a", count: 64)))
+        XCTAssertTrue(PSK.isStaticKey(String(repeating: "A1", count: 32)))
+        XCTAssertFalse(PSK.isStaticKey(String(repeating: "a", count: 63)))
+        XCTAssertFalse(PSK.isStaticKey(String(repeating: "a", count: 65)))
+        XCTAssertFalse(PSK.isStaticKey(String(repeating: "g", count: 64)))
+        XCTAssertFalse(PSK.isStaticKey("k7m3p9qx"))
+    }
+
+    func testMakeStaticKeyIsRandomHex() {
+        let a = PSK.makeStaticKey()
+        let b = PSK.makeStaticKey()
+        XCTAssertEqual(a.count, 64)
+        XCTAssertTrue(PSK.isStaticKey(a))
+        XCTAssertNotEqual(a, b)
+    }
+
+    func testStaticKeyIsUsedRawNotStretched() {
+        let hex = String(repeating: "0123456789abcdef", count: 4)
+        let key = try? XCTUnwrap(resolveAuthKey(["--key", hex]))
+        var expected = Data()
+        var i = hex.startIndex
+        while i < hex.endIndex {
+            let j = hex.index(i, offsetBy: 2)
+            expected.append(UInt8(hex[i..<j], radix: 16)!)
+            i = j
+        }
+        XCTAssertEqual(key, expected)
+        // The 8-character path stretches; a 64-character key must not collide with it.
+        XCTAssertNotEqual(key, PSK.stretch(hex))
+    }
+
+    func testWriteStaticKeyReplacesFileWithMode0600() throws {
+        let path = NSTemporaryDirectory() + "boltkvm-static-\(UUID().uuidString)"
+        let key = try PSK.writeStaticKey(to: path)
+        XCTAssertTrue(PSK.isStaticKey(key))
+        let attrs = try FileManager.default.attributesOfItem(atPath: path)
+        XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        XCTAssertTrue((try String(contentsOfFile: path, encoding: .utf8)).hasPrefix(key))
+        try FileManager.default.removeItem(atPath: path)
+    }
 }
