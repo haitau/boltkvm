@@ -62,6 +62,9 @@ final class Server: NSObject, SCStreamOutput {
     private var inputCount = 0
     /// Where the last injected event went; releases on disconnect use it.
     private var lastMousePoint: CGPoint?
+    /// Modifier bits the remote is currently holding, as far as our injections
+    /// are concerned (updated from the client's own event flags).
+    private var injectedFlags: UInt64 = 0
     private var keyCount = 0
     private var scrollCount = 0
     private var heartbeatTimer: DispatchSourceTimer?
@@ -350,6 +353,32 @@ final class Server: NSObject, SCStreamOutput {
         }
     }
 
+    /// Modifier key codes and their bit in the flags word.
+    private static let modifierBits: [(key: CGKeyCode, bit: UInt64)] = [
+        (55, 0x100000),  // command
+        (56, 0x020000),  // shift
+        (58, 0x080000),  // option
+        (59, 0x040000),  // control
+    ]
+
+    /// Make the remote's held modifiers match the flags the client had when it
+    /// sent this event. A plain left click must not arrive as a control-click
+    /// (which macOS shows as a right click) just because a key-up went missing;
+    /// the same sync makes ⌘-click and ⇧-click behave like they did locally.
+    private func syncModifiers(to flags: UInt64) {
+        let mask: UInt64 = 0x1F0000  // cmd/shift/caps/option/control
+        let want = flags & mask
+        let have = injectedFlags & mask
+        guard want != have else { return }
+        for (key, bit) in Self.modifierBits where (want & bit != 0) != (have & bit != 0) {
+            guard let e = CGEvent(keyboardEventSource: nil, virtualKey: key,
+                                  keyDown: want & bit != 0) else { continue }
+            e.flags = CGEventFlags(rawValue: want)
+            e.post(tap: .cghidEventTap)
+        }
+        injectedFlags = (injectedFlags & ~mask) | want
+    }
+
     private func inject(_ ev: InputEvent) {
         let p = CGPoint(
             x: displayBounds.minX + ev.x * displayBounds.width,
@@ -362,6 +391,7 @@ final class Server: NSObject, SCStreamOutput {
 
         switch ev.type {
         case .keyDown, .keyUp:
+            syncModifiers(to: ev.flags)
             guard let e = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(ev.keyCode), keyDown: ev.type == .keyDown) else { return }
             e.flags = CGEventFlags(rawValue: ev.flags)
             if ev.isRepeat { e.setIntegerValueField(.keyboardEventAutorepeat, value: 1) }
@@ -371,6 +401,7 @@ final class Server: NSObject, SCStreamOutput {
             e.type = .flagsChanged
             e.flags = CGEventFlags(rawValue: ev.flags)
             e.post(tap: .cghidEventTap)
+            injectedFlags = ev.flags
         case .mouseMoved, .leftMouseDown, .leftMouseUp, .leftMouseDragged,
              .rightMouseDown, .rightMouseUp, .rightMouseDragged,
              .otherMouseDown, .otherMouseUp, .otherMouseDragged:
@@ -389,8 +420,10 @@ final class Server: NSObject, SCStreamOutput {
             case .otherMouseDragged: type = .otherMouseDragged; button = .center
             default: return
             }
+            syncModifiers(to: ev.flags)
             guard let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: button) else { return }
             e.setIntegerValueField(.mouseEventButtonNumber, value: Int64(ev.button))
+            e.flags = CGEventFlags(rawValue: ev.flags)
             if ev.type != .mouseMoved && ev.type != .leftMouseDragged && ev.type != .rightMouseDragged && ev.type != .otherMouseDragged {
                 e.setIntegerValueField(.mouseEventClickState, value: 1)
             }
