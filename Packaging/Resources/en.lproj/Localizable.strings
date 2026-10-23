@@ -85,6 +85,7 @@
 "client.toolbar.app" = "App";
 "client.toolbar.missionControl" = "Mission Control";
 "client.toolbar.missionControl.tip" = "Show the remote Mission Control";
+"client.remote.needInput" = "Turn on Forward input for this host first — otherwise there is no way back";
 "client.toolbar.desktop" = "Desktop";
 "client.toolbar.desktop.tip" = "Show the remote desktop";
 "client.hosts.title" = "BoltKVM";
