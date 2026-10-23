@@ -15,7 +15,7 @@
 #
 # The pkill pattern uses a character class so this script does not match its
 # own command line when it runs.
-LOG=/Users/shawn/Library/Logs/boltkvm-server.log
+LOG="$HOME/Library/Logs/boltkvm-server.log"
 PIDFILE=/tmp/boltkvm-server.pid
 
 if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
@@ -25,10 +25,10 @@ fi
 echo $$ > "$PIDFILE"
 trap 'rm -f "$PIDFILE"; exit 0' EXIT INT TERM
 
-cd /Users/shawn || exit 1
+cd "$HOME" || exit 1
 # Extra server flags live in ~/boltkvm-flags so enabling audio does not mean
 # editing this script (empty/absent = default, audio isolated).
-FLAGS=$(cat /Users/shawn/boltkvm-flags 2>/dev/null)
+FLAGS=$(cat "$HOME/boltkvm-flags" 2>/dev/null)
 pkill -f 'boltkvm serve[r]' 2>/dev/null
 sleep 1
 while true; do

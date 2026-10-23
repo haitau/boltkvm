@@ -422,7 +422,7 @@ final class SessionCipher {
     }
 }
 
-final class TCPConnection {
+final class TCPConnection: @unchecked Sendable {
     let fd: Int32
     private let sendLock = NSLock()
     init(fd: Int32) {
@@ -591,7 +591,7 @@ func resolveBindAddress(_ spec: String) throws -> BindTarget {
     return BindTarget(addr: a, label: spec)
 }
 
-final class TCPListener {
+final class TCPListener: @unchecked Sendable {
     let fd: Int32
     let label: String
     init(port: UInt16, bind spec: String = "auto") throws {
@@ -644,7 +644,7 @@ func log(_ s: String) {
     // (and the process aborts, leaving a "quit unexpectedly" crash report) when
     // the descriptor is closed. The helper logs one line exactly when its parent
     // dies and stderr may already be a broken pipe.
-    var bytes = Array((s + "\n").utf8)
+    let bytes = Array((s + "\n").utf8)
     bytes.withUnsafeBufferPointer { buf in
         guard let base = buf.baseAddress else { return }
         var offset = 0

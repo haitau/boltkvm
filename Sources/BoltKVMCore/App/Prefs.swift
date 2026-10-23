@@ -82,27 +82,3 @@ enum Prefs {
         set { d.set(newValue, forKey: "server.codec") }
     }
 }
-
-/// Shared key file helpers. The CLI resolves --key > $BOLTKVM_KEY > ~/.boltkvm-key;
-/// the app uses the same file so both transports speak the same secret.
-enum AppKey {
-    static var path: String { NSHomeDirectory() + "/.boltkvm-key" }
-
-    static var exists: Bool {
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return false }
-        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    /// Creates a random 32-byte key on first run so the server never comes up
-    /// without auth by accident.
-    @discardableResult
-    static func ensure() -> Bool {
-        if exists { return true }
-        var bytes = [UInt8](repeating: 0, count: 32)
-        arc4random_buf(&bytes, bytes.count)
-        let hex = bytes.map { String(format: "%02x", $0) }.joined()
-        guard (try? hex.write(toFile: path, atomically: true, encoding: .utf8)) != nil else { return false }
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
-        return true
-    }
-}

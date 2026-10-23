@@ -8,7 +8,7 @@ import AVFoundation
 /// Wire format is fixed: 48 kHz, 2 channels, signed 16-bit, interleaved.
 /// The server converts to this before sending, so the player can schedule
 /// buffers with no further work.
-final class AudioPlayer {
+final class AudioPlayer: @unchecked Sendable {
     static let sampleRate: Double = 48_000
     static let channels: AVAudioChannelCount = 2
     static let bytesPerFrame = 4  // int16 * 2ch

@@ -70,16 +70,16 @@ fi
 if probe "$HOST" "$PORT"; then
   ok "boltkvm ($PORT)" "accepting connections"
 else
-  bad "boltkvm ($PORT)" "closed — start the server over ssh: open -a Terminal ~/soak-start.sh"
+  bad "boltkvm ($PORT)" "closed — start the server over ssh: open -a /Applications/BoltKVM.app"
 fi
 
 echo
 if [ "$FAIL" -ne 0 ]; then
   cat <<'EOF'
 Recovery order:
-  1. ssh:   ssh <host>                      # if this fails you need physical access
+  1. ssh:    ssh <host>                      # if this fails you need physical access
   2. unlock: open Screen Sharing to the host, type the login password
-  3. start:  ssh <host> 'open -a Terminal ~/soak-start.sh'
+  3. start:  ssh <host> 'open -a /Applications/BoltKVM.app'
   4. verify: scripts/rescue.sh --host <host>
 
 A rebooted host lands on the login window with the screen locked; SSH and VNC

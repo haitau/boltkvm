@@ -4,7 +4,7 @@ import Foundation
 /// Client-side connection engine: connect → auth → decode → present, plus input
 /// forwarding and audio. Same wire logic as `boltkvm client --render`, minus the
 /// borderless fullscreen window the CLI builds for long runs.
-final class ClientSession {
+final class ClientSession: @unchecked Sendable {
     enum State: Equatable {
         case idle
         case connecting
@@ -101,7 +101,7 @@ final class ClientSession {
                     } catch {
                         if attempt == 3 { throw error }
                         log("connect: attempt \(attempt) failed (\(error.localizedDescription)); retrying")
-                        Thread.sleep(forTimeInterval: 0.6)
+                        try? await Task.sleep(nanoseconds: 600_000_000)
                     }
                 }
                 guard let c = connection else { return }

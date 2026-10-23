@@ -64,7 +64,7 @@ final class ServerAppController: NSObject {
         if !canInject {
             setState(L.t("server.status.needsAccessibility"), detail: L.t("server.accessibility.hint"))
         }
-        _ = AppKey.ensure()
+        _ = PSK.ensureKey(args: [])
         start()
     }
 
@@ -292,7 +292,8 @@ final class ServerAppController: NSObject {
         let text = field.stringValue.trimmingCharacters(in: .whitespaces)
         let parts = text.lowercased().split(separator: "x")
         guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]),
-              (640...8192).contains(w), (480...8192).contains(h) else {
+              (640...7680).contains(w), (480...4320).contains(h),
+              w % 2 == 0, h % 2 == 0 else {
             let bad = NSAlert()
             bad.messageText = L.t("server.resolution.custom.invalid")
             bad.addButton(withTitle: L.t("common.ok"))
@@ -433,7 +434,6 @@ final class ServerAppController: NSObject {
         proc.standardInput = Pipe()
         var env = ProcessInfo.processInfo.environment
         env["BOLTKVM_EXIT_ON_STDIN_EOF"] = "1"
-        env["BOLTKVM_RELAY_REMOTE"] = "1"
         proc.environment = env
         // Keep the child's output in the app log as well as parsing it: the menu
         // bar only has room for one line.

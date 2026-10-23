@@ -1,37 +1,37 @@
-# ADR 0003：M1 主路径改用 ProRes 422
+# ADR 0003：默认视频编码器采用 ProRes 422
 
-- 状态：已接受（M1 实测；HEVC 作为回退）
+- 状态：已接受（ProRes 422 为默认主路径，HEVC 保留为可选回退）
 - 日期：2026-10-21
 
 ## 背景
 
-ADR 0001 规定视频编码优先 VideoToolbox HEVC 低延迟。M1 实测显示，4K HEVC 硬件编码的管线延迟约 **22ms**，即便关闭低延迟码控、保持 60fps，capture→present P95 仍在 34.7ms 左右，端到端余量不足。
+[ADR-0001](0001-thin-self-built-layer.md) 最初规划优先使用 VideoToolbox HEVC 低延迟硬件编码。但在 M1 实测中发现：
+
+1. 4K HEVC 硬件编码存在约 **22 ms** 的固有管线延迟，需要保持 4 帧在途才能跑满 60 fps，导致 `capture→present` 端到端 P95 达到 34.7 ms，超出 33 ms 解码预算；
+2. 在 `6016×3384`（6K）分辨率下，HEVC 硬编吞吐跌至 23 fps、延迟达 162 ms，无法支撑 2× 背板原画传输（[ADR-0002](0002-pixel-path-deferred.md)）。
 
 ## 决策
 
-M1 spike 的主路径改为 **ProRes 422**：
+将默认视频编码器切换为 **Apple ProRes 422**（`kCMVideoCodecType_AppleProRes422`）：
 
-- 编码：VideoToolbox `kCMVideoCodecType_AppleProRes422` 硬件编码；
-- 传输：雷雳 TCP，实测约 **658Mbps**，占链路约 1%；
-- 解码：客户端 8-bit 422v 硬件解码 + Metal 1:1；
-- 回退：HEVC 4:2:0（约 17Mbps、22ms 编码延迟），用于带宽或兼容性受限场景。
+- **默认主路径**：ProRes 422 硬件编码 + 客户端 422 硬件解码 + Metal 渲染；
+- **可选回退**：保留 `--codec hevc`（4:2:0），供普通局域网等带宽受限场景使用。
 
-## 依据
+## 实测依据
 
-【事实】4K 真实桌面：
+4K（3840×2160）真实桌面下三种 VideoToolbox 硬件编码器实测对比：
 
-| 编码器 | 吞吐 | 编码延迟 | 码率 |
+| 编码器 | 帧率 | 平均编码延迟 | 码率 |
 |---|---|---|---|
-| HEVC Main | 60fps | 22.9ms | 6–17Mbps |
-| H.264 High | 55fps | 57.7ms | 2.5Mbps |
-| **ProRes 422** | **59.9fps** | **9.16ms** | **658Mbps** |
+| HEVC Main | 60 fps | 22.9 ms | 6–17 Mbps |
+| H.264 High | 55 fps | 57.7 ms | 2.5 Mbps |
+| **ProRes 422** | **59.9 fps** | **9.16 ms** | **658 Mbps** |
 
-【事实】ProRes 端到端（capture→present）P95 **18.2ms**，全图 SSIM **0.9839**（4K 1:1，测试图参考）。
+- 4K ProRes 422 下，`capture→decode` P95 降至 **13.7 ms**，静态测试图全图 SSIM 达 **0.9839**（文字区 **0.9904**）；
+- 6K（6016×3384）ProRes 422 下，编码仍能稳定维持 **60.0 fps**（编码延迟约 12.2–12.5 ms，码率约 1.1–1.4 Gbps）。
 
 ## 后果
 
-- 带宽从 Mbps 级升到 ~0.66Gbps；雷雳直连可接受，公网/无线不在目标内；
-- 全 I 帧，丢帧不影响后续解码，适合低延迟调度；
-- 解码输出 8-bit 4:2:2；SCK 采集仍是 4:2:0，彩色高频细节的 SSIM 上限受采集层限制；
-- 项目章程的“HEVC 优先”条款需要同步修订，HEVC 保留为回退；
-- 仍需 glass-to-glass 相机实测与客户端窗口化验证。
+- **带宽开销**：码率从几十 Mbps 升至 0.6–1.4 Gbps，在 60 Gbps 雷雳网桥上仅占 1%–2% 带宽，但在 Wi-Fi 下不适用（慢速链路需切回 `--codec hevc` 或标准画质）；
+- **天然抗丢帧**：ProRes 帧帧独立（全 I 帧），发送队列或解码队列发生背压时可直接丢弃单帧，无需等待关键帧恢复；
+- **色度精度**：解码输出 4:2:2（10-bit），减少色度二次损失（注：ScreenCaptureKit 采集源仍为 4:2:0，彩色高频棋盘格极限受采集层约束）。

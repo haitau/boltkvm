@@ -12,8 +12,8 @@ cd "$(dirname "$0")/.."
 IDENTITY="${BOLTKVM_CODESIGN_IDENTITY:--}"
 APP="dist/BoltKVM.app"
 
-echo "==> swift build -c release --product BoltKVMApp"
-swift build -c release --product BoltKVMApp
+echo "==> swift build -c release"
+swift build -c release
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

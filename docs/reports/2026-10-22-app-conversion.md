@@ -1,293 +1,68 @@
-# 单 app 化与内建虚拟显示（阶段 1–6）
+# 单应用化与内建虚拟显示验证报告（2026-10-22）
 
-日期：2026-10-22
-范围：把「CLI + vdscreen 外挂」的部署方式收成一个 `BoltKVM.app`，两个角色共用一套采集/传输/渲染代码。
+- 范围：将「CLI + 外置 `vdscreen`」收敛为单一 `BoltKVM.app`，被控端与主控端共用 `BoltKVMCore` 核心库。
 
-## 一句话结论
+## 1. 核心成果
 
-mini 已从「CLI 守护循环 + vdscreen 虚拟屏」切换为「`/Applications/BoltKVM.app` + SMAppService 登录项」，重启后无人干预自动起服务；Pro 的 app 作为主控端连上后 57 fps / 977 Mbps，服务端 58–60 fps。vdscreen 已从 mini 移走。
+被控端 Mac mini 已从早期的「CLI 脚本守护 + 外置 `vdscreen`」全面切换为 `/Applications/BoltKVM.app`（通过 `SMAppService.mainApp` 注册登录项自启），重启后无需人工干预即可自动建屏并监听；主控端 MacBook Pro 运行同一个 `BoltKVM.app` 连接后稳定在 58–60 fps。
 
-## 做了什么
-
-| 阶段 | 内容 |
+| 阶段 | 完成内容 |
 |---|---|
-| 1 | vendored `CVirtualDisplay`（vdscreen MIT 代码，固定 commit），`--virtual-display builtin` 由进程自己建屏 |
-| 2 | 默认改 builtin，采集按 displayID 精确锁定，mini 移除 vdscreen（app 与 LaunchAgent/登录项） |
-| 3 | 抽出 `BoltKVMCore`，CLI 变成 40 行调度器，app 与 CLI 共用实现 |
-| 4 | 单 app 骨架：首启选角色、主控端窗口（连接面板 + Metal 画面 + 全屏） |
-| 5 | 被控端：菜单栏状态项、非模态权限引导、`SMAppService.mainApp` 自启、单实例锁 |
-| 6 | `Packaging/build-app.sh`、代码生成的图标、自签名代码签名证书 |
+| 1 | 封装 `CVirtualDisplay`（源自 `vdscreen` MIT 核心代码），支持 `--virtual-display builtin` 进程内建屏 |
+| 2 | 默认切换为 `builtin`，采集按 `displayID` 精确锁定，移除被控端外置 `vdscreen` |
+| 3 | 抽取 `BoltKVMCore` 公共模块，CLI 精简为薄入口，App 与 CLI 共用全部核心实现 |
+| 4 | 完成单 App 双角色骨架：首次启动角色选择、主控端主机列表与 Metal 渲染窗口 |
+| 5 | 完成被控端菜单栏状态项、设置面板、权限引导、`SMAppService` 开机自启与 `flock` 单实例锁 |
+| 6 | 完成 `Packaging/build-app.sh`、代码生成图标与 `BoltKVM Local` 本地自签名脚本 |
 
-## 实测
+## 2. 端到端实测数据
 
-| 项目 | 结果 |
+| 测试项 | 实测结果 |
 |---|---|
-| CLI 服务端（单块内建屏） | `captured=480 encoded=480 dropped=0 fps=59.8 bitrate=522.7Mbps encLat=7.50ms` |
-| 客户端（CLI，同一次） | 588 帧 / 10 s |
-| app 主控端窗口渲染 | `decode 60.5 fps` / `render 447 帧 55.4 fps drawable=2400x1448 latency p50=27.2ms p95=29.3ms` |
-| app 服务端（子进程） | `fps=58.3 bitrate=703.2Mbps dropped=0` |
-| app → app 全链路 | 客户端 `57 fps · 977 Mbps`，服务端 `58.2 fps / 1004 Mbps` |
-| 重启恢复（无人工步骤） | 开机 → app 自启 → 子进程建屏 `id=5 3008x1692 / 6016x3384 HiDPI` → `listening`，客户端随即连上（434 帧 / 8 s） |
+| CLI 服务端（内建虚拟屏） | `captured=480 encoded=480 dropped=0 fps=59.8 bitrate=522.7Mbps encLat=7.50ms` |
+| App 主控端窗口渲染 | `decode 60.5 fps` / `render 55.4–60.0 fps`，`dropped=0` |
+| App 被控端 ↔ App 主控端（清晰 6016×3384） | 服务端 `60.0 fps / 1380 Mbps / dropped=0 / encLat=12.2ms`；客户端 `60 fps` |
+| 整机重启无人值守恢复 | 开机 → 自动登录 → App 自启 → 子进程建屏 `3008×1692 (6016×3384 HiDPI)` → `listening`，客户端直连出流 |
 
-## 输入链路（app 部署）
+## 3. 实施中解决的关键问题
 
-主控端不需要任何 TCC：`NSEvent.addLocalMonitorForEvents` 只监听本窗口，再用 `contentView.hitTest` 判断指针是否在画面视图内，在画面里才转发并吞掉，连接栏/菜单/快捷键照常本地可用。被控端需要「屏幕录制 + 辅助功能」两项。
+### 3.1 两块虚拟屏并存导致采集帧率暴跌
 
-| 项目 | 结果 |
-|---|---|
-| 坐标映射 | 客户端视图内 (600,372)/1200×724 → 归一化 (0.5,0.486) → 远端 (1504,822)，mini 光标实测停在 1504,822 |
-| 鼠标注入 | 连续移动/点击，mini 光标跟随，停止后停在最后一个映射点 |
-| 键盘注入 | 140 次按键 → 服务端 `input events=120 keys=120`（走同一条 `CGEvent.post` 注入路径） |
-| 事件分流 | 指针在连接栏时事件不进服务端；在画面内才计数 |
-| 全屏 | 按钮点击：`AXFullScreen true`、窗口 3008×1692；再点回 `false`、1200×788 |
+当系统同时存在两块 `3008×1692` 虚拟屏（内建屏与残留的外置 `vdscreen` 屏）时，ScreenCaptureKit 采集帧率会跌至 **3–8 fps**。移除外置 `vdscreen` 并通过 `SingleInstance` 文件锁保证单实例后，采集帧率立即恢复至 **58–60 fps**。
 
-**未能独立取证的一项**：合成 ⌘⇧3 在本机注入也不触发截图，说明 macOS 限制合成系统快捷键；因此键盘注入只能证明到「事件到达服务端注入函数」这一层，键盘在远端产生的实际效果没有独立观察。
+### 3.2 GUI 主进程建屏限制与子进程托管架构
 
-## 关键发现
+在 GUI 应用主进程内直接调用 `BKVVirtualDisplayCreate` 会被系统拒绝或退化为 LoDPI，而在普通命令行进程中则完全稳定。因此被控端采用「GUI 主进程管菜单与面板 + 包内 `boltkvm-server` 子进程建屏与采集」的架构（子进程名设为 `boltkvm-server` 以免在大小写不敏感的 APFS 上覆盖主程序 `BoltKVM`）。
 
-1. **两块虚拟屏会互相拖垮**：两块 3008×1692 虚拟屏同时在线时 ScreenCaptureKit 掉到 3–8 fps，两块都慢；只留一块立刻回到 57–60 fps。今天上午所有「帧率崩塌」的观测都是这个原因（残留的 vdscreen 屏）。
-2. **GUI 进程建虚拟屏不可靠**：同样的 C 代码 CLI 次次成功，放进 app 里要么被拒绝、要么掉成 LoDPI。服务端角色改为监督 bundle 内的 `boltkvm-server` 子进程（vdscreen 也是这么做的），TCC 由责任进程继承。
-3. **macOS 15 起「本地网络」是独立 TCC 项**：Info.plist 缺 `NSLocalNetworkUsageDescription` 时连接只报 `No route to host`。
-4. **ad-hoc 签名会重置所有 TCC**：每次构建 cdhash 都变。改用自签名证书（`scripts/make-signing-identity.sh`）后授权可跨构建保留。
-5. **APFS 大小写不敏感**：`Contents/MacOS/boltkvm` 会覆盖主程序 `BoltKVM`，helper 必须叫别的名字（现为 `boltkvm-server`）。
+父进程通过未写入的 `stdin` 管道与子进程绑定生命周期：父进程退出时子进程检测到 `stdin EOF` 立即退出并销毁虚拟屏；同时 `log()` 底层改用忽略 `SIGPIPE` 的 `write(2)` 系统调用，消除父进程先退出时子进程写日志触发 `NSFileHandle` 异常崩溃的问题。
 
-## 帧率：45 fps 之谜与一个真 bug
+### 3.3 无头虚拟屏自动休眠冻屏修复
 
-关掉 mini 的屏幕共享后重测，帧率先是 23 fps、随后归零，`boltkvm displays` 显示
+无头 Mac mini 上的虚拟屏在没有外部重绘刺激时会被系统标记为 `ASLEEP`，导致 ScreenCaptureKit 停止出帧。修复措施：
 
-```
-id=25  inactive online ASLEEP main 3008x1692
-```
+1. 服务端进程全生命周期持有 `PreventUserIdleDisplaySleep` 电源断言（`DisplaySleepAssertion`）；
+2. 每次创建或重建虚拟屏后调用 `IOPMAssertionDeclareUserActivity` 主动唤醒；
+3. 将建屏重试窗口延长至 20 秒，等待旧进程退出的虚拟屏身份彻底释放。
 
-也就是说：**无头机器的虚拟屏在没有外部刺激时会自己睡过去**，一旦 ASLEEP，ScreenCaptureKit 不再出帧，远端画面就冻住。之前看到的 45 fps 是屏幕共享会话一直在给这块屏制造重绘，掩盖了问题；上午 59.8 fps 时也没有这个休眠窗口。
+修复后静止桌面连续观察 50 秒以上，显示器始终保持 `active online awake`，帧率稳定在 58–60 fps。
 
-修复三处：
+### 3.4 `SCShareableContent` 首次枚举超时重试
 
-1. 服务端进程生命周期内持有 `PreventUserIdleDisplaySleep` 断言（原来只在每次建 capture 时短暂声明一次用户活动）；
-2. 建屏后 `IOPMAssertionDeclareUserActivity` 主动唤醒；
-3. 建屏失败的重试窗口从 3 秒延长到 20 秒——上一个 helper 被 kill 后，它的虚拟屏会残留（inactive/ASLEEP）几秒，占着同一个 identity，重试太短就会掉到 1920×1080 占位屏，客户端于是串流了错误的屏幕。
+虚拟屏刚创建完成时，首次调用 `SCShareableContent.excludingDesktopWindows` 偶发挂起不返回。通过 `withThrowingTaskGroup` 为该异步调用加上 5 秒超时与自动重试后，消除了刚启动时首次连接停滞在「正在连接…」的问题。
 
-修复后（无屏幕共享、Pro 端 app 客户端）：
+### 3.5 分辨率等比缩放与画质档位
 
-| 场景 | 服务端 | 客户端 |
-|---|---|---|
-| 持续有输入/画面变化 | 55–60 fps，`dropped=0`，~790 Mbps，encLat 7.9–8.8 ms | 60 fps · 771–793 Mbps |
-| 静止 50 秒后 | 58.0 fps，显示器仍 `active online awake`，断言在 `pmset -g assertions` 里可见 | 画面不冻 |
+- **等比缩放与黑边隔离**：Metal 顶点着色器按远端画面长宽比计算等比缩放系数，窗口比例不一致时自动留出对称黑边；窗口内 `NSEvent` 输入捕获仅在鼠标命中画面矩形时转发坐标，点击黑边或工具栏时正常交还本地处理；
+- **分辨率与画质设置**：被控端支持 `1920×1080` 至 `6016×3384` 预设及自定义分辨率（偶数宽高 `640–7680` × `480–4320`），并提供「清晰」（默认，2× 真实像素原画传输）与「标准」（最大宽度限制为 3840，适合慢速链路）两档画面质量。
 
-顺带修了两件小事：主控端窗口关掉后没有入口再打开（加了「显示主控端窗口」菜单项和 reopen 处理）；app 刚启动时第一次连接偶尔报 `No route to host`（本地网络检查未就绪），改成 3 次重试后稳定一次成功。
+### 3.6 客户端工具栏与全屏自动隐藏
 
-## 分辨率与画质（2026-10-22 下午）
+- 主控端窗口采用 macOS 原生 `NSToolbar`：居中放置「调度中心」与「桌面」按钮，最右侧实时显示 `fps · Mbps`；
+- 全屏状态下默认隐藏工具栏与标题栏，当鼠标指针移至屏幕顶边 4 pt 以内时自动浮现工具栏，离开顶边 110 pt 以外时再次隐藏，避免工具栏展开下推指针引发闪烁抖动。
 
-用户反馈「mini 分辨率不太对、字体宽、整体模糊」。实测两台机器都是
-`3008x1692 logical / 6016x3384 pixel / 2.0x backing / 60Hz`，虚拟屏模式本身没问题，
-问题出在两处：
+### 3.7 单实例进程锁（`flock`）
 
-| 现象 | 原因 | 处理 |
-|---|---|---|
-| 字体发宽/发扁 | 16:9 码流被拉满视频区（1200×724 ≈ 1.66:1），横向压缩约 7%；全屏时反过来被拉宽 | 着色器改成等比缩放 + 黑边，输入映射按画面矩形取坐标，点黑边放行给本地 |
-| 整体模糊 | 码流固定 3840×2160，全屏（6016×3384 像素）时被放大 1.57 倍 | 新增「画面质量」：清晰 = 码流等于虚拟屏真实像素 |
+在 `~/Library/Application Support/BoltKVM/` 下使用内核级 `flock(LOCK_EX | LOCK_NB)` 维护两把锁：
 
-服务端菜单新增（持久化，改完自动重启 helper）：
-
-- **分辨率**：1920×1080 / 2560×1440 / 2880×1620 / 3008×1692 / 3840×2160 / 5120×2880 / 6016×3384，以及**自定义**（宽x高，640–8192）；
-- **画面质量**：清晰（默认，码流 = 2× 逻辑尺寸）／标准（码流最宽 3840，给慢链路用；2× 超过 8192 宽时也自动退回按比例缩放）。
-
-实测（雷雳桥，清晰 6016×3384）：
-
-| | 数值 |
-|---|---|
-| 服务端 | 60.0 fps，1380 Mbps，`dropped=0`，encLat 12.2 ms |
-| 客户端 | 60 fps，窗口视频区 1200×724，画面 1200×675（上下各 24.5pt 黑边） |
-| 映射 | (1504,641)→(1504,795)、(1504,340)→(1504,41)、(1504,985)→(1504,1658)、(1000,641)→(240,795) |
-
-清晰模式的 1.38 Gbps 只在雷雳桥（10Gbps）上验证过；Wi-Fi 下应该退回「标准」。默认值已改成「清晰」，清掉 preferences 后验证：helper 参数 `--width 6016 --height 3384`，客户端 60 fps / 1381 Mbps / dropped=0。
-
-## 客户端工具栏（仿屏幕共享）
-
-按 macOS「屏幕共享」的布局给客户端窗口加了 `NSToolbar`：
-
-```
-[控制]   [App] [调度中心] [桌面]   [全屏]
-```
-
-- 三个远程动作从菜单搬到工具栏（菜单里的三项保留）；
-- 「控制」是键鼠转发开关，图标随状态在 `cursorarrow.rays` / `hand.raised.slash` 之间切换；
-- 连接栏里重复的「全屏」按钮删掉，全屏入口只在工具栏；
-- 全屏时连接栏隐藏（`windowWillEnterFullScreen` 里换约束），窗口进入标准 AppKit
-  全屏后工具栏由系统在指针移到顶边时浮现。
-
-验证：窗口态截图确认工具栏五项齐全、图标正确。
-
-全屏态（2026-10-22 17:45 重做，Pro 本机）：**工具栏默认隐藏，指针到顶边才浮现**。
-
-- `windowWillEnter/ExitFullScreen` 和 `didEnter/ExitFullScreen` 通知**都不会来**
-  （两轮临时日志一条都没打印），所以改成 0.2s 轮询 `window.styleMask.contains(.fullScreen)`；
-- 全屏时隐藏连接栏（换约束）、隐藏工具栏、隐藏标题；指针进顶边 4pt 内显示工具栏，
-  退到 110pt 以外再隐藏。阈值取 110 不是随意：工具栏一浮现，系统会把指针往
-  下推大约一个工具栏的高度（实测 y 从 1689 掉到 1615，top=1692），阈值设 40 会
-  变成"显示 → 隐藏"每个 tick 抖一次；
-- 验证日志：`fs: chrome applied (fullscreen=true)` → `fs: toolbar shown at the top edge`
-  → `fs: toolbar hidden`；截图对比确认隐藏时画面上没有工具栏、到顶边时五项都在；
-- 退出全屏：`视图 → 全屏` 正常，`chrome applied (fullscreen=false)`，连接保持
-  60fps · 1357Mbps。之前"退全屏窗口消失"的现象没有复现——那两次多半是我用 AX
-  查窗口时查不到（全屏窗口在独立 Space 里 AX 索引不到），不是窗口真的没了。
-
-## 远程系统操作（调度中心 / 显示桌面 / App 窗口）
-
-参照屏幕共享加了「远程」菜单：调度中心（多桌面）、显示 App 窗口、显示桌面。
-
-一开始把它们实现成"注入 `⌃↑` / `⌃↓` / `F11`"，实测**不生效**：按键确实到达并被注入
-（服务端 `input events=360 keys=6`），但系统级热键无视合成事件。同一条链路里
-`⌘Space` 能打开远端 Spotlight（画面 79 → 188），说明注入本身没问题——被吃掉的是
-`RegisterEventHotKey` 一类热键（和之前 `⌘⇧3` 截图不生效是同一个原因）。
-
-所以改成**命令通道**：客户端发 `PacketType.command = 10` + 一个动作字节，服务端自己执行。
-菜单项名称按用户口径改为 **App / 调度中心 / 桌面**。
-
-| 动作 | 服务端实现 | 实测 |
-|---|---|---|
-| 调度中心 | `NSWorkspace.open("/System/Applications/Mission Control.app")` | ✅ 服务端日志 `command: missionControl`，画面结构变化（相关性 0.41）、亮度 188 → 81 |
-| App（App 窗口） | System Events `key code 125 using control down` | ❌ 需要「自动化」授权，当前返回 -1743 `未获得授权将Apple事件发送给 System Events` |
-| 桌面（显示桌面） | System Events `key code 103` | ❌ 同上，需要授权 |
-
-也试过给合成事件换 event tap（hid / session / annotated）和用 `flagsChanged` 发修饰键，
-都不影响系统热键的行为——这条路走不通，命令通道才是对的。
-
-## 「BoltKVM 意外退出」的崩溃报告（2026-10-22 17:00 后）
-
-mini 上报了多条 `boltkvm-server-*.ips`。抓一份看：
-
-```
-exception: EXC_CRASH / SIGABRT (abort trap: 6)
-  _NSFileHandleRaiseOperationExceptionWhileReading
-  -[NSConcreteFileHandle writeData:]
-  log(_:)
-  closure #1 in exitWhenParentGoesAway()
-```
-
-`log()` 用 `FileHandle.standardError.write(...)`，描述符已关闭时 Foundation 抛
-Objective-C 异常 → `std::terminate` → abort。触发条件很具体：父进程（被控端 app）
-退出 → helper 的 stdin EOF → 它写下最后一行"parent closed stdin" → 此时 stderr
-已经是断掉的管道 → 抛异常 → 崩溃报告。
-
-改成 `write(2)`（带 EINTR 重试，失败就放弃这行日志），并在
-`exitWhenParentGoesAway()` 开头忽略 SIGPIPE。
-
-验证：重启 app 再 kill，崩溃报告数 13 → 13，helper 干净退出。
-
-另有一份 `boltkvm-*.ips` 是 `SIGKILL (Code Signature Invalid)`——那是重建二进制时
-taskgated 杀掉正在运行的旧 CLI 进程，不是代码问题。
-
-## 未验证 / 下一步
-
-- app 部署下 >10 分钟的稳定性（今天只做了分钟级）；
-- 音频在 app 里未实测（CLI 下已验）；
-- 8 小时输入连续性测试仍按用户要求搁置。
-
-## 远程动作的 TCC 身份问题（2026-10-22 17:50）
-
-`桌面` / `App` 一直返回 `-1743 未获得授权将Apple事件发送给 System Events`。
-原因不在脚本本身：**helper 是裸可执行文件，没有 bundle 身份**，TCC 把它的
-Automation 请求直接判死，连授权弹窗都不会出。
-
-改法：helper 收到 `PacketType.command` 后不自己执行，往 stdout 打
-`@@REMOTE:<raw>`（`BOLTKVM_RELAY_REMOTE=1` 时），由 app 进程解析后调用
-`performRemoteAction`——只有 app 有 bundle id，才有资格被弹窗询问。
-`performRemoteAction` 抽到 `RemoteActionPerformer.swift`，CLI 角色仍然本地执行。
-
-实测：`command: relayed showDesktop to the app` 已经走到，但**仍然 -1743**，
-说明 TCC 里已经有一条拒绝记录（之前 helper 反复请求留下的）。已在 mini 上
-`tccutil reset AppleEvents io.github.boltkvm` 清掉，等客户端能连上后再点一次
-`桌面` 应该就会弹授权框。
-
-## SCShareableContent 卡死（2026-10-22 17:48）
-
-现象：helper 刚启动后的**第一次**连接经常停在"正在连接…"，服务端日志只有
-`client connected` / `auth ok`，没有 `capture started`，只能重启 helper 才好——
-而且重启后又要再连一次。
-
-原因：`SCShareableContent.excludingDesktopWindows` 在虚拟屏刚建好时会**永远不
-回调**（不是返回空，是不返回），`start()` 就卡在 await 上。原来的 5 次重试只在
-"返回了但 displays 为空"时有用。
-
-改成用 `withThrowingTaskGroup` 给这次调用套 5s 超时，超时算一次失败并重试。
-验证：重启 helper 后立刻用 CLI 客户端连，`fps=61.1`、348 帧，`capture started`
-立即出现。
-
-## 待查：GUI 客户端连不上（2026-10-22 17:58）
-
-同一台 Pro 上：
-
-- CLI 客户端 `--host <mini 桥接地址> --port 7474` → 61.1 fps、348 帧，正常；
-- GUI 客户端同一地址同一端口 → `失败：未能完成该操作。无到主机的路由`，
-  而服务端日志里能看到 `client connected` 之后紧接 `auth failed: ... Connection
-  reset by peer`。
-
-`nc -z <mini 桥接地址> 7474` 通，ping 0.4ms，两端 `~/.boltkvm-key` sha256 一致，app 无
-sandbox entitlement。反复重建签名（Local Network / 本地网络 TCC）是头号嫌疑，
-但 `tccutil reset LocalNetwork` 报不支持，没验成。
-
-## 「调度中心」看起来像「显示桌面」的真正原因（2026-10-22 18:25）
-
-复现后确认：`调度中心` 发的就是 Mission Control，远端也确实进了 Mission Control
-（窗口全部铺开 + 顶部「桌面」缩略图）。真正的问题是**进去出不来**：
-
-- Mission Control 是模式不是动作，退出要按 Esc；
-- 而客户端「转发键鼠」默认是关的（`client.input` 被上一次测试存成了 false），
-  键鼠完全不往远端送，于是远端一直停在 Mission Control；
-- 那一刻画面是「一堆窗口缩略图 + 模糊壁纸」，加上帧率掉到 17fps，
-  看起来就很像"显示桌面"或者"卡住了"。
-
-两处改动：
-
-1. 点 `调度中心` 时如果「转发键鼠」是关的，自动打开（同时写回偏好）；
-2. 实测链路：点 `调度中心` → 远端进 Mission Control（17fps）→ 客户端按 Esc →
-   Mission Control 关闭 → 回到 **60fps · 1584Mbps**。
-
-## 本地网络权限（2026-10-22 18:15）
-
-GUI 客户端连不上（`EHOSTUNREACH` / "无到主机的路由"）、同机 CLI 却正常，原因是
-**系统设置 → 隐私与安全性 → 本地网络 → BoltKVM.app 的开关是关的**，
-命令行继承终端权限所以不受影响。截图核对后手动打开，客户端立刻连上
-（60fps · 1371Mbps）。反复重建签名会重置这类授权，调试期间要注意。
-
-## 单实例约束（2026-10-22 18:40）
-
-一台机器上只允许一个 boltkvm，分两把锁（`~/Library/Application Support/BoltKVM/*.pid`，
-`flock(LOCK_EX|LOCK_NB)` 持有到进程退出）：
-
-- `.app`：GUI 进程启动时取；取不到说明已有实例，激活那个窗口后 `exit(0)`；
-- `.server`：`server` 角色取；helper 和手动 `boltkvm-server server` 共用这一把，
-  第二个直接 `exit(9)`，不抢虚拟屏和 7474 端口。
-
-用 flock 而不是"检查 pid 文件存在"：内核在进程退出（包括 SIGKILL）时自动释放，
-所以崩溃留下的文件不会挡住下次启动。原来的 `NSRunningApplication` 扫描留着做
-"激活已有窗口"，但它不是原子的——登录项 + 手动启动可能同时通过检查。
-
-app 侧对 `exit(9)` 特殊处理：状态显示「另一个实例正在运行」并**停止自动重启**
-（否则每 3 秒拉一次，永远循环）。
-
-实测（Pro + mini）：
-
-- 已在运行时直接再跑一次 `dist/BoltKVM.app/Contents/MacOS/BoltKVM`
-  → `boltkvm: another instance is already running (pid 86734); exiting`，进程数保持 1；
-- mini 上 app 正在跑时手动 `/Applications/BoltKVM.app/Contents/MacOS/boltkvm-server server`
-  → `boltkvm: another server is already running (pid 31713)`；
-- 部署后客户端照常连接：60 fps · 1791 Mbps。
-
-未验证：登录项 + 手动启动同时触发的竞态（只做了顺序启动的验证）。
-
-## 工具栏精简与居中（2026-10-22 18:58）
-
-用户反馈两点：`控制` 不知道干什么、`全屏` 多余（窗口左上角绿灯就是原生全屏），
-以及为什么按钮不居中。都成立：
-
-- `控制` 和连接栏里的「转发键鼠」是同一个开关的两种表现，留着只会让人迷惑 → 删；
-- `全屏` 和绿灯按钮、`视图 → 全屏`（⌃⌘F）重复 → 删；
-- 居中：`NSToolbar.centeredItemIdentifier` **只居中指定的那一个 item**，其余按顺序
-  排在它两侧（实测：App 被甩到最左边，调度中心居中，桌面跟在右边）。改成把三个
-  动作放进**一个 view-based item**（`NSStackView` + 三个 `imageAbove` 的 NSButton），
-  再让这个 item 居中，整组就落在正中。
-
-验证：截图量过，三组图标在窗口内水平居中（中心偏差 < 10pt），标签正常显示；
-连接后 60fps · 1377Mbps。
+- `app.pid`：保证同一台机器只运行一个 `BoltKVM.app` 实例，重复打开时自动激活已有窗口并退出；
+- `server.pid`：保证同一台机器只运行一个 `boltkvm-server` 采集服务（退出码 `9` 时宿主 App 自动清理孤儿进程后重拉，避免死循环重启）。

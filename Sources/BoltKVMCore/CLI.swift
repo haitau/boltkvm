@@ -33,7 +33,7 @@ public enum CLI {
             // Fresh install: nobody has a key yet, and copying one around is not
             // an option on machines without SSH. Generate it here and let the
             // operator read the password off the 被控端 panel.
-            if let generated = PSK.ensureKey(args: args) {
+            if PSK.ensureKey(args: args) != nil {
                 // Not the password itself: this log ends up in a file on the
                 // remote machine (the app redirects helper output into
                 // ~/Library/Logs/BoltKVM.log). The panel shows it on demand.
@@ -383,6 +383,7 @@ public enum CLI {
     public static func runClientRender(_ args: [String]) async {
         let host = argValue(args, "--host", "127.0.0.1")
         let port = UInt16(argInt(args, "--port", 7474))
+        let requested = parseRequestSize(args)
         let seconds = Double(argInt(args, "--seconds", 20))
         let switchMode = args.contains("--switch-mode")
         let wantsInput = args.contains("--input")
@@ -411,6 +412,7 @@ public enum CLI {
                 var sawChallenge = false
                 var sawAuthOk = false
                 var challengeNonce: Data?
+                var authSentAt: Int64 = 0
                 do {
                     let c = try tcpConnect(host: host, port: port)
                     conn = c
@@ -420,11 +422,45 @@ public enum CLI {
                     decoder.renderer = RenderSession.shared.renderer
                     lastDecoder = decoder
                     var inputStarted = false
-                    while DispatchTime.now().uptimeNanoseconds < deadline {
-                        let (header, payload) = try c.recvFrame()
-                        packets += 1
-                        winBytes += payload.count
-                        if header.type == .frame { frames += 1; winFrames += 1 }
+                    let pump = SessionPump(conn: c, decoder: decoder)
+                    pump.onChallenge = { payload in
+                        sawChallenge = true
+                        challengeNonce = payload
+                        authSentAt = Int64(Date().timeIntervalSince1970 * 1_000_000)
+                        try respondToAuthChallenge(conn: c, nonce: payload)
+                    }
+                    pump.onAuthOk = { header, payload in
+                        sawAuthOk = true
+                        try enableClientEncryption(
+                            conn: c, nonce: challengeNonce,
+                            forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
+                        log("auth ok")
+                        if header.payloadLength >= 9, payload.first == 1, authSentAt > 0 {
+                            let t2 = payload.readInt64BE(payload.startIndex + 1)
+                            let t3 = Int64(Date().timeIntervalSince1970 * 1_000_000)
+                            decoder.setClockOffset(t2 - (authSentAt + t3) / 2,
+                                                   rttMs: Double(t3 - authSentAt) / 1000.0)
+                        }
+                        if header.payloadLength >= 1, payload.first == 1, let requested {
+                            try? c.send(packet(type: .config, payload: requested.encode()))
+                            log("sent config \(requested.width)x\(requested.height) quality=\(requested.quality)")
+                        }
+                        try? c.send(timeSyncRequest())
+                    }
+                    pump.onFormat = { _ in
+                        if wantsInput && !inputStarted {
+                            inputStarted = true
+                            DispatchQueue.main.async {
+                                RenderSession.shared.restartInput(conn: c)
+                            }
+                        }
+                    }
+                    pump.onAudio = { [audio] payload in audio?.enqueue(payload) }
+                    pump.onWindow = { window in
+                        packets += window.packets
+                        frames += window.frames
+                        winBytes += window.bytes
+                        winFrames += window.frames
                         let beatNow = DispatchTime.now().uptimeNanoseconds
                         if beatNow - lastBeat >= 60_000_000_000 {
                             let secs = Double(beatNow - lastBeat) / 1e9
@@ -438,41 +474,12 @@ public enum CLI {
                             winBytes = 0
                             winFrames = 0
                         }
-                        if header.type == .authChallenge {
-                            sawChallenge = true
-                            challengeNonce = payload
-                            try respondToAuthChallenge(conn: c, nonce: payload)
-                        } else if header.type == .authOk {
-                            sawAuthOk = true
-                            try enableClientEncryption(
-                                conn: c, nonce: challengeNonce,
-                                forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
-                            log("auth ok")
-                            // Encrypted ping: proves the client->server direction
-                            // decrypts, not just server->client.
-                            try? c.send(timeSyncRequest())
-                        } else if header.type == .format, let f = StreamFormat.decode(payload) {
-                            try decoder.configure(f)
-                            if wantsInput && !inputStarted {
-                                inputStarted = true
-                                DispatchQueue.main.async {
-                                    RenderSession.shared.restartInput(conn: c)
-                                }
-                            }
-                        } else if header.type == .frame {
-                            decoder.decode(payload, ptsMicros: header.ptsMicros)
-                        } else if header.type == .timeSync {
-                            handleTimeSync(header, payload, decoder: decoder)
-                        } else if header.type == .audio {
-                            audio?.enqueue(payload)
-                        }
                     }
+                    try pump.run(deadline: DispatchTime(uptimeNanoseconds: deadline))
                     c.close()
                     break
                 } catch {
                     if sawChallenge && !sawAuthOk {
-                        // Wrong key: the server closed after the challenge. Retrying
-                        // with the same key cannot succeed.
                         log("auth rejected by server: check ~/.boltkvm-key on both ends (not retrying)")
                         break
                     }

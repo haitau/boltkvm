@@ -40,8 +40,8 @@ final class TransportSafetyTests: XCTestCase {
         let bodySize = 4
 
         let finished = DispatchSemaphore(value: 0)
-        var payloads = Set<Data>()
-        var readError: Error?
+        nonisolated(unsafe) var payloads = Set<Data>()
+        nonisolated(unsafe) var readError: Error?
 
         DispatchQueue.global().async {
             for _ in 0..<total {

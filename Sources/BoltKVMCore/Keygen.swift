@@ -8,9 +8,9 @@ import CommonCrypto
 /// There is no pairing handshake on the wire: both ends simply hold the same
 /// bytes (see `resolveAuthKey` for the lookup order). So the first-run story is:
 ///
-/// 1. the 被控端 generates a password on first start (`ensureKey`) and shows it in
-///    the 被控端 panel together with a short fingerprint;
-/// 2. the operator types that password into the 主控端's host editor once; it is
+/// 1. the server generates a password on first start (`ensureKey`) and shows it in
+///    the server panel together with a short fingerprint;
+/// 2. the operator types that password into the client's host editor once; it is
 ///    saved per host (`keys/<host>_<port>`, 0600) and reused afterwards;
 /// 3. both ends print the same fingerprint, which is how you confirm they agree.
 ///
@@ -36,7 +36,7 @@ enum PSK {
         return out
     }
 
-    /// `K7M3-P9QX`: 8 symbols, grouped in two halves so it is easy to read out.
+    /// 8 lowercase characters from the 31-symbol alphabet (e.g. `k7m3p9qx`).
     static func makePassword() -> String {
         var bytes = [UInt8](repeating: 0, count: 8)
         if SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) != errSecSuccess {
@@ -183,7 +183,7 @@ extension CLI {
         print("connection password \(password)")
         print("fingerprint \(PSK.fingerprint(key))")
         print("""
-        type the password once in the 主控端's host editor; both ends must show the \
+        type the password once in the controller's host editor; both ends must show the \
         same fingerprint
         """)
     }

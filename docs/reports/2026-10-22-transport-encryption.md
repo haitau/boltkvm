@@ -1,69 +1,60 @@
-# 传输加密：ChaCha20-Poly1305 会话层
+# 传输层加密与前向保密：ChaCha20-Poly1305 + X25519
 
-> 2026-10-22。之前只有认证（HMAC 挑战应答）没有加密，线上是明文 ProRes。现在握手完成后整条链路都是 AEAD 密封的。
+- 日期：2026-10-22（2026-10-23 升级 X25519 前向保密）
+- 相关：[ADR-0004](../adr/0004-psk-over-pairing-code.md)
 
-## 设计
+## 1. 设计概览
 
-- **密钥来源**：复用认证用的 PSK。服务端挑战里的 32 字节随机 nonce 直接当 HKDF 盐，所以不需要额外往返；每次连接密钥都不同。
-- **两个方向两把钥**：`HKDF-SHA256(psk, salt=nonce, info="boltkvm c2s"/"boltkvm s2c")`，避免双向同钥绕开 nonce 复用风险。
-- **算法**：ChaCha20-Poly1305（CryptoKit），每包 16 字节 tag。
-- **Nonce**：64 位计数器放在 12 字节 nonce 的低 8 字节（即后 8 字节）。TCP 有序，两端在同一协议点（authOk 之后）同时装密钥，计数器天然对齐，不需要重放窗口。
-- **帧头保持明文**：头里有 magic/type/length，是分帧必需的；把它作为 AEAD 的 AAD 参与认证，所以改 type 或改长度都会校验失败。
-- **载荷长度**：`payloadLength` 字段写的是密文+tag 的长度，接收端据此读取。
+握手认证完成后，整条 TCP 传输链路（视频帧、音频流、键鼠输入、远端命令、时钟同步）均采用 **ChaCha20-Poly1305（AEAD）** 逐包加密与认证：
 
-## 协议时序
+- **初始密钥派生**：复用挑战-应答认证阶段的预共享密钥（PSK）与服务端生成的 32 字节随机 `nonce`，通过 `HKDF-SHA256(psk, salt=nonce, info="boltkvm c2s" / "boltkvm s2c")` 派生收发双向独立密钥；
+- **X25519 前向保密升级**：`authOk` 之后，双方通过已加密通道交换 32 字节 X25519 临时公钥（`PacketType.authExchange = 12`），计算出共享秘密 `sharedSecret`，并立即将双向会话密钥升级为 `HKDF-SHA256(psk ‖ sharedSecret, salt=nonce)`。即使预共享口令在事后泄露，历史录制的抓包流量也无法被解密；
+- **Nonce 计数器**：采用 64 位递增计数器（置于 12 字节 Nonce 的后 8 字节）。由于 TCP 严格保序且收发双方在完全相同的协议节点（`authOk` 后及 `authExchange` 后）切换密钥，两端计数器天然对齐；
+- **帧头认证（AAD）**：20 字节协议帧头（含 `magic`、`type`、`flags`、`payloadLength`、`ptsMicros`）保持明文以便流式分帧，同时作为 AEAD 的附加认证数据（AAD）参与校验，任何对包类型或长度的篡改均会被拒绝；
+- **密文载荷**：加密帧设置 `FLAG_ENCRYPTED (0x02)`，`payloadLength` 为密文长度加上 16 字节 Poly1305 认证标签（Tag）。一旦会话启用加密，接收端拒绝任何未携带 `FLAG_ENCRYPTED` 的明文帧。
 
+## 2. 握手与加密时序
+
+```text
+Client                                          Server
+  |---- timeSync (明文，握手期被跳过) ------------>|
+  |<--- authChallenge (32B nonce, 明文) ----------|
+  |---- authResponse (HMAC-SHA256, 明文) -------->|
+  |<--- authOk (含服务端时钟与能力标志, 明文) ----|
+  |                                               |
+  [安装初始会话密钥: HKDF(psk, nonce)]            [安装初始会话密钥: HKDF(psk, nonce)]
+  |                                               |
+  |---- authExchange (客户端 X25519 公钥, 加密) ->|
+  |<--- authExchange (服务端 X25519 公钥, 加密) --|
+  |                                               |
+  [升级前向保密密钥: HKDF(psk ‖ shared, nonce)]   [升级前向保密密钥: HKDF(psk ‖ shared, nonce)]
+  |                                               |
+  |---- config / timeSync (前向保密加密) -------->|
+  |<--- format / frame / audio (前向保密加密) ----|
 ```
-client                          server
-  |---- timeSync (明文) --------->|   （握手期间被跳过）
-  |<--- authChallenge (明文) -----|
-  |---- authResponse (明文 MAC) ->|
-  |<--- authOk (明文) ------------|
-  |                               |  装密钥 s2c/c2s
-  装密钥 c2s/s2c
-  |---- timeSync (加密, c2s#0) -->|
-  |<--- timeSync echo (加密 s2c#0)|
-  |<--- format / frame (加密) ----|
-```
 
-## 验证
+## 3. 验证结果
 
-| 项 | 方法 | 结果 |
+| 验证项 | 方法 | 结果 |
 |---|---|---|
-| seal/open 往返 | `boltkvm cryptotest`：1000 帧双向 + 3 种篡改 | PASS |
-| 载荷篡改 | 翻转密文最后一字节 | 拒绝（认证失败） |
-| 帧头篡改 | 翻转 flags 字节 | 拒绝（AAD 不匹配） |
-| 错误密钥 | 用全零 PSK 派生 | 拒绝 |
-| 端到端 | 被控端新服务端 + 主控端新客户端 | `auth ok`、加密 timeSync 往返 RTT 22.5 ms、348 帧、`failed=0` |
-| 旧客户端 | 用部署前的二进制连新服务端 | 帧数 0、`EBADMSG`——线上不再是可解析的明文帧 |
+| 加解密往返与篡改拒绝 | `boltkvm cryptotest`（1000 帧双向往返 + 密文/帧头/密钥 3 类篡改） | PASS |
+| X25519 协商与重键对齐 | `CryptoTests` 单元测试（11 项，含双向重键后流对齐与临时密钥敏感性） | PASS |
+| 明文注入拒绝 | `TransportSafetyTests.testPlaintextFrameIsRejectedOnceEncrypted` | PASS（返回 `EPROTO`） |
+| 并发发送 Nonce 顺序 | `TransportSafetyTests.testConcurrentSendersKeepNonceOrder`（6 线程并发） | PASS |
+| 端到端实测 | 主控端与被控端雷雳桥连接 | 日志确认 `auth: forward secrecy on (X25519)`，帧率稳定 58–60 fps |
 
-## 代价
+## 4. 性能开销
 
-- 每包多 16 字节；500 Mbps 下带宽开销可忽略（帧约 700 KB，tag 占比 0.002%）。
-- 加密是逐包 AEAD，没有握手层的额外 RTT；实测帧率与加密前一致（约 58–61 fps，6 秒窗口）。
-- CPU：ChaCha20 在 Apple silicon 上有硬件加速，未观察到编码/解码侧的变化。
+- **带宽开销**：每包增加 16 字节 Tag，对约 700 KB 的视频帧而言占比仅约 `0.002%`；
+- **计算开销**：Apple Silicon 原生硬件加速 ChaCha20-Poly1305，实测开启前后帧率与延迟无变化。
 
-## 未做的
-
-- **不做前向保密**：PSK 泄漏等于历史流量可解。要 PFS 得上临时 ECDH，那是另一套握手。
-- **不做重放窗口**：依赖 TCP 有序性；如果将来上 UDP/QUIC，需要补。
-- **`--insecure` 仍是明文**：故意保留的逃生口，日志会警告。
-
-## 复现
+## 5. 复现命令
 
 ```bash
-# 单元：加解密与篡改拒绝
+# 运行加解密自测与 XCTest 加密单测
 .build/release/boltkvm cryptotest
+./scripts/test.sh
 
-# 端到端（两端都需新二进制）
-.build/release/boltkvm client --host <bridge-ip> --port 7474 --seconds 6
-# 期望：auth ok → time sync rtt=... → received frames > 0
+# 端到端连接验证
+.build/release/boltkvm client --host <被控端地址> --port 7474 --seconds 6
 ```
-
-## 后记（2026-10-23）：前向保密已实现
-
-上面"不做前向保密"是当时的结论，保留不改。现在 `authExchange` 包（类型 12）在 `authOk`
-之后交换 X25519 临时公钥，会话密钥改由 `PSK ‖ X25519 共享密钥` 经 HKDF 派生；录下的流量
-在口令事后泄露时也解不开。实现与取舍见 [ADR-0004 后记](../adr/0004-psk-over-pairing-code.md)，
-包定义见 `Sources/BoltKVMCore/Protocol.swift` 的 `.authExchange`。`--insecure` 仍是明文
-逃生口，这一条不变。

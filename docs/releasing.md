@@ -1,64 +1,64 @@
 # 发布流程（GitHub Actions + Releases）
 
-目标：打一个 tag，GitHub 自动编译出 `BoltKVM.app`、跑自测、生成带校验和的 zip，
-并建成 Release。人不需要本地打包、不需要上传。
+推送版本标签后，GitHub Actions 会自动编译 `BoltKVM.app`、运行测试、打包带 SHA-256 校验和的 zip，并创建 GitHub Release。
 
-## 日常：提 tag
+## 日常发布
 
 ```bash
-# 版本号写在 Info.plist 里只是默认值，CI 会用 tag 覆盖
+# Info.plist 中的版本号仅为默认值，CI 构建时会用 tag 覆盖
 git tag v0.2.0
-git push origin v0.2.0        # 只有"发布"才需要 push
+git push origin v0.2.0
 ```
 
-`.github/workflows/release.yml` 会：
+`.github/workflows/release.yml` 执行步骤：
 
-1. `swift build -c release`；
-2. 跑 `boltkvm selftest`、`boltkvm cryptotest`（纯协议/加密自测，不需要 TCC）；
-3. 把 tag 写进 `Info.plist`（`CFBundleShortVersionString`），`CFBundleVersion` 用
-   `GITHUB_RUN_NUMBER`；
-4. `Packaging/build-app.sh` 打 `dist/BoltKVM.app`，`ditto` 压成 zip，`shasum -a 256`；
-5. 有 `MACOS_CERT_P12` 时用 Developer ID 重签，没有就用 ad-hoc；
-6. `softprops/action-gh-release` 建 Release，附件是 zip + `.sha256`，正文自动带
-   `generate_release_notes`（对比上一个 tag 的提交）。
+1. 运行 `swift build -c release`；
+2. 运行 `boltkvm selftest` 与 `boltkvm cryptotest`（纯协议与加解密自测，无需系统 TCC 权限）；
+3. 将标签名写入 `Packaging/Info.plist` 的 `CFBundleShortVersionString`，将 `GITHUB_RUN_NUMBER` 写入 `CFBundleVersion`；
+4. 调用 `Packaging/build-app.sh` 组装 `dist/BoltKVM.app`，使用 `ditto` 压缩为 zip 并生成 `.sha256` 校验文件；
+5. 若仓库配置了 `MACOS_CERT_P12` 密钥则使用 Developer ID 签名，否则使用 ad-hoc 签名；
+6. 通过 `softprops/action-gh-release` 创建 Release，上传 zip 与 `.sha256` 并自动生成变更说明。
 
-手动触发：Actions → Release → Run workflow，填版本号。
+也可在 GitHub Actions 页面选择 Release 工作流手动触发（`workflow_dispatch`）。
 
-## 合并前：CI
+## 持续集成（CI）
 
-`.github/workflows/ci.yml` 在 `push main` / PR 上跑构建 + `scripts/test.sh`（47 个 XCTest）+
-`selftest` / `cryptotest` + 打包，产物作为 artifact 上传（ad-hoc 签名，不可直接分发）。
+`.github/workflows/ci.yml` 在每次推送 `main` 或发起 PR 时执行：
 
-## 签名与公证的现状（重要）
+1. `swift build -c release` 编译；
+2. `scripts/test.sh` 运行 48 个 XCTest 单元测试；
+3. 运行 `selftest` 与 `cryptotest`；
+4. 执行 `Packaging/build-app.sh` 组装应用并上传为构建产物（Artifact）。
 
-| 方案 | 结果 |
+## 签名与公证限制
+
+| 签名方式 | 前提条件 | 运行表现 |
+|---|---|---|
+| ad-hoc（默认） | 无需配置密钥 | 下载后带有隔离属性，首次需右键「打开」或执行 `xattr -dr com.apple.quarantine /Applications/BoltKVM.app` |
+| Developer ID | 配置证书相关 Secrets | 具备开发者签名身份，但仍未公证 |
+| Apple 公证（Notarization） | 需开启 Hardened Runtime | **当前不支持** |
+
+**不支持公证的原因**：Apple 公证强制要求开启 Hardened Runtime（`--options runtime`），但实测开启 Hardened Runtime 后，进程调用私有 `CGVirtualDisplay` 接口创建虚拟显示器会被系统拒绝。为保证无头被控端正常创建虚拟屏，打包脚本默认关闭 Hardened Runtime（可通过 `BOLTKVM_HARDENED_RUNTIME=1` 显式开启）。
+
+## 本地重编译与 TCC 权限保持
+
+macOS 的 TCC 权限（屏幕录制、辅助功能、本地网络）绑定应用的签名身份。使用默认 ad-hoc 签名时，每次重编译都会改变二进制的 `cdhash`，导致系统将其视为新应用并要求重新授权。
+
+本地开发时，建议生成稳定的自签名代码签名证书：
+
+```bash
+./scripts/make-signing-identity.sh
+BOLTKVM_CODESIGN_IDENTITY="BoltKVM Local" ./Packaging/build-app.sh
+```
+
+使用固定证书签名后，重新编译不会丢失已授予的 TCC 权限。
+
+## 可选仓库密钥（Secrets）
+
+| Secret 名称 | 用途 |
 |---|---|
-| ad-hoc（默认，无 secrets） | 能跑；下载后有隔离属性，用户要右键打开或 `xattr -dr com.apple.quarantine` |
-| Developer ID（有 secrets） | 签名可信；**仍然不能公证** |
-| 公证（notarization） | **当前做不到** |
-
-原因是硬碰硬的冲突：公证要求 hardened runtime，而 hardened runtime 会让
-`CGVirtualDisplay` 创建失败（2026-10-22 实测：同一个二进制在 CLI 下能建虚拟屏，放进
-开启 hardened runtime 的 bundle 里就失败）。而虚拟屏正是服务端存在的意义，所以宁可
-不公证也不开 hardened runtime。
-
-Release 正文里写了这一步，用户按右键打开即可。若哪天找到 hardened runtime 下建虚拟屏的
-办法（例如换成 ScreenCaptureKit 的虚拟显示 API 或把建屏挪到另一个未加固的 helper），
-再把 `BOLTKVM_HARDENED_RUNTIME=1` 打开并加回公证步骤。
-
-## 每次构建 TCC 会重新询问
-
-签名（哪怕自签）变了，macOS 就把 app 当成新程序，屏幕录制权限要重新授予。CI 产物每次
-cdhash 都不同，所以用户升级后要重新授权一次——这是 TCC 的规则，不是打包脚本的问题。
-本地开发想避免反复授权：用稳定的自签证书（`scripts/make-signing-identity.sh` 生成
-`BoltKVM Local`），`BOLTKVM_CODESIGN_IDENTITY="BoltKVM Local"`。
-
-## 需要配置的 secrets（可选）
-
-| Secret | 用途 |
-|---|---|
-| `MACOS_CERT_P12` | Developer ID 证书（base64） |
-| `MACOS_CERT_PASSWORD` | 证书密码 |
+| `MACOS_CERT_P12` | Base64 编码的 Developer ID 证书（`.p12`） |
+| `MACOS_CERT_PASSWORD` | 证书导入密码 |
 | `MACOS_SIGN_IDENTITY` | 签名标识名，默认 `Developer ID Application` |
 
-不配也能发布，只是 ad-hoc。
+未配置上述密钥时，发布流水线自动回退为 ad-hoc 签名。
