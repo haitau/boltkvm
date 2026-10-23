@@ -69,15 +69,26 @@ u16 width, u16 height, u8 quality, u8 reserved, u16 reserved
 服务端的自身设置（被控端面板/菜单里的分辨率）仍是默认值；客户端请求是**当次会话**的覆盖，
 helper 重启后回到服务端设置——这是有意的：headless 机器不该被上一个客户端永久改尺寸。
 
-## R3 登录密码
+## R3 登录密码（未实现，阻塞已定位）
 
-服务端当前只有虚拟显示上的已登录会话，没有登录窗口/解锁注入能力。要做"记住远端登录
-密码"，还需要：
+目标：连上 mini 后，如果它停在锁屏/登录窗口，用记住的密码自动解锁。
 
-1. 服务端能检测到"锁屏/登录界面"状态（`CGSessionCopyCurrentDictionary` 的
-   `CGSSessionScreenIsLocked`）；
-2. 解锁注入：`CGEvent` 输入密码到登录窗口——登录窗口是 secure input，合成事件通常无效；
-   可行路径是 `AuthorizationCreate` + `unlockScreen` 私有 API 或 FileVault 解锁接口，
-   都有权限/签名要求。
+现状：服务端只有"虚拟显示上的已登录会话"，**没有解锁注入能力**。缺的不是存储，
+是下面这条链路，而它超出当前 app 的权限边界：
 
-结论：R3 依赖服务端新能力，先只定存储（Keychain，条目 `boltkvm-login`），不做 UI。
+1. **检测**：可用 `CGSessionCopyCurrentDictionary()` 的 `CGSSessionScreenIsLocked`
+   判断是否锁屏，这步没问题；
+2. **注入**：登录窗口跑在 `loginwindow` 的 secure input 里，`CGEventPost` 合成键盘事件
+   被系统丢弃（实测合成事件在登录窗口不产生字符）；可行的是
+   `AuthorizationCreate` + 未公开的 `unlockScreen`，或者走 FileVault 解锁接口，
+   两者都要求 **root / 特权 helper**；
+3. **进程位置**：`boltkvm-server` 是用户级进程，拿不到上面前提；要做得加一个
+   root `launchd` daemon + 用户授权（SMJobBless / 登录项授权），这属于新的分发形态，
+   不是加几行代码。
+
+所以 R3 当天不做，阻塞条件是：**需要 root 特权 helper + 私有解锁 API（或改服务端为
+自动登录）**，二者都不在现有签名/TCC 能力内。存储侧已就绪：`keys/<host>_<port>`
+（0600）将来直接复用，默认不写、只在用户勾选时写。
+
+顺带说明为什么不走 Keychain：本地重签名让每次构建都被当成新程序，读钥匙串要登录
+密码（见上文 R1 数据模型）。
