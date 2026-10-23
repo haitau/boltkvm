@@ -93,7 +93,7 @@ final class ClientSession {
                     let (header, payload) = try c.recvFrame()
                     bytes += payload.count
                     switch header.type {
-                    case .command, .input, .audio, .config:
+                    case .command, .input, .config:
                         break  // client never receives these
                     case .authChallenge:
                         challengeNonce = payload
