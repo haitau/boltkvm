@@ -128,6 +128,16 @@ final class ServerSettingsController: NSWindowController {
     }
 
     func reload() {
+        // The PSK is the one setting you cannot set here (both ends must hold the
+        // same bytes), so at least show which key this machine will accept:
+        // matching fingerprints on both ends is the whole "sync" story.
+        var hint = L.t("server.panel.hint")
+        if let key = resolveAuthKey([]) {
+            hint += "\n" + L.f("server.panel.fingerprint", PSK.fingerprint(key))
+        } else {
+            hint += "\n" + L.t("server.panel.nokey")
+        }
+        hintLabel.stringValue = hint
         let current = Prefs.serverDisplaySize
         resolutionPopup.removeAllItems()
         var labels: [(String, String)] = []

@@ -111,3 +111,6 @@
 "server.panel.hint" = "Changing resolution or quality rebuilds the virtual display and restarts the service, so it takes effect immediately. After closing this panel, reopen it from the BoltKVM menu bar icon, where you can also stop the service or switch roles.";
 "server.panel.close" = "Close";
 "server.menu.settings" = "Settings…";
+
+"server.panel.fingerprint" = "Local key fingerprint %@ (the client must show the same one, or auth fails)";
+"server.panel.nokey" = "No ~/.boltkvm-key: the server will refuse to start. Run `boltkvm keygen` here and copy the file to the other machine.";

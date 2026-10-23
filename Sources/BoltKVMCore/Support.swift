@@ -76,6 +76,7 @@ func usage() -> Never {
                      [--audio] [--audio-record <path>]   # 播放 / 落盘被控端音频
 
     utilities:
+      boltkvm keygen [--path <file>] [--force]   # 生成 ~/.boltkvm-key 并打印指纹
       boltkvm doctor [--role server|client]
       boltkvm inputprobe [--seconds 60] [--interval-ms 60000]
       boltkvm cryptotest      # 会话加密往返与篡改拒绝自测
@@ -159,6 +160,7 @@ func respondToAuthChallenge(conn: TCPConnection, nonce: Data) throws {
 
 /// Key-injecting variant for the app, which must not read CommandLine or exit.
 func respondToAuthChallenge(conn: TCPConnection, nonce: Data, key: Data) throws {
+    log("auth: key fingerprint \(PSK.fingerprint(key))")
     let mac = authMAC(key: key, nonce: nonce)
     try conn.send(packet(type: .authResponse, ptsMicros: 0, payload: mac))
 }

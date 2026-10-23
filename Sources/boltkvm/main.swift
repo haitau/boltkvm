@@ -11,6 +11,8 @@ struct BoltKVM {
         switch args[1] {
         case "server":
             await CLI.runServer(args)
+        case "keygen":
+            CLI.runKeygen(args)
         case "doctor":
             CLI.runDoctor(args)
         case "watchdog":

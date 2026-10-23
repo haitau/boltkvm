@@ -76,14 +76,26 @@ swift build -c release        # 产物：.build/release/boltkvm
 
 ### 1. 配对密钥（一次性）
 
-服务端带密钥启动、客户端带同一密钥连接；没有密钥时服务端拒绝启动（`--insecure` 可强制关闭）。
+两边必须持有**同一把** PSK（预共享密钥）。协议里没有"配对"握手：服务端发 32 字节随机数，
+客户端回 `HMAC-SHA256(key, nonce)`，对不上就 `auth failed`。所以"同步"就是**把同一份密钥
+放到两台机器上**，没有主从之分、谁生成都行：
 
 ```bash
-openssl rand -hex 32 > ~/.boltkvm-key && chmod 600 ~/.boltkvm-key
-scp ~/.boltkvm-key <被控端>:~/.boltkvm-key     # 两端各存一份，权限 600
+# 在任意一端生成（推荐被控端），顺便打印指纹
+boltkvm keygen                       # → ~/.boltkvm-key（0600）+ 指纹，如 67AA 1E18 F2DD E3EF
+scp ~/.boltkvm-key <另一端>:~/.boltkvm-key
+
+# 两端核对：指纹一致 = 同一把密钥
+grep "key fingerprint" ~/Library/Logs/BoltKVM.log | tail -1
 ```
 
-密钥也可用 `--key <psk>` 或环境变量 `BOLTKVM_KEY` 传入，优先级 `--key` > 环境变量 > `~/.boltkvm-key`。
+没有密钥时服务端拒绝启动（`--insecure` 可显式关闭认证，等于谁都能连）。
+密钥来源优先级：`--key <psk>` > `$BOLTKVM_KEY` > `~/.boltkvm-key`（首行；64 位 hex 按原始
+字节解，其余按 UTF-8 当口令）。也可以在 app 的「编辑」面板里给每台被控端填一个口令，
+客户端会把它写进 `~/Library/Application Support/BoltKVM/keys/<host>_<port>`（0600）——
+但**被控端仍然要有同一把密钥**，这一步不会替你同步过去。
+
+被控端的「被控端」面板底部会显示本机密钥指纹，和主控端日志/面板对上即可。
 
 ### 2. 被控端准备
 

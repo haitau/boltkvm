@@ -34,6 +34,7 @@ public enum CLI {
             exit(2)
         }
         if insecure { log("WARNING: --insecure — anyone who can reach this port controls the machine") }
+        if let authKey { log("auth: key fingerprint \(PSK.fingerprint(authKey))") }
         if let virtualDisplay {
             // Losing the display means capture is meaningless; exit and let the
             // supervisor recreate the process (and with it, the display).
