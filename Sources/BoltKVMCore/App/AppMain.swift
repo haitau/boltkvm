@@ -120,6 +120,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stopAll() {
+        // The connection list belongs to the client role: switching to the
+        // server (or back to the chooser) must take it off screen, otherwise
+        // closing it later terminates the app and the running server with it.
+        hostList?.onClosed = nil
+        hostList?.window?.orderOut(nil)
+        hostList = nil
         clientController?.shutdown()
         clientController = nil
         serverController?.shutdown()
@@ -183,7 +189,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Dock/reopen events (also covers ⌘-tab back into the app).
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { showClientWindow() }
+        if Prefs.role == nil {
+            // First run: the chooser was closed without a choice; give the user
+            // a way back in instead of an app with no windows.
+            showChooser()
+        } else if !flag {
+            showClientWindow()
+        }
         return true
     }
 
