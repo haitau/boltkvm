@@ -97,7 +97,7 @@ func prepareVirtualDisplay(args: [String]) -> BuiltinVirtualDisplay? {
     }
     // Waking a freshly adopted or freshly created headless display: without user
     // activity it can sit ASLEEP, and a sleeping display produces no frames.
-    IOPMAssertionDeclareUserActivity("BoltKVM remote screen" as CFString, kIOPMUserActiveLocal, nil)
+    wakeDisplay()
     guard let display else {
         // Capture whatever exists rather than refusing to start; the CLI logs the
         // reason (identity conflict) from the C layer.
@@ -108,6 +108,14 @@ func prepareVirtualDisplay(args: [String]) -> BuiltinVirtualDisplay? {
     let backing = display.backingPixels().map { "\($0.width)x\($0.height)" } ?? "unknown"
     log("virtual display: id=\(display.displayID) logical=\(logicalWidth)x\(logicalHeight) backing=\(backing) hiDPI=\(display.isHiDPI) (\(took))")
     return display
+}
+
+/// Headless displays are power-managed like real ones: without an activity
+/// declaration a freshly created display sits ASLEEP and WindowServer throttles
+/// it (measured 2026-10-23: a recreated display captured at ~27 fps instead of
+/// ~56 until the process restarted).
+func wakeDisplay() {
+    IOPMAssertionDeclareUserActivity("BoltKVM remote screen" as CFString, kIOPMUserActiveLocal, nil)
 }
 
 /// `--virtual-display-size WxH` sets the logical size; the default is half the

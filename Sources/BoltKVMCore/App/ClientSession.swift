@@ -86,6 +86,7 @@ final class ClientSession {
                 self.decoder = decoder
                 var challengeNonce: Data?
                 var wantInput = forwardInput
+                var authResponseSentAt: Int64 = 0
                 while !Task.isCancelled {
                     let (header, payload) = try c.recvFrame()
                     bytes += payload.count
@@ -94,14 +95,27 @@ final class ClientSession {
                         break  // client never receives these
                     case .authChallenge:
                         challengeNonce = payload
+                        authResponseSentAt = Int64(Date().timeIntervalSince1970 * 1_000_000)
                         try respondToAuthChallenge(conn: c, nonce: payload, key: sessionKey)
                     case .authOk:
+                        // Only new servers advertise it; talking to an old one we
+                        // must not send a packet type it cannot parse.
+                        let supportsConfig = payload.first == 1
+                        // Offset from the handshake: this packet was written by
+                        // the server before it had a single frame to queue.
+                        if supportsConfig, payload.count >= 9, authResponseSentAt > 0 {
+                            let t2 = payload.readInt64BE(payload.startIndex + 1)
+                            let t3 = Int64(Date().timeIntervalSince1970 * 1_000_000)
+                            let offset = t2 - (authResponseSentAt + t3) / 2
+                            let rtt = Double(t3 - authResponseSentAt) / 1000.0
+                            decoder.setClockOffset(offset, rttMs: rtt)
+                        }
                         if let challengeNonce {
                             enableClientEncryption(conn: c, nonce: challengeNonce, key: sessionKey)
                         }
                         // Ask for the size the connection list chose *before*
                         // anything else: the server reads exactly one frame here.
-                        if let requested = self.requestedConfig {
+                        if supportsConfig, let requested = self.requestedConfig {
                             try? c.send(packet(type: .config, payload: requested.encode()))
                         }
                         // Encrypted ping: proves the client→server direction

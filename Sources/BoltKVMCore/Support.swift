@@ -113,7 +113,16 @@ func authenticateServer(conn: TCPConnection, key: Data, timeoutSeconds: Int = 5)
         let payload = try conn.recvExact(Int(h.payloadLength))
         if h.type == .authResponse {
             guard authMACMatches(expected, payload) else { throw POSIXError(.EACCES) }
-            try conn.send(packet(type: .authOk, ptsMicros: 0, payload: Data()))
+            // Capability byte: 1 = this server understands the `config` packet.
+            // Old clients ignore the payload; old servers send an empty one, so a
+            // new client talking to them simply does not ask for a size.
+            //
+            // The server's clock rides along for the same reason: the first
+            // timeSync round trip happens before any video is queued, so the
+            // client gets a clean offset instead of measuring a full socket.
+            var payload = Data([1])
+            payload.appendInt64BE(Int64(Date().timeIntervalSince1970 * 1_000_000))
+            try conn.send(packet(type: .authOk, ptsMicros: 0, payload: payload))
             // Auth ok is the last plaintext packet: everything after it is sealed.
             let keys = deriveSessionKeys(psk: key, nonce: nonce)
             conn.inCipher = SessionCipher(key: keys.c2s)

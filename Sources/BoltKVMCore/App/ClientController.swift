@@ -5,6 +5,9 @@ import Foundation
 /// Client role window: a connection bar on top, the remote screen below.
 final class ClientController: NSWindowController, NSWindowDelegate {
     private var renderer: Renderer?
+    /// 60 s windowed report from the renderer, so a long GUI session leaves the
+    /// same per-window fps/latency series the CLI client logs.
+    private var reportTimer: Timer?
     private var session: ClientSession?
 
     private var hostField: NSTextField!
@@ -144,6 +147,13 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             self.statusLabel.textColor = state == .streaming ? .systemGreen : .secondaryLabelColor
             // No 断开 button: closing the window is the disconnect (R4).
             self.connectButton.isHidden = self.session?.isActive == true
+            if state == .streaming, self.reportTimer == nil {
+                self.reportTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+                    self?.renderer?.reportWindow()
+                }
+            } else if !(self.session?.isActive == true) {
+                self.stopReportTimer(report: true)
+            }
         }
         session?.onStats = { [weak self] text in
             self?.toolbarStatusLabel.stringValue = text
@@ -153,6 +163,13 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         toolbarStatusLabel.alignment = .right
         installToolbar()
         setupFullScreenChrome()
+    }
+
+    private func stopReportTimer(report: Bool) {
+        guard reportTimer != nil else { return }
+        reportTimer?.invalidate()
+        reportTimer = nil
+        if report { renderer?.report() }
     }
 
     // MARK: - Toolbar

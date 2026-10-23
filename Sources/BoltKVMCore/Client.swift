@@ -31,15 +31,28 @@ final class VideoDecoder {
     var decoded = 0
     var dropped = 0
     var lastDecodeLatencyMs: Double = 0
+    /// Frames handed to VideoToolbox but not yet delivered back. Its queue is
+    /// unbounded: when decode is slower than the stream, frames pile up and the
+    /// picture falls seconds behind instead of dropping. Cap it at 2.
+    private var inFlight = 0
     var firstPacketAt: UInt64 = 0
     var lastDecodedAt: UInt64 = 0
     private var loggedPixelFormat = false
 
     func setClockOffset(_ offset: Int64, rttMs: Double) {
-        lock.lock(); serverToLocalOffsetMicros = offset; clockSyncRTTms = rttMs; lock.unlock()
-        if rttMs > 20 && !warnedClock {
+        lock.lock()
+        // A congested sample (RTT in seconds) says nothing about the clocks: it
+        // measured a full queue, not the path. Keep the best RTT seen and only
+        // let comparable samples move the offset.
+        if rttMs <= clockSyncRTTms + 2 {
+            clockSyncRTTms = min(clockSyncRTTms, rttMs)
+            serverToLocalOffsetMicros = offset
+        }
+        let settled = clockSyncRTTms
+        lock.unlock()
+        if settled > 50 && !warnedClock {
             warnedClock = true
-            log("time sync RTT \(String(format: "%.1f", rttMs))ms is high; latency metrics suppressed until a stable sample")
+            log("time sync RTT \(String(format: "%.1f", settled))ms is high; latency metrics suppressed until a stable sample")
         }
     }
 
@@ -128,9 +141,16 @@ final class VideoDecoder {
 
     func decode(_ data: Data, ptsMicros: Int64) {
         guard let session, let format else { return }
+        lock.lock()
+        let queued = inFlight
+        lock.unlock()
+        if queued >= 2 {
+            lock.lock(); dropped += 1; lock.unlock()
+            return
+        }
         let offset = serverToLocalOffsetMicros
         lock.lock(); let syncRTT = clockSyncRTTms; lock.unlock()
-        if syncRTT < 20 {
+        if syncRTT < 50 {
             let recvLatency = Double(Int64(Date().timeIntervalSince1970 * 1_000_000) - (ptsMicros - offset)) / 1000.0
             if recvLatency > 0 && recvLatency < 10_000 { recvLatencies.append(recvLatency) }
         }
@@ -161,14 +181,16 @@ final class VideoDecoder {
         guard sst == noErr, let sbuf else { return }
         if firstPacketAt == 0 { firstPacketAt = DispatchTime.now().uptimeNanoseconds }
         let flags = VTDecodeFrameFlags(rawValue: 1) // EnableAsynchronousDecompression
+        lock.lock(); inFlight += 1; lock.unlock()
         let dst = VTDecompressionSessionDecodeFrame(session, sampleBuffer: sbuf, flags: flags, frameRefcon: nil, infoFlagsOut: nil)
         if dst != noErr {
-            lock.lock(); dropped += 1; lock.unlock()
+            lock.lock(); inFlight = max(0, inFlight - 1); dropped += 1; lock.unlock()
         }
     }
 
     func handleDecoded(status: OSStatus, flags: VTDecodeInfoFlags, imageBuffer: CVBuffer?, pts: CMTime) {
         let now = DispatchTime.now().uptimeNanoseconds
+        lock.lock(); inFlight = max(0, inFlight - 1); lock.unlock()
         let offset = serverToLocalOffsetMicros
         lock.lock()
         let syncRTT = clockSyncRTTms
@@ -185,7 +207,7 @@ final class VideoDecoder {
             if serverMicros > 0 {
                 let localMicros = Int64(Date().timeIntervalSince1970 * 1_000_000)
                 let latency = Double(localMicros - (serverMicros - offset)) / 1000.0
-                if syncRTT < 20 && latency > 0 && latency < 10_000 { latencies.append(latency) }
+                if syncRTT < 50 && latency > 0 && latency < 10_000 { latencies.append(latency) }
             }
             let captureLocal = serverMicros - offset
             renderer?.submit(imageBuffer, captureLocalMicros: captureLocal)

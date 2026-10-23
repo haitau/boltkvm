@@ -101,6 +101,9 @@ public enum CLI {
                             ? max(2, captureW * req.height / req.width)
                             : req.height * 2
                         log("virtual display recreated: logical \(req.width)x\(req.height), streaming \(captureW)x\(captureH)")
+                        // Same reason as at startup: a fresh display without user
+                        // activity is throttled to ~27 fps.
+                        await MainActor.run { wakeDisplay() }
                         // Let WindowServer settle before ScreenCaptureKit looks
                         // for the new display, otherwise it enumerates none.
                         try? await Task.sleep(nanoseconds: 1_200_000_000)
@@ -512,6 +515,7 @@ public enum CLI {
             var packets = 0
             var lastHeader: PacketHeader?
             var challengeNonce: Data?
+            var authSentAt: Int64 = 0
             var lastBeat = DispatchTime.now().uptimeNanoseconds
             while DispatchTime.now().uptimeNanoseconds < deadline {
                 do {
@@ -539,11 +543,18 @@ public enum CLI {
                         handleTimeSync(header, payload, decoder: decoder)
                     case .authChallenge:
                         challengeNonce = payload
+                        authSentAt = Int64(Date().timeIntervalSince1970 * 1_000_000)
                         try respondToAuthChallenge(conn: conn, nonce: payload)
                     case .authOk:
                         enableClientEncryption(conn: conn, nonce: challengeNonce)
                         log("auth ok")
-                        if let requested {
+                        if header.payloadLength >= 9, payload.first == 1, authSentAt > 0 {
+                            let t2 = payload.readInt64BE(payload.startIndex + 1)
+                            let t3 = Int64(Date().timeIntervalSince1970 * 1_000_000)
+                            decoder.setClockOffset(t2 - (authSentAt + t3) / 2,
+                                                   rttMs: Double(t3 - authSentAt) / 1000.0)
+                        }
+                        if header.payloadLength >= 1, payload.first == 1, let requested {
                             try? conn.send(packet(type: .config, payload: requested.encode()))
                             log("sent config \(requested.width)x\(requested.height) quality=\(requested.quality)")
                         }
