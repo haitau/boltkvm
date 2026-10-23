@@ -236,20 +236,41 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         resolution.addItem(withTitle: L.t("client.hosts.addResolution"))
         resolution.selectItem(at: options.firstIndex { $0.0 == current.0 && $0.1 == current.1 } ?? 0)
 
+        // Everything the session window used to carry lives here now: the key,
+        // and whether this host gets keyboard/mouse and audio.
+        let keyField = NSSecureTextField(string: host?.pskKeychainAccount
+            .flatMap { Keychain.get(account: $0) } ?? "")
+        keyField.placeholderString = L.t("client.placeholder.key")
+        let inputCheck = NSButton(checkboxWithTitle: L.t("client.check.input"), target: nil, action: nil)
+        inputCheck.state = (host?.forwardInput ?? Prefs.forwardInput) ? .on : .off
+        let audioCheck = NSButton(checkboxWithTitle: L.t("client.check.audio"), target: nil, action: nil)
+        audioCheck.state = (host?.audio ?? Prefs.audio) ? .on : .off
+
         // Manual frames: an NSGridView/NSStackView accessory tripped the Swift
         // compiler here ("failed to produce diagnostic"), and this form is fixed
         // size anyway.
-        let form = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 130))
-        let labels = [L.t("client.hosts.name"), L.t("client.label.host"),
-                      L.t("client.label.port"), L.t("client.hosts.resolution")]
-        let controls: [NSView] = [nameField, hostField, portField, resolution]
-        for index in 0..<labels.count {
-            let label = NSTextField(labelWithString: labels[index])
-            label.alignment = .right
-            label.frame = NSRect(x: 0, y: 100 - index * 32, width: 82, height: 22)
-            form.addSubview(label)
-            let control = controls[index]
-            control.frame = NSRect(x: 90, y: 99 - index * 32, width: 240, height: 24)
+        var rows: [(String, NSView)] = [
+            (L.t("client.hosts.name"), nameField),
+            (L.t("client.label.host"), hostField),
+            (L.t("client.label.port"), portField),
+            (L.t("client.hosts.resolution"), resolution),
+            (L.t("client.label.key"), keyField),
+        ]
+        rows.append(("", inputCheck))
+        rows.append(("", audioCheck))
+        let rowHeight = 32
+        let form = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: CGFloat(rows.count * rowHeight + 10)))
+        let formHeight = form.frame.height
+        for (index, row) in rows.enumerated() {
+            let y = formHeight - CGFloat((index + 1) * rowHeight) + 2
+            if !row.0.isEmpty {
+                let label = NSTextField(labelWithString: row.0)
+                label.alignment = .right
+                label.frame = NSRect(x: 0, y: y + 1, width: 82, height: 22)
+                form.addSubview(label)
+            }
+            let control = row.1
+            control.frame = NSRect(x: 90, y: y, width: 250, height: 24)
             form.addSubview(control)
         }
         alert.accessoryView = form
@@ -264,16 +285,32 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
             size = custom
             HostListController.rememberCustomResolution(custom)
         }
+        let account = "\(hostField.stringValue):\(port)"
+        let keyText = keyField.stringValue
+        let hasKey = !keyText.isEmpty
+        if hasKey {
+            Keychain.set(keyText, account: account)
+        } else if let old = host?.pskKeychainAccount {
+            Keychain.delete(account: old)
+        }
+        let keyAccount = hasKey ? account : nil
+        let forwardsInput = inputCheck.state == .on
+        let playsAudio = audioCheck.state == .on
         if var existing = host {
             existing.name = name
             existing.host = hostField.stringValue
             existing.port = port
             existing.width = size.0
             existing.height = size.1
+            existing.pskKeychainAccount = keyAccount
+            existing.forwardInput = forwardsInput
+            existing.audio = playsAudio
             store.update(existing)
         } else {
             store.add(SavedHost(name: name, host: hostField.stringValue, port: port,
-                                width: size.0, height: size.1))
+                                pskKeychainAccount: keyAccount,
+                                width: size.0, height: size.1,
+                                forwardInput: forwardsInput, audio: playsAudio))
         }
         reload()
     }

@@ -2,7 +2,9 @@ import AppKit
 import Metal
 import Foundation
 
-/// Client role window: a connection bar on top, the remote screen below.
+/// Client role window: the remote screen, and nothing else. Which machine, key,
+/// input and audio all come from the connection list (that is where a "连接" is
+/// configured); status lives in the toolbar's trailing edge.
 final class ClientController: NSWindowController, NSWindowDelegate {
     private var renderer: Renderer?
     /// 60 s windowed report from the renderer, so a long GUI session leaves the
@@ -10,19 +12,10 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private var reportTimer: Timer?
     private var session: ClientSession?
 
-    private var hostField: NSTextField!
-    private var portField: NSTextField!
-    private var keyField: NSSecureTextField!
-    private var inputCheck: NSButton!
-    private var audioCheck: NSButton!
-    private var connectButton: NSButton!
-    private var statusLabel: NSTextField!
     private var videoView: NSView!
-    private var bar: NSStackView!
-    /// The connect bar is windowed-only chrome; in fullscreen the toolbar takes
-    /// over (it auto-reveals at the top edge, like Screen Sharing).
-    private var videoTopToBar: NSLayoutConstraint?
-    private var videoTopToContent: NSLayoutConstraint?
+    /// Connection state, mirrored into the toolbar's trailing label.
+    private var stateText = L.t("client.state.idle")
+    private var statsText = ""
     private var chromeTimer: Timer?
     private var appliedFullScreen: Bool?
     private var didLogInvisibleWindow = false
@@ -55,9 +48,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         build(in: window)
         window.center()
         if let preset {
-            hostField.stringValue = preset.host
-            portField.stringValue = String(preset.port)
-            DispatchQueue.main.async { [weak self] in self?.connectPressed() }
+            DispatchQueue.main.async { [weak self] in self?.connect(preset) }
         }
     }
 
@@ -67,58 +58,15 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     // MARK: - Layout
 
     private func build(in window: NSWindow) {
-        let hostLabel = label(L.t("client.label.host"))
-        hostField = NSTextField(string: Prefs.host)
-        hostField.placeholderString = L.t("client.placeholder.host")
-        hostField.widthAnchor.constraint(equalToConstant: 150).isActive = true
-
-        let portLabel = label(L.t("client.label.port"))
-        portField = NSTextField(string: String(Prefs.port))
-        portField.widthAnchor.constraint(equalToConstant: 60).isActive = true
-
-        let keyLabel = label(L.t("client.label.key"))
-        keyField = NSSecureTextField(string: "")
-        keyField.placeholderString = L.t("client.placeholder.key")
-        keyField.widthAnchor.constraint(equalToConstant: 170).isActive = true
-
-        inputCheck = NSButton(checkboxWithTitle: L.t("client.check.input"), target: nil, action: nil)
-        inputCheck.state = Prefs.forwardInput ? .on : .off
-        audioCheck = NSButton(checkboxWithTitle: L.t("client.check.audio"), target: nil, action: nil)
-        audioCheck.state = Prefs.audio ? .on : .off
-
-        connectButton = NSButton(title: L.t("client.button.connect"), target: self, action: #selector(connectPressed))
-        connectButton.bezelStyle = .rounded
-        connectButton.keyEquivalent = "\r"
-
-        statusLabel = NSTextField(labelWithString: L.t("client.state.idle"))
-        statusLabel.textColor = .secondaryLabelColor
-        let bar = NSStackView(views: [hostLabel, hostField, portLabel, portField,
-                                      keyLabel, keyField, inputCheck, audioCheck,
-                                      connectButton, statusLabel])
-        bar.orientation = .horizontal
-        bar.spacing = 8
-        bar.alignment = .centerY
-        bar.edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
-        bar.translatesAutoresizingMaskIntoConstraints = false
-
         videoView = NSView()
         videoView.wantsLayer = true
         videoView.layer?.backgroundColor = NSColor.black.cgColor
         videoView.translatesAutoresizingMaskIntoConstraints = false
 
         let content = window.contentView!
-        self.bar = bar
-        content.addSubview(bar)
         content.addSubview(videoView)
-        let videoToBar = videoView.topAnchor.constraint(equalTo: bar.bottomAnchor)
-        let videoToContent = videoView.topAnchor.constraint(equalTo: content.topAnchor)
-        videoToBar.isActive = true
-        videoTopToBar = videoToBar
-        videoTopToContent = videoToContent
         NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: content.topAnchor),
-            bar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            bar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            videoView.topAnchor.constraint(equalTo: content.topAnchor),
             videoView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             videoView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             videoView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
@@ -136,17 +84,17 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             renderer.view.autoresizingMask = [.width, .height]
             videoView.addSubview(renderer.view)
         } catch {
-            statusLabel.stringValue = L.f("client.renderer.failed", error.localizedDescription)
-            statusLabel.textColor = .systemRed
+            stateText = L.f("client.renderer.failed", error.localizedDescription)
+            refreshToolbarStatus()
         }
 
         session = renderer.map { ClientSession(renderer: $0) }
         session?.onState = { [weak self] state in
             guard let self else { return }
-            self.statusLabel.stringValue = state.text
-            self.statusLabel.textColor = state == .streaming ? .systemGreen : .secondaryLabelColor
-            // No 断开 button: closing the window is the disconnect (R4).
-            self.connectButton.isHidden = self.session?.isActive == true
+            self.stateText = state.text
+            self.toolbarStatusLabel.textColor = state == .streaming ? .systemGreen : .secondaryLabelColor
+            self.refreshToolbarStatus()
+            // Closing the window is the disconnect (R4); there is no button.
             if state == .streaming, self.reportTimer == nil {
                 self.reportTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
                     self?.renderer?.reportWindow()
@@ -156,7 +104,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             }
         }
         session?.onStats = { [weak self] text in
-            self?.toolbarStatusLabel.stringValue = text
+            guard let self else { return }
+            self.statsText = text
+            self.refreshToolbarStatus()
         }
         toolbarStatusLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         toolbarStatusLabel.textColor = .secondaryLabelColor
@@ -257,9 +207,6 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         let fullScreen = window.styleMask.contains(.fullScreen)
         if appliedFullScreen != fullScreen {
             appliedFullScreen = fullScreen
-            bar.isHidden = fullScreen
-            videoTopToContent?.isActive = fullScreen
-            videoTopToBar?.isActive = !fullScreen
             window.toolbar?.isVisible = !fullScreen
             log("fs: chrome applied (fullscreen=\(fullScreen))")
         }
@@ -290,35 +237,41 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Actions
 
-    @objc private func connectPressed() {
+    /// Connect using the saved host. The window has no fields of its own: the
+    /// list is where a connection is configured.
+    private func connect(_ host: SavedHost) {
         guard let session, !session.isActive else { return }
-        // Disconnecting is done by closing the window (R4), so this only connects.
-        let host = hostField.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !host.isEmpty else {
-            statusLabel.stringValue = L.t("client.host.required")
-            statusLabel.textColor = .systemRed
+        guard !host.host.trimmingCharacters(in: .whitespaces).isEmpty else {
+            stateText = L.t("client.host.required")
+            refreshToolbarStatus()
             return
         }
-        Prefs.host = host
-        let port = UInt16(portField.stringValue) ?? 7474
-        Prefs.port = Int(port)
-        Prefs.forwardInput = inputCheck.state == .on
-        Prefs.audio = audioCheck.state == .on
-        let explicitKey: Data? = keyField.stringValue.isEmpty
-            ? nil
-            : resolveAuthKey(["--key", keyField.stringValue])
+        Prefs.host = host.host
+        Prefs.port = Int(host.port)
+        let forwardInput = host.forwardInput ?? Prefs.forwardInput
+        let playAudio = host.audio ?? Prefs.audio
+        Prefs.forwardInput = forwardInput
+        Prefs.audio = playAudio
+        let explicitKey: Data? = host.pskKeychainAccount
+            .flatMap { Keychain.get(account: $0) }
+            .flatMap { resolveAuthKey(["--key", $0]) }
         session.inputView = renderer?.view
-        // Ask for the size saved for this host; nil means "whatever the server
-        // already uses", which is what an old entry gets.
-        if let preset, let width = preset.width, let height = preset.height,
-           width > 0, height > 0 {
+        if let width = host.width, let height = host.height, width > 0, height > 0 {
             session.requestedConfig = SessionConfig(width: width, height: height, quality: 1)
         } else {
             session.requestedConfig = nil
         }
-        session.connect(host: host, port: port, key: explicitKey,
-                        forwardInput: inputCheck.state == .on,
-                        playAudio: audioCheck.state == .on)
+        session.connect(host: host.host, port: host.port, key: explicitKey,
+                        forwardInput: forwardInput, playAudio: playAudio)
+    }
+
+    /// `已连接 · 24 fps · 385 Mbps` lives in the toolbar's trailing edge.
+    private func refreshToolbarStatus() {
+        var text = stateText
+        if !statsText.isEmpty {
+            text = text.isEmpty ? statsText : "\(text) · \(statsText)"
+        }
+        toolbarStatusLabel.stringValue = text
     }
 
     // MARK: - Remote system shortcuts
@@ -329,11 +282,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         // it. With input forwarding off there is no Esc, so the remote just sits
         // in the overview and reads as "frozen desktop" — which is exactly how
         // this looked in testing.
-        if inputCheck.state == .off {
-            inputCheck.state = .on
-            Prefs.forwardInput = true
-            session?.setInputEnabled(true)
-        }
+        // With input forwarding off there is no Esc to leave the overview, so
+        // turn it on for the action.
+        session?.setInputEnabled(true)
         session?.sendCommand(.missionControl)
     }
 

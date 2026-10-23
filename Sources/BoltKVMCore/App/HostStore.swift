@@ -13,10 +13,14 @@ struct SavedHost: Codable, Identifiable, Equatable {
     /// nil means "whatever the server starts with".
     var width: Int?
     var height: Int?
+    /// nil keeps the old global preference; the editor sets these explicitly.
+    var forwardInput: Bool?
+    var audio: Bool?
     var lastConnected: Date?
 
     init(id: UUID = UUID(), name: String, host: String, port: UInt16 = 7474,
          pskKeychainAccount: String? = nil, width: Int? = nil, height: Int? = nil,
+         forwardInput: Bool? = nil, audio: Bool? = nil,
          lastConnected: Date? = nil) {
         self.id = id
         self.name = name
@@ -25,6 +29,8 @@ struct SavedHost: Codable, Identifiable, Equatable {
         self.pskKeychainAccount = pskKeychainAccount
         self.width = width
         self.height = height
+        self.forwardInput = forwardInput
+        self.audio = audio
         self.lastConnected = lastConnected
     }
 }
