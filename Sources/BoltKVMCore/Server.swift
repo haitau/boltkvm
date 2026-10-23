@@ -73,8 +73,15 @@ final class Server: NSObject, SCStreamOutput {
     private var disconnectedFlag = false
     private var startTime = DispatchTime.now().uptimeNanoseconds
 
+    /// How the stream is coloured. `.wide` asks ScreenCaptureKit for Display P3
+    /// in 10-bit 4:2:2 and tags the ProRes bitstream accordingly; `.standard`
+    /// keeps the 8-bit BT.709 path every previous build used.
+    let colorMode: ColorMode
+
     init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?,
-         audioEnabled: Bool = false, preferredDisplayID: CGDirectDisplayID? = nil) {
+         audioEnabled: Bool = false, preferredDisplayID: CGDirectDisplayID? = nil,
+         colorMode: ColorMode = .standard) {
+        self.colorMode = colorMode
         self.captureWidth = width
         self.audioEnabled = audioEnabled
         self.captureHeight = height
@@ -137,6 +144,14 @@ final class Server: NSObject, SCStreamOutput {
             kVTCompressionPropertyKey_RealTime: true,
             kVTCompressionPropertyKey_ExpectedFrameRate: 60,
         ]
+        if colorMode == .wide {
+            // Tag the bitstream so the decoder does not have to guess: P3
+            // primaries, BT.709 transfer and YCbCr matrix (what Apple uses for
+            // P3 video), matching what the shader inverts on the client.
+            props[kVTCompressionPropertyKey_ColorPrimaries] = kCVImageBufferColorPrimaries_P3_D65
+            props[kVTCompressionPropertyKey_TransferFunction] = kCVImageBufferTransferFunction_ITU_R_709_2
+            props[kVTCompressionPropertyKey_YCbCrMatrix] = kCVImageBufferYCbCrMatrix_ITU_R_709_2
+        }
         if codec == .hevc {
             props[kVTCompressionPropertyKey_AllowFrameReordering] = false
             props[kVTCompressionPropertyKey_ProfileLevel] = kVTProfileLevel_HEVC_Main_AutoLevel
@@ -189,7 +204,15 @@ final class Server: NSObject, SCStreamOutput {
         let config = SCStreamConfiguration()
         config.width = captureWidth
         config.height = captureHeight
-        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        // Wide gamut needs 4:2:2 10-bit and a P3 working space; ScreenCaptureKit
+        // converts the screen into it, and ProRes 422 is 10-bit natively.
+        config.pixelFormat = colorMode == .wide
+            ? kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange
+            : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        if colorMode == .wide {
+            config.colorSpaceName = CGColorSpace.displayP3
+        }
+        log("colour: \(colorMode == .wide ? "wide gamut (Display P3, 10-bit 4:2:2)" : "standard (BT.709, 8-bit 4:2:0)")")
         config.minimumFrameInterval = CMTime(value: 0, timescale: 1)
         config.queueDepth = 8
         // Do not paint the remote cursor into the stream. The client already has
@@ -625,7 +648,8 @@ final class Server: NSObject, SCStreamOutput {
                 if (codec == .hevc && !sets.isEmpty) || codec == .prores422,
                    key != formatKey {
                     formatKey = key
-                    let f = StreamFormat(width: captureWidth, height: captureHeight, codec: codec, parameterSets: sets)
+                    let f = StreamFormat(width: captureWidth, height: captureHeight, codec: codec,
+                                      parameterSets: sets, color: colorMode)
                     sendQueue.async { [weak self] in
                         guard let self else { return }
                         do {

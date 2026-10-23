@@ -51,6 +51,15 @@ enum PacketType: UInt8 {
     case authExchange = 12
 }
 
+/// Colour pipeline. `.standard` is what every session used before this existed:
+/// 8-bit 4:2:0 BT.709, the cheapest thing ScreenCaptureKit and ProRes can do.
+/// `.wide` captures Display P3 into 10-bit 4:2:2 so wide-gamut content and smooth
+/// gradients survive; it costs roughly twice the bitrate.
+enum ColorMode: UInt8, Codable {
+    case standard = 0
+    case wide = 1
+}
+
 /// What a client asks the server to stream: a logical size plus how sharp.
 ///
 /// The server may refuse (no virtual display to recreate, or the display is
@@ -61,6 +70,9 @@ struct SessionConfig {
     var height: Int
     /// 0 = standard (cap the stream at 3840 wide), 1 = pixel (2x logical).
     var quality: UInt8
+    /// Rides in the byte that used to be reserved, so a server that predates it
+    /// reads 0 (standard) and behaves exactly as before.
+    var color: ColorMode = .standard
 
     static let payloadSize = 8
 
@@ -71,7 +83,7 @@ struct SessionConfig {
             base.storeBytes(of: UInt16(clamping: width).bigEndian, toByteOffset: 0, as: UInt16.self)
             base.storeBytes(of: UInt16(clamping: height).bigEndian, toByteOffset: 2, as: UInt16.self)
             base.storeBytes(of: quality, toByteOffset: 4, as: UInt8.self)
-            base.storeBytes(of: UInt8(0), toByteOffset: 5, as: UInt8.self)
+            base.storeBytes(of: color.rawValue, toByteOffset: 5, as: UInt8.self)
             base.storeBytes(of: UInt16(0).bigEndian, toByteOffset: 6, as: UInt16.self)
         }
         return data
@@ -84,8 +96,9 @@ struct SessionConfig {
             let width = Int(UInt16(bigEndian: base.load(fromByteOffset: 0, as: UInt16.self)))
             let height = Int(UInt16(bigEndian: base.load(fromByteOffset: 2, as: UInt16.self)))
             let quality = base.load(fromByteOffset: 4, as: UInt8.self)
+            let color = ColorMode(rawValue: base.load(fromByteOffset: 5, as: UInt8.self)) ?? .standard
             guard (320...7680).contains(width), (240...4320).contains(height) else { return nil }
-            return SessionConfig(width: width, height: height, quality: quality)
+            return SessionConfig(width: width, height: height, quality: quality, color: color)
         }
     }
 }
@@ -146,14 +159,25 @@ struct StreamFormat {
     var height: Int
     var codec: VideoCodec
     var parameterSets: [Data]
+    var color: ColorMode = .standard
+
+    /// Marker for the colour mode, carried as an extra "parameter set" so the
+    /// packet layout does not change. Clients that predate the field ignore
+    /// parameter sets for ProRes (they are only read for HEVC), and a server
+    /// that predates it never sends the tag, which decodes as `.standard`.
+    static let colorTag = Data("BKVC".utf8)
 
     func encode() -> Data {
         var d = Data()
         d.appendUInt32BE(UInt32(width))
         d.appendUInt32BE(UInt32(height))
         d.appendUInt32BE(codec.rawValue)
-        d.append(UInt8(parameterSets.count))
-        for ps in parameterSets {
+        var sets = parameterSets
+        if codec == .prores422 && color != .standard {
+            sets.append(Self.colorTag + Data([color.rawValue]))
+        }
+        d.append(UInt8(sets.count))
+        for ps in sets {
             d.appendUInt16BE(UInt16(ps.count))
             d.append(ps)
         }
@@ -169,14 +193,23 @@ struct StreamFormat {
         let n = Int(d[base + 12])
         var off = base + 13
         var ps: [Data] = []
+        var color = ColorMode.standard
         for _ in 0..<n {
             guard off + 2 <= d.endIndex else { return nil }
             let len = Int(d.readUInt16BE(off)); off += 2
             guard off + len <= d.endIndex else { return nil }
-            ps.append(d.subdata(in: off..<(off + len)))
+            let set = d.subdata(in: off..<(off + len))
             off += len
+            // The colour tag is metadata, not decoder input: strip it so the
+            // HEVC path never sees a set it cannot parse.
+            if set.count == StreamFormat.colorTag.count + 1,
+               set.prefix(StreamFormat.colorTag.count) == StreamFormat.colorTag {
+                color = ColorMode(rawValue: set.last!) ?? .standard
+            } else {
+                ps.append(set)
+            }
         }
-        return StreamFormat(width: width, height: height, codec: codec, parameterSets: ps)
+        return StreamFormat(width: width, height: height, codec: codec, parameterSets: ps, color: color)
     }
 }
 

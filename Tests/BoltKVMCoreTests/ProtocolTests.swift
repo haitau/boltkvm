@@ -68,6 +68,37 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(c.encode().count, SessionConfig.payloadSize)
     }
 
+    func testColorModeRidesInTheReservedByte() {
+        let wide = SessionConfig(width: 3008, height: 1692, quality: 1, color: .wide)
+        let data = wide.encode()
+        XCTAssertEqual(data[5], 1, "colour mode must use the byte that used to be reserved")
+        XCTAssertEqual(SessionConfig.decode(data)?.color, .wide)
+
+        // A config from a build that predates the field has 0 there.
+        var legacy = data
+        legacy[5] = 0
+        XCTAssertEqual(SessionConfig.decode(legacy)?.color, .standard)
+        // Unknown values must not make the server reject the session.
+        var future = data
+        future[5] = 0xFF
+        XCTAssertEqual(SessionConfig.decode(future)?.color, .standard)
+    }
+
+    func testStreamFormatCarriesColorWithoutBreakingParameterSets() {
+        let f = StreamFormat(width: 6016, height: 3384, codec: .prores422,
+                             parameterSets: [], color: .wide)
+        guard let back = StreamFormat.decode(f.encode()) else { return XCTFail("decode failed") }
+        XCTAssertEqual(back.color, .wide)
+        XCTAssertEqual(back.parameterSets, [], "the colour tag is metadata, not a parameter set")
+        XCTAssertEqual(back.width, 6016)
+
+        // Standard keeps the packet exactly as older builds expect (no tag).
+        let standard = StreamFormat(width: 6016, height: 3384, codec: .prores422, parameterSets: [])
+        let raw = standard.encode()
+        XCTAssertEqual(raw[12], 0, "no parameter sets, no tag")
+        XCTAssertEqual(StreamFormat.decode(raw)?.color, .standard)
+    }
+
     func testSessionConfigRejectsImpossibleSizes() {
         // A malicious or buggy client must not be able to make the server build a
         // virtual display of 0×0 or 60000×60000.

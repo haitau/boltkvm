@@ -118,8 +118,11 @@ final class VideoDecoder {
             VTDecompressionSessionInvalidate(old)
             session = nil
         }
+        // Wide gamut is 10-bit 4:2:2 end to end; asking for an 8-bit buffer here
+        // would throw the extra bits away right after decoding.
         let pixelFormat: OSType = f.codec == .prores422
-            ? kCVPixelFormatType_422YpCbCr8BiPlanarVideoRange
+            ? (f.color == .wide ? kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange
+                                : kCVPixelFormatType_422YpCbCr8BiPlanarVideoRange)
             : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         let attrs: [CFString: Any] = [
             kCVPixelBufferPixelFormatTypeKey: pixelFormat,

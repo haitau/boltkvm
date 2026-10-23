@@ -117,11 +117,13 @@ public enum CLI {
                     }
                 }
 
+                let desiredColor = requested?.color ?? .standard
                 let server = Server(width: captureW, height: captureH, codec: codec, connection: conn,
                             dumpPath: dump.isEmpty ? nil : dump, audioEnabled: audio,
                             preferredDisplayID: argInt(args, "--display-id", 0) != 0
                                 ? CGDirectDisplayID(argInt(args, "--display-id", 0))
-                                : virtualDisplay?.displayID)
+                                : virtualDisplay?.displayID,
+                            colorMode: desiredColor)
                 do {
                     try await server.start()
                 } catch {
@@ -506,7 +508,8 @@ public enum CLI {
         let parts = raw.split(separator: "x").compactMap { Int($0) }
         guard parts.count == 2 else { return nil }
         let quality = UInt8(argInt(args, "--request-quality", 1))
-        return SessionConfig(width: parts[0], height: parts[1], quality: quality)
+        let color: ColorMode = argValue(args, "--color", "standard") == "wide" ? .wide : .standard
+        return SessionConfig(width: parts[0], height: parts[1], quality: quality, color: color)
     }
 
     public static func runClient(_ args: [String]) async {

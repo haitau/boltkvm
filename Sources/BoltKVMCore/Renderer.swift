@@ -200,10 +200,23 @@ final class Renderer: NSObject, MTKViewDelegate {
         pipeline = try device.makeRenderPipelineState(descriptor: desc)
         super.init()
         view.delegate = self
-        // The shader outputs BT.709 primaries (what the capture side encodes);
-        // tag the layer so the compositor colour-matches instead of guessing.
+        // The shader outputs whatever primaries the stream carries; the layer
+        // tag tells the compositor how to colour-match it. Standard is sRGB,
+        // wide is Display P3 — same YCbCr matrix, different primaries.
         (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
+    }
+
+    /// Set by the stream's format packet: which primaries the shader's output
+    /// is in. Changing this does not touch the maths, only the tagging.
+    private var colorMode = ColorMode.standard
+
+    func setColorMode(_ mode: ColorMode) {
+        guard mode != colorMode else { return }
+        colorMode = mode
+        let name = mode == .wide ? CGColorSpace.displayP3 : CGColorSpace.sRGB
+        (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: name)
+        log("render colour: \(mode == .wide ? "Display P3" : "sRGB")")
     }
 
     func attach(to window: NSWindow) {
