@@ -1,4 +1,4 @@
-# boltkvm
+# BoltKVM
 
 [简体中文](README.md) | **English**
 
@@ -168,7 +168,7 @@ Soak and rescue helper scripts:
 ```bash
 ./scripts/soak-preflight.sh --host <ip>         # Verify caffeinate, power assertions, ports, and stale processes
 ./scripts/soak-monitor.sh --client-log <path>   # Sample client liveness and latency metrics every 5 minutes
-./scripts/rescue.sh --host <ip>                 # Probe SSH (22), VNC (5900), and boltkvm (7474) reachability
+./scripts/rescue.sh --host <ip>                 # Probe SSH (22), VNC (5900), and BoltKVM (7474) reachability
 ```
 
 ## Releases
@@ -190,7 +190,7 @@ Reboot ──► SSH ready ──► Auto-login into Aqua desktop session
                            └─ If stuck at the lock screen → unlock via macOS Screen Sharing (vnc://<ip>)
 ```
 
-- Run `./scripts/rescue.sh --host <ip>` to check SSH (`22`), VNC (`5900`), and boltkvm (`7474`) in one step;
+- Run `./scripts/rescue.sh --host <ip>` to check SSH (`22`), VNC (`5900`), and BoltKVM (`7474`) in one step;
 - Use **Launch at Login** inside `BoltKVM.app` to supervise the server rather than running the raw CLI binary under `launchd` directly (`launchd` daemons lack a GUI responsible-process identity for Screen Recording TCC).
 
 ## Known Limitations

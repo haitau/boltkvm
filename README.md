@@ -1,4 +1,4 @@
-# boltkvm
+# BoltKVM
 
 **简体中文** | [English](README_EN.md)
 
@@ -168,7 +168,7 @@ defaults write io.github.boltkvm server.audio -bool true
 ```bash
 ./scripts/soak-preflight.sh --host <地址>       # 起跑前检查 caffeinate、电源断言、端口与残留进程
 ./scripts/soak-monitor.sh --client-log <日志>   # 每 5 分钟采样客户端存活与延迟指标到 monitor.tsv
-./scripts/rescue.sh --host <地址>               # 检查 SSH / VNC / boltkvm 三条通道连通性
+./scripts/rescue.sh --host <地址>               # 检查 SSH / VNC / BoltKVM 三条通道连通性
 ```
 
 ## 发布流程
@@ -190,7 +190,7 @@ git tag v0.2.0 && git push origin v0.2.0
                           └─ 若停留在锁屏界面 → 通过系统屏幕共享 vnc://<地址> 解锁
 ```
 
-- 执行 `./scripts/rescue.sh --host <地址>` 可一键检查 SSH（22）、VNC（5900）与 boltkvm（7474）三条通道；
+- 执行 `./scripts/rescue.sh --host <地址>` 可一键检查 SSH（22）、VNC（5900）与 BoltKVM（7474）三条通道；
 - 请通过 `BoltKVM.app` 的「开机自动启动」托管服务端，不要用 `launchd` 直接运行 CLI 二进制（`launchd` 无 GUI 责任进程身份，无法获取屏幕录制权限）。
 
 ## 已知限制
