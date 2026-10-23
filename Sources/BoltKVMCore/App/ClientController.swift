@@ -312,14 +312,23 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             content = NSSize(width: (ideal.width * factor).rounded(.down),
                              height: (ideal.height * factor).rounded(.down))
         }
-        window.setContentSize(content)
+        // Resize around the centre of the visible area, not around the old
+        // bottom-left corner: setContentSize keeps the origin, so a window that
+        // grew from a 1200x760 default ended up hanging off the top-right edge.
+        let frameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: content)).size
+        let origin = NSPoint(x: (visible.width - frameSize.width) / 2,
+                             y: (visible.height - frameSize.height) / 2)
+        let frame = NSRect(x: visible.minX + origin.x.rounded(.down),
+                           y: visible.minY + origin.y.rounded(.down),
+                           width: frameSize.width, height: frameSize.height)
+        window.setFrame(frame, display: true)
         remotePixelSize = NSSize(width: width, height: height)
         let percent = Int(((content.width * scale / CGFloat(width)) * 100).rounded())
         scalePercent = percent
         refreshToolbarStatus()
-        log(String(format: "window: remote %dx%d px -> content %.0fx%.0f pt (%d%% of 1:1, screen %.0fx%.0f)",
+        log(String(format: "window: remote %dx%d px -> content %.0fx%.0f pt (%d%% of 1:1, screen %.0fx%.0f, origin %.0f,%.0f)",
                    width, height, content.width, content.height, percent,
-                   visible.width, visible.height))
+                   visible.width, visible.height, frame.minX, frame.minY))
     }
 
     /// `已连接 · 24 fps · 385 Mbps · 92%` lives in the toolbar's trailing edge.
