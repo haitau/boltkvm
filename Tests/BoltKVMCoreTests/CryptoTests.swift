@@ -103,4 +103,67 @@ final class CryptoTests: XCTestCase {
         flipped[0] ^= 0x01
         XCTAssertFalse(authMACMatches(mac, flipped))
     }
+
+    // MARK: - Forward secrecy (X25519)
+
+    private func secret(_ a: Curve25519.KeyAgreement.PrivateKey,
+                        _ b: Curve25519.KeyAgreement.PublicKey) -> Data {
+        let s = try! a.sharedSecretFromKeyAgreement(with: b)
+        return s.withUnsafeBytes { Data($0) }
+    }
+
+    func testX25519AgreementIsSymmetric() {
+        let a = Curve25519.KeyAgreement.PrivateKey()
+        let b = Curve25519.KeyAgreement.PrivateKey()
+        XCTAssertEqual(secret(a, b.publicKey), secret(b, a.publicKey))
+        XCTAssertNotEqual(secret(a, b.publicKey), secret(a, Curve25519.KeyAgreement.PrivateKey().publicKey))
+    }
+
+    func testSessionKeysDependOnEphemeralSecret() {
+        let a = Curve25519.KeyAgreement.PrivateKey()
+        let b = Curve25519.KeyAgreement.PrivateKey()
+        let shared = secret(a, b.publicKey)
+
+        let plain = deriveSessionKeys(psk: psk, nonce: nonce)
+        let upgraded = deriveSessionKeys(psk: psk, nonce: nonce, extra: shared)
+        XCTAssertNotEqual(plain.c2s.withUnsafeBytes { Data($0) },
+                          upgraded.c2s.withUnsafeBytes { Data($0) },
+                          "the PSK alone must not yield the session key any more")
+
+        // A different session (fresh ephemeral pair) gives different keys even
+        // with the same PSK and nonce.
+        let c = Curve25519.KeyAgreement.PrivateKey()
+        let other = deriveSessionKeys(psk: psk, nonce: nonce, extra: secret(a, c.publicKey))
+        XCTAssertNotEqual(upgraded.c2s.withUnsafeBytes { Data($0) },
+                          other.c2s.withUnsafeBytes { Data($0) })
+    }
+
+    func testRekeyedStreamsStayAlignedInBothDirections() throws {
+        // Mirrors the wire roles: the client sends with c2s and reads with s2c,
+        // the server the other way round (this is the bug that made the first
+        // re-keyed packet fail to decrypt once).
+        let clientPair = Curve25519.KeyAgreement.PrivateKey()
+        let serverPair = Curve25519.KeyAgreement.PrivateKey()
+        let shared = secret(clientPair, serverPair.publicKey)
+
+        let keys = deriveSessionKeys(psk: psk, nonce: nonce, extra: shared)
+        let clientOut = SessionCipher(key: keys.c2s)
+        let clientIn = SessionCipher(key: keys.s2c)
+        let serverIn = SessionCipher(key: keys.c2s)
+        let serverOut = SessionCipher(key: keys.s2c)
+
+        for i in 0..<20 {
+            let c2s = packet(type: .input, flags: 0, ptsMicros: Int64(i), payload: Data([UInt8(i)]))
+            let sealedC2S = clientOut.seal(c2s)
+            let openedC2S = try serverIn.open(header: Data(sealedC2S.prefix(HEADER_SIZE)),
+                                              body: Data(sealedC2S.dropFirst(HEADER_SIZE)))
+            XCTAssertEqual(openedC2S, Data([UInt8(i)]))
+
+            let s2c = packet(type: .frame, flags: 0, ptsMicros: Int64(i), payload: Data([UInt8(i), 1]))
+            let sealedS2C = serverOut.seal(s2c)
+            let openedS2C = try clientIn.open(header: Data(sealedS2C.prefix(HEADER_SIZE)),
+                                              body: Data(sealedS2C.dropFirst(HEADER_SIZE)))
+            XCTAssertEqual(openedS2C, Data([UInt8(i), 1]))
+        }
+    }
 }

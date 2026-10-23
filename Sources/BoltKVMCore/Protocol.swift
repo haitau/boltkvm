@@ -18,6 +18,11 @@ let BKVM_MAGIC: UInt32 = 0x424B_564D // "BKVM"
 let BKVM_VERSION: UInt8 = 1
 let HEADER_SIZE = 20
 
+/// `authOk` flags, carried in the byte after the 8-byte clock so clients built
+/// before this existed still read the clock at the right offset.
+/// 1 = the server can upgrade the session to X25519 forward secrecy.
+let FLAG_SUPPORTS_KEY_EXCHANGE: UInt8 = 1
+
 enum PacketType: UInt8 {
     case format = 1
     case frame = 2
@@ -36,6 +41,10 @@ enum PacketType: UInt8 {
     /// First packet after `authOk`: what the client wants streamed. Sent by new
     /// clients only, so old servers simply ignore an unknown type.
     case config = 11
+    /// X25519 public key, one per direction, exchanged inside the already
+    /// authenticated channel. Both sides re-key from the shared secret, so the
+    /// PSK alone cannot decrypt a recorded session (forward secrecy).
+    case authExchange = 12
 }
 
 /// What a client asks the server to stream: a logical size plus how sharp.
@@ -340,8 +349,13 @@ let FLAG_ENCRYPTED: UInt8 = 0x2
 /// Session keys derived from the same PSK the HMAC handshake used, salted with
 /// the server's challenge nonce — no extra round trip, and a fresh key per
 /// connection because the nonce is random.
-func deriveSessionKeys(psk: Data, nonce: Data) -> (c2s: SymmetricKey, s2c: SymmetricKey) {
-    let ikm = SymmetricKey(data: psk)
+/// `extra` is the X25519 shared secret when the session upgraded to forward
+/// secrecy; empty for a plain PSK session (old servers, --insecure).
+func deriveSessionKeys(psk: Data, nonce: Data,
+                       extra: Data = Data()) -> (c2s: SymmetricKey, s2c: SymmetricKey) {
+    var ikmBytes = psk
+    ikmBytes.append(extra)
+    let ikm = SymmetricKey(data: ikmBytes)
     let c2s = HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, salt: nonce,
                                      info: Data("boltkvm c2s".utf8), outputByteCount: 32)
     let s2c = HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, salt: nonce,

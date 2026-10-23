@@ -16,6 +16,7 @@
 | ~~P2-3~~ | ~~传输是明文 TCP~~ | **已解决**：ChaCha20-Poly1305 会话层，帧头作 AAD | 见 [传输加密](../reports/2026-10-22-transport-encryption.md) |
 | P1-发布 | GitHub Actions 自动发布 | **已配好未实跑**：`ci.yml`（build + selftest + cryptotest + 打包 artifact）、`release.yml`（tag `v*` → 构建、写版本号、zip + sha256、Developer ID 或 ad-hoc 签名、建 Release） | 需要 push 一个 tag 才能在 GitHub 上验证；公证受 hardened runtime ↔ CGVirtualDisplay 冲突阻塞，见 [发布流程](../releasing.md) |
 | P1-密码 | 连接密码自动生成与轮换 | **已完成 2026-10-23**：服务端首启自动生成 8 位口令（60 秒内可读、0600），面板显示 + 「重新生成密码…」按钮（二次确认、重启 helper、弹窗给出新密码） | 实测旧密码 0 帧、`auth failed`，新密码 `auth ok` |
+| ~~P1-FS~~ | ~~前向保密~~ | **已完成 2026-10-23**：`authExchange`（X25519）在 authOk 后换临时密钥，会话密钥 = HKDF(PSK ‖ 共享密钥)；旧客户端/旧服务端双向兼容 | 单测覆盖派生与重键后的双向对齐；CLI 双端与 app↔app 实测 `forward secrecy on (X25519)`，55fps 正常 |
 | P2-多屏 | 多显示器支持 | **不支持，无环境实现**：被控端只建一块虚拟屏、只采一路流；接第二块物理屏不会被传输 | 若要支持：多 `CGVirtualDisplay`/多 `SCStream`、输入坐标映射到对应屏、主控端选屏 UI；没有第二块屏可验证，不排期 |
 | P2-物理 | 睡眠唤醒 / 雷雳拔插 / 锁屏后注入 | **未测，需人工在机器前操作**（合盖、拔线、锁屏解锁），自动化跑不了；误操作可能把机器睡死/锁死 | 见下方"不列入"表；如需验证，约定一个可随时物理恢复的时间窗 |
 | B8 | 收流循环重复 | CLI `Client.swift` 与 app `ClientSession.swift` 各有一份 recv/decode/stats 循环（约 200 行重复） | 抽一层共享 pipeline；2026-10-23 起有 `swift test`（26 个协议/加密/口令用例）兜底，具备动手条件 |

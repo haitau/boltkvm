@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import IOKit.pwr_mgt
 import CoreMedia
 import CoreVideo
@@ -101,7 +102,9 @@ func argInt(_ args: [String], _ name: String, _ def: Int) -> Int {
 /// Server side of the handshake: send a nonce, then wait for the matching MAC.
 /// Packets that are not the response are skipped, because the client may have
 /// queued a time-sync request before it saw the challenge.
-func authenticateServer(conn: TCPConnection, key: Data, timeoutSeconds: Int = 5) throws {
+@discardableResult
+func authenticateServer(conn: TCPConnection, key: Data,
+                        timeoutSeconds: Int = 5) throws -> SessionConfig? {
     let nonce = randomNonce()
     try conn.send(packet(type: .authChallenge, ptsMicros: 0, payload: nonce))
     conn.setRecvTimeout(timeoutSeconds)
@@ -121,31 +124,107 @@ func authenticateServer(conn: TCPConnection, key: Data, timeoutSeconds: Int = 5)
             // The server's clock rides along for the same reason: the first
             // timeSync round trip happens before any video is queued, so the
             // client gets a clean offset instead of measuring a full socket.
+            // [1][clock 8][flags 1]: version-1 clients read the clock at offset 1
+            // and ignore the trailing flag byte, so the layout stays compatible.
             var payload = Data([1])
             payload.appendInt64BE(Int64(Date().timeIntervalSince1970 * 1_000_000))
+            payload.append(FLAG_SUPPORTS_KEY_EXCHANGE)
             try conn.send(packet(type: .authOk, ptsMicros: 0, payload: payload))
             // Auth ok is the last plaintext packet: everything after it is sealed.
             let keys = deriveSessionKeys(psk: key, nonce: nonce)
             conn.inCipher = SessionCipher(key: keys.c2s)
             conn.outCipher = SessionCipher(key: keys.s2c)
-            return
+            return try awaitClientUpgrade(conn: conn, key: key, nonce: nonce)
         }
     }
     throw POSIXError(.ETIMEDOUT)
 }
 
+/// After `authOk` the client may immediately start an X25519 exchange (new
+/// clients do, old ones go straight to `config` or stay silent). Both paths are
+/// handled here so the caller only sees the resulting session.
+private func awaitClientUpgrade(conn: TCPConnection, key: Data, nonce: Data) throws -> SessionConfig? {
+    conn.setRecvTimeout(1)
+    defer { conn.setRecvTimeout(0) }
+    guard let (head, body) = try? conn.recvFrame() else { return nil }
+
+    if head.type == .authExchange, body.count == 32 {
+        if let upgraded = try? finishKeyExchange(conn: conn, key: key, nonce: nonce, peerPublic: body) {
+            // The exchange consumed the first frame; the size request (if any)
+            // is the next one.
+            return upgraded ? conn.nextConfig() : nil
+        }
+        return nil
+    }
+    return head.type == .config ? SessionConfig.decode(body) : nil
+}
+
+private extension TCPConnection {
+    /// Reads at most one config frame, then restores the timeout.
+    func nextConfig() -> SessionConfig? {
+        setRecvTimeout(1)
+        defer { setRecvTimeout(0) }
+        guard let (head, body) = try? recvFrame(), head.type == .config else { return nil }
+        return SessionConfig.decode(body)
+    }
+}
+
+/// Server half of the X25519 exchange: reply with our public key using the
+/// PSK-derived cipher, then switch both directions to keys that also depend on
+/// the shared secret.
+private func finishKeyExchange(conn: TCPConnection, key: Data, nonce: Data,
+                               peerPublic: Data) throws -> Bool {
+    let pair = Curve25519.KeyAgreement.PrivateKey()
+    let peer = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: peerPublic)
+    let shared = try pair.sharedSecretFromKeyAgreement(with: peer)
+    try conn.send(packet(type: .authExchange, ptsMicros: 0,
+                         payload: Data(pair.publicKey.rawRepresentation)))
+    installSessionKeys(conn: conn, psk: key, nonce: nonce,
+                       extra: shared.withUnsafeBytes { Data($0) }, client: false)
+    log("auth: forward secrecy on (X25519)")
+    return true
+}
+
+private func installSessionKeys(conn: TCPConnection, psk: Data, nonce: Data, extra: Data,
+                                client: Bool) {
+    let keys = deriveSessionKeys(psk: psk, nonce: nonce, extra: extra)
+    // Both roles install at the same protocol point, but each direction has its
+    // own key: the client sends with c2s and reads with s2c, the server the other
+    // way round. Swapping them makes the first re-keyed packet fail to decrypt.
+    conn.outCipher = SessionCipher(key: client ? keys.c2s : keys.s2c)
+    conn.inCipher = SessionCipher(key: client ? keys.s2c : keys.c2s)
+}
+
 /// Installs the session ciphers once the server confirms auth. Both sides set
 /// them at the same point (right after authOk), which keeps the nonce counters
 /// aligned in each direction.
-func enableClientEncryption(conn: TCPConnection, nonce: Data?) {
+func enableClientEncryption(conn: TCPConnection, nonce: Data?, forwardSecrecy: Bool = false) throws {
     guard let nonce, let key = resolveAuthKey(CommandLine.arguments) else { return }
-    enableClientEncryption(conn: conn, nonce: nonce, key: key)
+    try enableClientEncryption(conn: conn, nonce: nonce, key: key, forwardSecrecy: forwardSecrecy)
 }
 
-func enableClientEncryption(conn: TCPConnection, nonce: Data, key: Data) {
+/// `forwardSecrecy` comes from the authOk flags: only a server that advertises it
+/// gets an `authExchange` packet, so a new client talking to an old server never
+/// desynchronises that server's cipher counters.
+func enableClientEncryption(conn: TCPConnection, nonce: Data, key: Data,
+                            forwardSecrecy: Bool = false) throws {
     let keys = deriveSessionKeys(psk: key, nonce: nonce)
     conn.outCipher = SessionCipher(key: keys.c2s)
     conn.inCipher = SessionCipher(key: keys.s2c)
+    guard forwardSecrecy else { return }
+
+    let pair = Curve25519.KeyAgreement.PrivateKey()
+    try conn.send(packet(type: .authExchange, ptsMicros: 0,
+                         payload: Data(pair.publicKey.rawRepresentation)))
+    conn.setRecvTimeout(2)
+    defer { conn.setRecvTimeout(0) }
+    let (head, body) = try conn.recvFrame()
+    guard head.type == .authExchange, body.count == 32 else { throw POSIXError(.EPROTO) }
+    let peer = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: body)
+    let shared = try pair.sharedSecretFromKeyAgreement(with: peer)
+    installSessionKeys(conn: conn, psk: key, nonce: nonce,
+                       extra: shared.withUnsafeBytes { Data($0) }, client: true)
+    log("auth: forward secrecy on (X25519)")
 }
 
 /// Client side of the handshake: answer the challenge with the MAC.
@@ -163,6 +242,13 @@ func respondToAuthChallenge(conn: TCPConnection, nonce: Data, key: Data) throws 
     log("auth: key fingerprint \(PSK.fingerprint(key))")
     let mac = authMAC(key: key, nonce: nonce)
     try conn.send(packet(type: .authResponse, ptsMicros: 0, payload: mac))
+}
+
+/// Capability flags from an `authOk` payload. Empty/9-byte payloads come from
+/// servers that predate the flag byte and mean "no extras".
+func authOkFlags(_ payload: Data) -> UInt8 {
+    guard payload.count >= 10 else { return 0 }
+    return payload[payload.startIndex + 9]
 }
 
 func timeSyncRequest() -> Data {

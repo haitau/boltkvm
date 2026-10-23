@@ -46,7 +46,9 @@ VideoToolbox 硬编（ProRes 422 / HEVC）── TCP ──► VideoToolbox 硬�
 CGEvent 注入              ◄── 输入与音频 ──────── CGEvent/NSEvent 捕获 + Metal 1:1 上屏
 ```
 
-- 传输层是裸 TCP + 20 字节大端头（`TCP_NODELAY`）；认证后整条链路 ChaCha20-Poly1305 加密；
+- 传输层是裸 TCP + 20 字节大端头（`TCP_NODELAY`）；认证后整条链路 ChaCha20-Poly1305 加密，
+  并且每会话先用 X25519 换一把临时密钥再导会话密钥（前向保密：录下握手包，事后拿到口令也
+  解不开当次流量）；
 - 默认编码 ProRes 422（[ADR-0003](docs/adr/0003-prores-422-primary.md)），`--codec hevc` 可切；
 - UDP / QUIC 未实现（[ADR](docs/adr/)）。
 
@@ -211,8 +213,9 @@ reboot ──► ssh 可用 ──► 自动登录进桌面会话
 
 - **GUI 端到端约 40 ms（SLO 50 ms）**：解码路径能进 33 ms，呈现管线多约 14 ms；想再压要换
   呈现方式，见 [B5](docs/reports/2026-10-23-b5-latency.md)。
-- **认证只有预共享口令，没有前向保密**：口令泄露等于机器泄露；`--insecure` 是明文逃生口，
-  会打警告。为什么不做配对码换密钥，见 [ADR-0004](docs/adr/0004-psk-over-pairing-code.md)。
+- **口令泄露等于机器泄露**：认证是预共享口令，泄露后对方可以主动连上来（已录下的历史流量
+  受 X25519 前向保密保护，解不开）；`--insecure` 是明文逃生口，会打警告。为什么不做配对码
+  换密钥，见 [ADR-0004](docs/adr/0004-psk-over-pairing-code.md)。
 - **只能有一块虚拟屏**：两块同时在线时 ScreenCaptureKit 会掉到 3–8 fps。`boltkvm displays`
   检查，看到两块就杀掉旧进程。
 - **残留服务端会让采集静默挂死**：`startCapture()` 不返回也不报错，客户端只收到心跳；起跑前

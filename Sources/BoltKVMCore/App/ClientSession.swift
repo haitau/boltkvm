@@ -95,7 +95,7 @@ final class ClientSession {
                     let (header, payload) = try c.recvFrame()
                     bytes += payload.count
                     switch header.type {
-                    case .command, .input, .config:
+                    case .command, .input, .config, .authExchange:
                         break  // client never receives these
                     case .authChallenge:
                         challengeNonce = payload
@@ -117,7 +117,9 @@ final class ClientSession {
                             decoder.setClockOffset(offset, rttMs: rtt)
                         }
                         if let challengeNonce {
-                            enableClientEncryption(conn: c, nonce: challengeNonce, key: sessionKey)
+                            try enableClientEncryption(
+                                conn: c, nonce: challengeNonce, key: sessionKey,
+                                forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                         }
                         // Ask for the size the connection list chose *before*
                         // anything else: the server reads exactly one frame here.

@@ -63,9 +63,10 @@ public enum CLI {
                 if let d = deadline, DispatchTime.now().uptimeNanoseconds >= d { break }
                 let conn = try await acceptAsync(listener)
                 log("client connected")
+                var requested: SessionConfig?
                 if let key = authKey {
                     do {
-                        try authenticateServer(conn: conn, key: key)
+                        requested = try authenticateServer(conn: conn, key: key)
                         log("auth ok")
                     } catch {
                         log("auth failed: \(error); closing")
@@ -78,20 +79,6 @@ public enum CLI {
                     }
                 }
                 let audio = args.contains("--audio")
-
-                // Optional first packet: what the client wants streamed. New
-                // clients send it straight after authOk; old ones send a
-                // timeSync, which we simply drop here.
-                var requested: SessionConfig?
-                conn.setRecvTimeout(1)
-                do {
-                    let (head, body) = try conn.recvFrame()
-                    if head.type == .config { requested = SessionConfig.decode(body) }
-                } catch {
-                    // No packet (old client that stays silent) or a read timeout:
-                    // keep the server's own size.
-                }
-                conn.setRecvTimeout(0)
 
                 var captureW = width
                 var captureH = height
@@ -454,7 +441,9 @@ public enum CLI {
                             try respondToAuthChallenge(conn: c, nonce: payload)
                         } else if header.type == .authOk {
                             sawAuthOk = true
-                            enableClientEncryption(conn: c, nonce: challengeNonce)
+                            try enableClientEncryption(
+                                conn: c, nonce: challengeNonce,
+                                forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                             log("auth ok")
                             // Encrypted ping: proves the client->server direction
                             // decrypts, not just server->client.
@@ -561,7 +550,9 @@ public enum CLI {
                         authSentAt = Int64(Date().timeIntervalSince1970 * 1_000_000)
                         try respondToAuthChallenge(conn: conn, nonce: payload)
                     case .authOk:
-                        enableClientEncryption(conn: conn, nonce: challengeNonce)
+                        try enableClientEncryption(
+                            conn: conn, nonce: challengeNonce,
+                            forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                         log("auth ok")
                         if header.payloadLength >= 9, payload.first == 1, authSentAt > 0 {
                             let t2 = payload.readInt64BE(payload.startIndex + 1)
@@ -574,7 +565,7 @@ public enum CLI {
                             log("sent config \(requested.width)x\(requested.height) quality=\(requested.quality)")
                         }
                         try? conn.send(timeSyncRequest())
-                    case .input, .authResponse, .config:
+                    case .input, .authResponse, .config, .authExchange:
                         break
                     case .audio:
                         audio?.enqueue(payload)

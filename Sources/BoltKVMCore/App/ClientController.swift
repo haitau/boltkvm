@@ -326,7 +326,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        log("window: will close — stack: \(Thread.callStackSymbols.dropFirst().prefix(10).joined(separator: " <- "))")
+        log("window: closed by user")
         // Closing the window *is* the disconnect (R4); for the client role the
         // app has nothing left to do, so it quits the way a document window would.
         session?.disconnect()
