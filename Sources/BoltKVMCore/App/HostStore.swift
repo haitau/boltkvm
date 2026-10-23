@@ -5,19 +5,6 @@ import Foundation
 /// Secrets are never stored here: `pskKeychainAccount` is only the *name* of a
 /// Keychain item (`service = boltkvm-psk`), nil meaning "use ~/.boltkvm-key".
 struct SavedHost: Codable, Identifiable, Equatable {
-    /// Encoding quality, matching the client's 画质 presets.
-    enum Quality: String, Codable, CaseIterable {
-        case pixel, balanced, smooth
-
-        var titleKey: String {
-            switch self {
-            case .pixel: return "quality.pixel"
-            case .balanced: return "quality.balanced"
-            case .smooth: return "quality.smooth"
-            }
-        }
-    }
-
     var id: UUID
     var name: String
     var host: String
@@ -26,12 +13,11 @@ struct SavedHost: Codable, Identifiable, Equatable {
     /// nil means "whatever the server starts with".
     var width: Int?
     var height: Int?
-    var quality: Quality?
     var lastConnected: Date?
 
     init(id: UUID = UUID(), name: String, host: String, port: UInt16 = 7474,
          pskKeychainAccount: String? = nil, width: Int? = nil, height: Int? = nil,
-         quality: Quality? = nil, lastConnected: Date? = nil) {
+         lastConnected: Date? = nil) {
         self.id = id
         self.name = name
         self.host = host
@@ -39,7 +25,6 @@ struct SavedHost: Codable, Identifiable, Equatable {
         self.pskKeychainAccount = pskKeychainAccount
         self.width = width
         self.height = height
-        self.quality = quality
         self.lastConnected = lastConnected
     }
 }

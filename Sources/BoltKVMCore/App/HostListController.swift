@@ -103,7 +103,8 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         let view = NSTableCellView()
         let name = NSTextField(labelWithString: host.name)
         name.font = .systemFont(ofSize: 13, weight: .medium)
-        let detail = NSTextField(labelWithString: "\(host.host):\(host.port)")
+        let size = host.width.flatMap { w in host.height.map { "\(w)×\($0)" } } ?? "—"
+        let detail = NSTextField(labelWithString: "\(host.host):\(host.port) · \(size)")
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
         let stack = NSStackView(views: [name, detail])
@@ -148,6 +149,67 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         reload()
     }
 
+
+    // MARK: - Resolutions
+
+    /// 3008×1692 is the virtual display the mini runs today; a new entry starts
+    /// from it instead of a meaningless "default".
+    static let defaultSize = (3008, 1692)
+
+    private static let presetSizes: [(Int, Int)] = [
+        (1280, 720), (1920, 1080), (2560, 1440), (3008, 1692), (3840, 2160),
+    ]
+
+    private static let customResolutionsKey = "hosts.customResolutions"
+
+    static func resolutionOptions() -> [(Int, Int)] {
+        var options = presetSizes
+        let stored = UserDefaults.standard.array(forKey: customResolutionsKey) as? [String] ?? []
+        for text in stored {
+            let parts = text.split(separator: "x").compactMap { Int($0) }
+            guard parts.count == 2, !options.contains(where: { $0.0 == parts[0] && $0.1 == parts[1] }) else { continue }
+            options.append((parts[0], parts[1]))
+        }
+        return options
+    }
+
+    static func rememberCustomResolution(_ size: (Int, Int)) {
+        var stored = UserDefaults.standard.array(forKey: customResolutionsKey) as? [String] ?? []
+        let text = "\(size.0)x\(size.1)"
+        guard !stored.contains(text) else { return }
+        stored.append(text)
+        UserDefaults.standard.set(stored, forKey: customResolutionsKey)
+    }
+
+    static func sizeTitle(_ size: (Int, Int)) -> String { "\(size.0)×\(size.1)" }
+
+    /// Asks for an explicit W×H. Returns nil when cancelled or invalid.
+    private func askForCustomResolution() -> (Int, Int)? {
+        let alert = NSAlert()
+        alert.messageText = L.t("client.hosts.addResolution")
+        alert.addButton(withTitle: L.t("common.ok"))
+        alert.addButton(withTitle: L.t("common.cancel"))
+        let widthField = NSTextField(string: String(HostListController.defaultSize.0))
+        let heightField = NSTextField(string: String(HostListController.defaultSize.1))
+        let form = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 72))
+        for (index, pair) in [(L.t("client.hosts.width"), widthField), (L.t("client.hosts.height"), heightField)].enumerated() {
+            let label = NSTextField(labelWithString: pair.0)
+            label.alignment = .right
+            label.frame = NSRect(x: 0, y: 46 - index * 32, width: 70, height: 22)
+            form.addSubview(label)
+            pair.1.frame = NSRect(x: 80, y: 45 - index * 32, width: 200, height: 24)
+            form.addSubview(pair.1)
+        }
+        alert.accessoryView = form
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        guard let width = Int(widthField.stringValue), let height = Int(heightField.stringValue),
+              (640...7680).contains(width), (480...4320).contains(height),
+              width % 2 == 0, height % 2 == 0 else {
+            return nil
+        }
+        return (width, height)
+    }
+
     private func presentEditor(host: SavedHost?) {
         let alert = NSAlert()
         alert.messageText = host == nil ? L.t("client.hosts.add") : L.t("client.hosts.edit")
@@ -161,37 +223,33 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         let portValue: UInt16 = host?.port ?? UInt16(Prefs.port)
         let portField = NSTextField(string: String(portValue))
         portField.placeholderString = L.t("client.label.port")
-        // Stored only for now: resolution is a *server* setting until the config
-        // packet exists (see docs/plans/2026-10-22-connection-manager-design.md).
-        let resolution = NSPopUpButton(frame: NSRect(x: 90, y: 0, width: 220, height: 25), pullsDown: false)
-        resolution.addItems(withTitles: ["默认", "1280×720", "1920×1080", "2560×1440", "3008×1692"])
-        let sizes: [(Int, Int)?] = [nil, (1280, 720), (1920, 1080), (2560, 1440), (3008, 1692)]
-        if let w = host?.width, let h = host?.height,
-           let index = sizes.firstIndex(where: { $0?.0 == w && $0?.1 == h }) {
-            resolution.selectItem(at: index)
+        // Concrete resolutions only: no "default" entry, so what you see is what
+        // gets saved. Custom sizes are remembered in UserDefaults.
+        let resolution = NSPopUpButton(frame: NSRect(x: 90, y: 0, width: 240, height: 25), pullsDown: false)
+        let fallback = HostListController.defaultSize
+        let current = (host?.width.flatMap { w in host?.height.map { (w, $0) } }) ?? fallback
+        var options = HostListController.resolutionOptions()
+        if !options.contains(where: { $0.0 == current.0 && $0.1 == current.1 }) {
+            options.append(current)
         }
-
-        let preset = NSPopUpButton(frame: NSRect(x: 90, y: 0, width: 220, height: 25), pullsDown: false)
-        preset.addItems(withTitles: [L.t("quality.pixel"), L.t("quality.balanced"), L.t("quality.smooth")])
-        if let quality = host?.quality {
-            preset.selectItem(at: SavedHost.Quality.allCases.firstIndex(of: quality) ?? 0)
-        }
+        resolution.addItems(withTitles: options.map { Self.sizeTitle($0) })
+        resolution.addItem(withTitle: L.t("client.hosts.addResolution"))
+        resolution.selectItem(at: options.firstIndex { $0.0 == current.0 && $0.1 == current.1 } ?? 0)
 
         // Manual frames: an NSGridView/NSStackView accessory tripped the Swift
         // compiler here ("failed to produce diagnostic"), and this form is fixed
         // size anyway.
-        let form = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 162))
+        let form = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 130))
         let labels = [L.t("client.hosts.name"), L.t("client.label.host"),
-                      L.t("client.label.port"), L.t("client.hosts.resolution"),
-                      L.t("client.hosts.quality")]
-        let controls: [NSView] = [nameField, hostField, portField, resolution, preset]
+                      L.t("client.label.port"), L.t("client.hosts.resolution")]
+        let controls: [NSView] = [nameField, hostField, portField, resolution]
         for index in 0..<labels.count {
             let label = NSTextField(labelWithString: labels[index])
             label.alignment = .right
-            label.frame = NSRect(x: 0, y: 132 - index * 32, width: 82, height: 22)
+            label.frame = NSRect(x: 0, y: 100 - index * 32, width: 82, height: 22)
             form.addSubview(label)
             let control = controls[index]
-            control.frame = NSRect(x: 90, y: 131 - index * 32, width: 240, height: 24)
+            control.frame = NSRect(x: 90, y: 99 - index * 32, width: 240, height: 24)
             form.addSubview(control)
         }
         alert.accessoryView = form
@@ -199,19 +257,23 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let name = nameField.stringValue.isEmpty ? hostField.stringValue : nameField.stringValue
         let port = UInt16(portField.stringValue) ?? 7474
-        let quality = SavedHost.Quality.allCases[max(0, preset.indexOfSelectedItem)]
-        let size = sizes[max(0, resolution.indexOfSelectedItem)]
+        let selectedIndex = resolution.indexOfSelectedItem
+        var size = options[max(0, min(selectedIndex, options.count - 1))]
+        if selectedIndex == options.count {
+            guard let custom = askForCustomResolution() else { return }
+            size = custom
+            HostListController.rememberCustomResolution(custom)
+        }
         if var existing = host {
             existing.name = name
             existing.host = hostField.stringValue
             existing.port = port
-            existing.quality = quality
-            existing.width = size?.0
-            existing.height = size?.1
+            existing.width = size.0
+            existing.height = size.1
             store.update(existing)
         } else {
             store.add(SavedHost(name: name, host: hostField.stringValue, port: port,
-                                width: size?.0, height: size?.1, quality: quality))
+                                width: size.0, height: size.1))
         }
         reload()
     }

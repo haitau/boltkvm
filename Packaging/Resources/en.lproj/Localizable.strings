@@ -98,9 +98,8 @@
 "client.hosts.edit" = "Edit";
 "client.hosts.remove" = "Remove";
 "client.hosts.name" = "Name";
-"client.hosts.quality" = "Quality";
 "client.label.hostName" = "Display name";
-"quality.pixel" = "Pixel (lossless)";
-"quality.balanced" = "Balanced";
-"quality.smooth" = "Smooth";
 "client.hosts.resolution" = "Resolution";
+"client.hosts.addResolution" = "Add resolution…";
+"client.hosts.width" = "Width";
+"client.hosts.height" = "Height";

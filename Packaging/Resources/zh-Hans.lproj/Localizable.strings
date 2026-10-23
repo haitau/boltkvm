@@ -99,9 +99,8 @@
 "client.hosts.edit" = "编辑";
 "client.hosts.remove" = "删除";
 "client.hosts.name" = "名称";
-"client.hosts.quality" = "画质";
 "client.label.hostName" = "显示名";
-"quality.pixel" = "像素（无损）";
-"quality.balanced" = "均衡";
-"quality.smooth" = "流畅";
 "client.hosts.resolution" = "分辨率";
+"client.hosts.addResolution" = "添加分辨率…";
+"client.hosts.width" = "宽度";
+"client.hosts.height" = "高度";

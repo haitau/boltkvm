@@ -12,14 +12,18 @@ struct SavedHost: Codable, Identifiable {
     var host: String          // IP 或主机名
     var port: UInt16
     var keychainPSK: String?  // Keychain 条目的 account，nil 表示用 ~/.boltkvm-key
-    var resolution: Resolution?   // 见 R2；nil = 服务端默认
-    var quality: Quality?         // pixel / balanced / smooth
+    var width: Int?           // 见 R2；界面里始终是具体数值，没有"默认"档
+    var height: Int?
     var lastConnected: Date?
 }
 ```
 
 - 存储：`~/Library/Application Support/BoltKVM/hosts.json`；
 - 首次启动迁移现有 `Prefs.host/port` 成一条记录（名字取 host），迁移后清掉旧键；
+- 画质字段已删除（2026-10-23）：它当初只是占位，服务端根本没有对应能力，留着等于假承诺。
+  真正的画面质量开关在**服务端菜单**里（画面质量 → 标准 / 清晰），见 `ServerAppController`；
+- 分辨率在界面里是具体数值（预设 1280×720…3840×2160 + 自定义），自定义尺寸记在
+  `UserDefaults` 的 `hosts.customResolutions`；仍然只存不生效，等 R2 的 config 包；
 - PSK 只存 Keychain 条目名（`boltkvm-psk` / `host:port`），不落 JSON；
 - 登录密码同理，条目 `boltkvm-login` / `user@host`，且默认不写。
 
@@ -33,8 +37,8 @@ struct SavedHost: Codable, Identifiable {
 
 ## R2 分辨率与画质：协议改动
 
-现状：分辨率是服务端启动参数（`--width/--height` 决定虚拟显示），画质是编码参数，
-客户端连接时无法影响。
+现状：分辨率是服务端启动参数（`--width/--height` 决定虚拟显示），客户端连接时无法影响。
+客户端的"画质"从未参与协议，已删除。
 
 方案：`authOk` 之后客户端发一个 `config` 包（新的 `PacketType.config = 11`）：
 
