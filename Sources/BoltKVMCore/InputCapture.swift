@@ -47,7 +47,16 @@ final class InputSender {
                 self.backlog -= 1
                 self.lock.unlock()
             }
-            do { try self.conn.send(pkt) } catch { self.onError?(error) }
+            do {
+                try self.conn.send(pkt)
+            } catch {
+                // A closing session fails queued packets with EBADF/EPIPE; that
+                // is the teardown itself, not an error worth a log line.
+                switch (error as? POSIXError)?.code {
+                case .EBADF, .EPIPE, .ECONNRESET, .ENOTCONN: return
+                default: self.onError?(error)
+                }
+            }
         }
     }
 }
