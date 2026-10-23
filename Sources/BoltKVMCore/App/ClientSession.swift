@@ -43,6 +43,8 @@ final class ClientSession {
 
     /// What the server should stream, when the user picked a size for this host.
     var requestedConfig: SessionConfig?
+    /// Real stream size, reported once the server describes its format.
+    var onFormat: ((Int, Int) -> Void)?
 
     func connect(host: String, port: UInt16, key: Data?, forwardInput: Bool, playAudio: Bool) {
         disconnect()
@@ -124,6 +126,8 @@ final class ClientSession {
                     case .format:
                         if let format = StreamFormat.decode(payload) {
                             try decoder.configure(format)
+                            let size = (format.width, format.height)
+                            DispatchQueue.main.async { self.onFormat?(size.0, size.1) }
                             self.setState(.streaming)
                             if wantInput {
                                 wantInput = false

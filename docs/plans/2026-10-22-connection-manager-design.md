@@ -11,7 +11,7 @@ struct SavedHost: Codable, Identifiable {
     var name: String          // 显示名，默认取 host
     var host: String          // IP 或主机名
     var port: UInt16
-    var keychainPSK: String?  // Keychain 条目的 account，nil 表示用 ~/.boltkvm-key
+    var pskAccount: String?   // keys/ 下文件名，nil 表示用 ~/.boltkvm-key
     var width: Int?           // 见 R2；界面里始终是具体数值，没有"默认"档
     var height: Int?
     var lastConnected: Date?
@@ -24,8 +24,12 @@ struct SavedHost: Codable, Identifiable {
   真正的画面质量开关在**服务端菜单**里（画面质量 → 标准 / 清晰），见 `ServerAppController`；
 - 分辨率在界面里是具体数值（预设 1280×720…3840×2160 + 自定义），自定义尺寸记在
   `UserDefaults` 的 `hosts.customResolutions`；仍然只存不生效，等 R2 的 config 包；
-- PSK 只存 Keychain 条目名（`boltkvm-psk` / `host:port`），不落 JSON；
-- 登录密码同理，条目 `boltkvm-login` / `user@host`，且默认不写。
+- PSK 只存**文件名**（`host:port`），内容写入
+  `~/Library/Application Support/BoltKVM/keys/<host>_<port>`，权限 0600，不落 JSON。
+  原本计划用 Keychain，实测行不通（2026-10-23）：本地重签名（`BoltKVM Local`）每次都让
+  钥匙串把 app 当成"另一个程序"，连接时弹出"想使用您储存在钥匙串中的 boltkvm-psk"、
+  要登录密码，界面就卡在黑屏。和已有的 `~/.boltkvm-key` 同级目录、同权限，重建不影响；
+- 登录密码（R3，未实现）将来同样走文件而不是 Keychain，理由同上，且默认不写。
 
 ## R1 界面
 

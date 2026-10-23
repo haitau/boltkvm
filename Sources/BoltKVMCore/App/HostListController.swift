@@ -238,8 +238,8 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
 
         // Everything the session window used to carry lives here now: the key,
         // and whether this host gets keyboard/mouse and audio.
-        let keyField = NSSecureTextField(string: host?.pskKeychainAccount
-            .flatMap { Keychain.get(account: $0) } ?? "")
+        let keyField = NSSecureTextField(string: host?.pskAccount
+            .flatMap { HostSecrets.get(account: $0) } ?? "")
         keyField.placeholderString = L.t("client.placeholder.key")
         let inputCheck = NSButton(checkboxWithTitle: L.t("client.check.input"), target: nil, action: nil)
         inputCheck.state = (host?.forwardInput ?? Prefs.forwardInput) ? .on : .off
@@ -289,9 +289,9 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         let keyText = keyField.stringValue
         let hasKey = !keyText.isEmpty
         if hasKey {
-            Keychain.set(keyText, account: account)
-        } else if let old = host?.pskKeychainAccount {
-            Keychain.delete(account: old)
+            HostSecrets.set(keyText, account: account)
+        } else if let old = host?.pskAccount {
+            HostSecrets.delete(account: old)
         }
         let keyAccount = hasKey ? account : nil
         let forwardsInput = inputCheck.state == .on
@@ -302,13 +302,13 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
             existing.port = port
             existing.width = size.0
             existing.height = size.1
-            existing.pskKeychainAccount = keyAccount
+            existing.pskAccount = keyAccount
             existing.forwardInput = forwardsInput
             existing.audio = playsAudio
             store.update(existing)
         } else {
             store.add(SavedHost(name: name, host: hostField.stringValue, port: port,
-                                pskKeychainAccount: keyAccount,
+                                pskAccount: keyAccount,
                                 width: size.0, height: size.1,
                                 forwardInput: forwardsInput, audio: playsAudio))
         }

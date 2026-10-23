@@ -103,6 +103,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
                 self.stopReportTimer(report: true)
             }
         }
+        session?.onFormat = { [weak self] width, height in
+            self?.fitWindowToRemote(width: width, height: height)
+        }
         session?.onStats = { [weak self] text in
             guard let self else { return }
             self.statsText = text
@@ -252,8 +255,8 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         let playAudio = host.audio ?? Prefs.audio
         Prefs.forwardInput = forwardInput
         Prefs.audio = playAudio
-        let explicitKey: Data? = host.pskKeychainAccount
-            .flatMap { Keychain.get(account: $0) }
+        let explicitKey: Data? = host.pskAccount
+            .flatMap { HostSecrets.get(account: $0) }
             .flatMap { resolveAuthKey(["--key", $0]) }
         session.inputView = renderer?.view
         if let width = host.width, let height = host.height, width > 0, height > 0 {
@@ -263,6 +266,28 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         }
         session.connect(host: host.host, port: host.port, key: explicitKey,
                         forwardInput: forwardInput, playAudio: playAudio)
+    }
+
+    /// Match the window to the remote picture. Screen Sharing does the same:
+    /// a 16:9 remote in a 16:10 window leaves two black bands that read as "the
+    /// picture is broken", so the window adopts the stream's aspect on connect.
+    private func fitWindowToRemote(width: Int, height: Int) {
+        guard width > 0, height > 0, let window else { return }
+        let aspect = NSSize(width: width, height: height)
+        window.contentAspectRatio = aspect
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        var contentWidth = window.contentLayoutRect.width
+        if contentWidth <= 0 { contentWidth = 1200 }
+        var contentHeight = contentWidth * CGFloat(height) / CGFloat(width)
+        // Keep the whole window on screen, with the toolbar and title bar.
+        let maxHeight = visible.height - 80
+        if contentHeight > maxHeight {
+            contentHeight = maxHeight
+            contentWidth = contentHeight * CGFloat(width) / CGFloat(height)
+        }
+        window.setContentSize(NSSize(width: contentWidth, height: contentHeight))
+        log(String(format: "window: fitted to remote %dx%d -> content %.0fx%.0f",
+                   width, height, contentWidth, contentHeight))
     }
 
     /// `已连接 · 24 fps · 385 Mbps` lives in the toolbar's trailing edge.

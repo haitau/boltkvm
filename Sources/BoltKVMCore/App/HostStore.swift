@@ -2,14 +2,14 @@ import Foundation
 
 /// One saved remote Mac, as shown in the connection list (R1).
 ///
-/// Secrets are never stored here: `pskKeychainAccount` is only the *name* of a
-/// Keychain item (`service = boltkvm-psk`), nil meaning "use ~/.boltkvm-key".
+/// Secrets are never stored here: `pskAccount` is only the *name* of the file in
+/// `keys/` (see `HostSecrets`), nil meaning "use ~/.boltkvm-key".
 struct SavedHost: Codable, Identifiable, Equatable {
     var id: UUID
     var name: String
     var host: String
     var port: UInt16
-    var pskKeychainAccount: String?
+    var pskAccount: String?
     /// nil means "whatever the server starts with".
     var width: Int?
     var height: Int?
@@ -19,19 +19,56 @@ struct SavedHost: Codable, Identifiable, Equatable {
     var lastConnected: Date?
 
     init(id: UUID = UUID(), name: String, host: String, port: UInt16 = 7474,
-         pskKeychainAccount: String? = nil, width: Int? = nil, height: Int? = nil,
+         pskAccount: String? = nil, width: Int? = nil, height: Int? = nil,
          forwardInput: Bool? = nil, audio: Bool? = nil,
          lastConnected: Date? = nil) {
         self.id = id
         self.name = name
         self.host = host
         self.port = port
-        self.pskKeychainAccount = pskKeychainAccount
+        self.pskAccount = pskAccount
         self.width = width
         self.height = height
         self.forwardInput = forwardInput
         self.audio = audio
         self.lastConnected = lastConnected
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, host, port, width, height, forwardInput, audio, lastConnected
+        case pskAccount
+        /// Written by the earlier Keychain-backed build; read once, then re-encoded
+        /// under the new name.
+        case legacyPSK = "pskKeychainAccount"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        host = try c.decode(String.self, forKey: .host)
+        port = try c.decode(UInt16.self, forKey: .port)
+        width = try c.decodeIfPresent(Int.self, forKey: .width)
+        height = try c.decodeIfPresent(Int.self, forKey: .height)
+        forwardInput = try c.decodeIfPresent(Bool.self, forKey: .forwardInput)
+        audio = try c.decodeIfPresent(Bool.self, forKey: .audio)
+        lastConnected = try c.decodeIfPresent(Date.self, forKey: .lastConnected)
+        pskAccount = try c.decodeIfPresent(String.self, forKey: .pskAccount)
+            ?? c.decodeIfPresent(String.self, forKey: .legacyPSK)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(host, forKey: .host)
+        try c.encode(port, forKey: .port)
+        try c.encodeIfPresent(width, forKey: .width)
+        try c.encodeIfPresent(height, forKey: .height)
+        try c.encodeIfPresent(forwardInput, forKey: .forwardInput)
+        try c.encodeIfPresent(audio, forKey: .audio)
+        try c.encodeIfPresent(lastConnected, forKey: .lastConnected)
+        try c.encodeIfPresent(pskAccount, forKey: .pskAccount)
     }
 }
 
