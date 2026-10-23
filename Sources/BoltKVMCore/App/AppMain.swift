@@ -107,6 +107,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let controller = ServerAppController()
             serverController = controller
             controller.startAutomatically()
+            // Switching roles used to be silent from the user's side; land them on
+            // the panel that owns the initial configuration (resolution/quality/port).
+            controller.showSettings()
         case .client:
             NSApp.setActivationPolicy(.regular)
             // R1: start on the connection list, not on an empty video window.
@@ -192,7 +195,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func useServerRole() {
-        guard Prefs.role != .server else { return }
+        // Already the server: do not no-op silently — surface the panel instead.
+        if Prefs.role == .server, let controller = serverController {
+            controller.showSettings()
+            return
+        }
         stopAll()
         Prefs.role = .server
         activate(role: .server)

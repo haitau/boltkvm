@@ -32,6 +32,12 @@ final class ServerAppController: NSObject {
     private var restartWork: DispatchWorkItem?
     private var lastStats = ""
 
+    private var settingsController: ServerSettingsController?
+    private(set) var statusText = ""
+    private(set) var clientConnected = false
+    var wantedState: Bool { wanted }
+    var needsScreenRecording: Bool { !CGPreflightScreenCaptureAccess() }
+
     private var running: Bool { process?.isRunning == true }
 
     // MARK: - Lifecycle
@@ -128,6 +134,10 @@ final class ServerAppController: NSObject {
         menu.addItem(access)
         accessibilityItem = access
 
+        let settings = NSMenuItem(title: L.t("server.menu.settings"), action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+
         let toggle = NSMenuItem(title: L.t("server.menu.start"), action: #selector(toggleService), keyEquivalent: "")
         toggle.target = self
         menu.addItem(toggle)
@@ -174,11 +184,40 @@ final class ServerAppController: NSObject {
             guard let self else { return }
             self.stateItem?.title = text
             if !detail.isEmpty { self.detailItem?.title = detail }
+            self.statusText = text
+            self.clientConnected = text == L.t("server.status.connected")
             self.updateMenu()
+            self.settingsController?.updateStatus(text, connected: self.clientConnected,
+                                                  needsPermission: self.needsScreenRecording)
         }
     }
 
+    /// Shows the 被控端 panel; creates it on first use.
+    func showSettings() {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in self?.showSettings() }
+            return
+        }
+        if settingsController == nil {
+            settingsController = ServerSettingsController(server: self)
+        }
+        settingsController?.reload()
+        settingsController?.showWindow(nil)
+        settingsController?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Resolution / quality / port are baked into the helper's argv, so a change
+    /// means restarting it. Not running means nothing to do.
+    func restartForSettings() {
+        guard wanted else { return }
+        stop()
+        start()
+    }
+
     // MARK: - Actions
+
+    @objc private func openSettings() { showSettings() }
 
     @objc private func toggleService() {
         wanted ? stop() : start()

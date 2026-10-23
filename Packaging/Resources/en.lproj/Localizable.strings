@@ -103,3 +103,11 @@
 "client.hosts.addResolution" = "Add resolution…";
 "client.hosts.width" = "Width";
 "client.hosts.height" = "Height";
+"server.panel.title" = "Remote Mac";
+"server.panel.heading" = "This Mac can be controlled remotely";
+"server.panel.openSettings" = "Open System Settings (Screen Recording)…";
+"server.panel.custom" = "Custom…";
+"server.panel.port" = "Port";
+"server.panel.hint" = "Changing resolution or quality rebuilds the virtual display and restarts the service, so it takes effect immediately. After closing this panel, reopen it from the BoltKVM menu bar icon, where you can also stop the service or switch roles.";
+"server.panel.close" = "Close";
+"server.menu.settings" = "Settings…";

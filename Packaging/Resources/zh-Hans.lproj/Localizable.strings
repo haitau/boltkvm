@@ -104,3 +104,11 @@
 "client.hosts.addResolution" = "添加分辨率…";
 "client.hosts.width" = "宽度";
 "client.hosts.height" = "高度";
+"server.panel.title" = "被控端";
+"server.panel.heading" = "这台 Mac 允许被远程控制";
+"server.panel.openSettings" = "打开系统设置（屏幕录制）…";
+"server.panel.custom" = "自定义…";
+"server.panel.port" = "端口";
+"server.panel.hint" = "分辨率和画质会重建虚拟屏并重启服务；改完立刻生效。关闭此窗口后，可以从菜单栏的 BoltKVM 图标重新打开，也能在那里停止服务或切换角色。";
+"server.panel.close" = "关闭";
+"server.menu.settings" = "打开设置…";
