@@ -345,7 +345,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         lock.unlock()
         let e = first > 0 ? Double(DispatchTime.now().uptimeNanoseconds - first) / 1e9 : 0
         let p50 = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
-        let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+        let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int((Double(sorted.count) * 0.95).rounded(.up)) - 1)]
         let maxv = sorted.last ?? 0
         log(String(format: "render frames=%d elapsed=%.2fs fps=%.1f drawable=%.0fx%.0f latency p50=%.1fms p95=%.1fms max=%.1fms",
                    f, e, e > 0 ? Double(f) / e : 0,
@@ -368,8 +368,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         submitWait.removeAll(keepingCapacity: true)
         lock.unlock()
         guard !gaps.isEmpty else { return }
-        let g95 = gaps[min(gaps.count - 1, Int(Double(gaps.count) * 0.95))]
-        let w95 = waits.isEmpty ? 0 : waits[min(waits.count - 1, Int(Double(waits.count) * 0.95))]
+        let g95 = gaps[min(gaps.count - 1, Int((Double(gaps.count) * 0.95).rounded(.up)) - 1)]
+        let w95 = waits.isEmpty ? 0 : waits[min(waits.count - 1, Int((Double(waits.count) * 0.95).rounded(.up)) - 1)]
         log(String(format: "render split decode→submit p95=%.1fms (queue wait p95=%.1fms) pumped=%@",
                    g95, w95, useDisplayLink ? "no" : "yes"))
     }
@@ -393,7 +393,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         lock.unlock()
         let e = Double(now - start) / 1e9
         let p50 = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
-        let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+        let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int((Double(sorted.count) * 0.95).rounded(.up)) - 1)]
         let maxv = sorted.last ?? 0
         logSplit()
         log(String(format: "render.win elapsed=%.1fs frames=%d total=%d fps=%.1f drawable=%.0fx%.0f p50=%.1fms p95=%.1fms max=%.1fms budget=%.0fms",

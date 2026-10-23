@@ -252,10 +252,10 @@ final class VideoDecoder {
         lock.unlock()
         let fps = e > 0 ? Double(d) / e : 0
         let p50 = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
-        let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+        let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int((Double(sorted.count) * 0.95).rounded(.up)) - 1)]
         let maxv = sorted.last ?? 0
         let rp50 = rsorted.isEmpty ? 0 : rsorted[rsorted.count / 2]
-        let rp95 = rsorted.isEmpty ? 0 : rsorted[min(rsorted.count - 1, Int(Double(rsorted.count) * 0.95))]
+        let rp95 = rsorted.isEmpty ? 0 : rsorted[min(rsorted.count - 1, Int((Double(rsorted.count) * 0.95).rounded(.up)) - 1)]
         log(String(format: "decode decoded=%d failed=%d elapsed=%.3fs fps=%.1f recv p50=%.1fms p95=%.1fms decodeLatency p50=%.1fms p95=%.1fms max=%.1fms", d, dr, e, fps, rp50, rp95, p50, p95, maxv))
         if p95 > 33 { log("WARNING: decode latency P95 \(String(format: "%.1f", p95))ms exceeds 33ms budget") }
         if dr > 0 { log("WARNING: \(dr) decode failures") }
