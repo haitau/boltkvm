@@ -7,7 +7,7 @@
 | ID | 项 | 状态 | 需要什么 |
 |---|---|---|---|
 | ~~P0-3~~ | ~~输入连续性 8 小时~~ | **已跑完**（2026-10-22 夜）：466 次转发、tap 失效 0、重连 0、96/96 采样存活、dropped=0；但用的是 CLI 客户端（~24fps），延迟结论不能代表 GUI | 见 [夜间报告](../reports/2026-10-22-night-run.md) |
-| B5 | 延迟 SLO（33ms）的同口径复测 | **已完成 2026-10-23**：解码 57.6fps/p95 25.4ms（命中），GUI 端到端 50fps/p95 40–42ms（不命中，差 7–9ms） | 见 [B5 报告](../reports/2026-10-23-b5-latency.md) |
+| B5 | 延迟 SLO 的同口径复测 | **已完成 2026-10-23**：SLO 拆成两档后，解码 57.6fps/p95 25.4ms 命中 33ms；GUI 端到端 50fps/p95 40–42ms（开音频 46.2ms）在 50ms 档内 | 见 [B5 报告](../reports/2026-10-23-b5-latency.md) |
 | B6 | 服务端 fps 跟随客户端反压 | 客户端渲染慢时服务端 `stats` 从 57 掉到 36，`caffeinate -u` 不恢复；不是服务端衰减 | 想要"服务端恒定 60fps + 客户端丢帧"的话，得让发送侧有界队列主动丢帧而不是阻塞 encode |
 | B7 | GUI 呈现路径多出 ~14ms | 解码 p95 25ms vs 端到端 p95 41ms，差额在 Metal 呈现 | 试 `drawableSize` 跟随窗口、纹理缓存复用、相同画面跳过上传 |
 | ~~P2-1~~ | ~~上屏 51 fps 天花板~~ | **已解决**：`displaySyncEnabled=false` 是根因，打开后 59.5 fps | 见 [present 同步修复](../reports/2026-10-22-present-sync-fix.md) |
@@ -16,6 +16,8 @@
 | ~~P2-3~~ | ~~传输是明文 TCP~~ | **已解决**：ChaCha20-Poly1305 会话层，帧头作 AAD | 见 [传输加密](../reports/2026-10-22-transport-encryption.md) |
 | P1-发布 | GitHub Actions 自动发布 | **已配好未实跑**：`ci.yml`（build + selftest + cryptotest + 打包 artifact）、`release.yml`（tag `v*` → 构建、写版本号、zip + sha256、Developer ID 或 ad-hoc 签名、建 Release） | 需要 push 一个 tag 才能在 GitHub 上验证；公证受 hardened runtime ↔ CGVirtualDisplay 冲突阻塞，见 [发布流程](../releasing.md) |
 | P1-密码 | 连接密码自动生成与轮换 | **已完成 2026-10-23**：服务端首启自动生成 8 位口令（60 秒内可读、0600），面板显示 + 「重新生成密码…」按钮（二次确认、重启 helper、弹窗给出新密码） | 实测旧密码 0 帧、`auth failed`，新密码 `auth ok` |
+| P2-多屏 | 多显示器支持 | **不支持，无环境实现**：被控端只建一块虚拟屏、只采一路流；接第二块物理屏不会被传输 | 若要支持：多 `CGVirtualDisplay`/多 `SCStream`、输入坐标映射到对应屏、主控端选屏 UI；没有第二块屏可验证，不排期 |
+| P2-物理 | 睡眠唤醒 / 雷雳拔插 / 锁屏后注入 | **未测，需人工在机器前操作**（合盖、拔线、锁屏解锁），自动化跑不了；误操作可能把机器睡死/锁死 | 见下方"不列入"表；如需验证，约定一个可随时物理恢复的时间窗 |
 | B8 | 收流循环重复 | CLI `Client.swift` 与 app `ClientSession.swift` 各有一份 recv/decode/stats 循环（约 200 行重复） | 抽一层共享 pipeline；2026-10-23 起有 `swift test`（26 个协议/加密/口令用例）兜底，具备动手条件 |
 | P1-连接管理 | 启动界面改为被控端列表、每台可编辑（分辨率）、记住登录密码 | R4/R5 完成；**R1 列表已完成并验证**；**R2 分辨率已实现**（config 包重建虚拟屏，CLI 双端验证）；画质假档位已删，R3 仍阻塞 | 见 [连接管理需求](2026-10-22-connection-manager.md) 与 [设计](2026-10-22-connection-manager-design.md)；R3 需服务端登录/解锁能力 |
 
@@ -30,6 +32,7 @@
 | macOS 升级后 TCC 演练 | 需要等系统升级 | 未验证 |
 | glass-to-glass 相机基线 | 需要外置相机 | 未验证 |
 | A′ RustDesk 限时排除 | 用户判断：日常用过，不能解决问题 | 不测 |
+| 多显示器 | 没有环境（单虚拟屏 + 一块物理屏），也非目标场景 | 不做，README 记为限制 |
 | 画面缩放（`+/-`、适应窗口） | 用户判断：没有意义（2026-10-22 明确否掉） | 不做 |
 
 这些项在报告与 README 里仍如实标"未验证"，只是不再占用计划位。哪天条件具备，直接按 [M3 报告 §9](../reports/2026-10-21-m3-stability.md) 的条目补测即可。
