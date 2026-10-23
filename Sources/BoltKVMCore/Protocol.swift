@@ -33,6 +33,48 @@ enum PacketType: UInt8 {
     /// Remote control of system UI that no keyboard event can trigger: the
     /// server performs the action natively (see `RemoteAction`).
     case command = 10
+    /// First packet after `authOk`: what the client wants streamed. Sent by new
+    /// clients only, so old servers simply ignore an unknown type.
+    case config = 11
+}
+
+/// What a client asks the server to stream: a logical size plus how sharp.
+///
+/// The server may refuse (no virtual display to recreate, or the display is
+/// external); it then keeps its current size and the client learns the truth
+/// from the `format` packet.
+struct SessionConfig {
+    var width: Int
+    var height: Int
+    /// 0 = standard (cap the stream at 3840 wide), 1 = pixel (2x logical).
+    var quality: UInt8
+
+    static let payloadSize = 8
+
+    func encode() -> Data {
+        var data = Data(count: SessionConfig.payloadSize)
+        data.withUnsafeMutableBytes { raw in
+            let base = raw.baseAddress!
+            base.storeBytes(of: UInt16(clamping: width).bigEndian, toByteOffset: 0, as: UInt16.self)
+            base.storeBytes(of: UInt16(clamping: height).bigEndian, toByteOffset: 2, as: UInt16.self)
+            base.storeBytes(of: quality, toByteOffset: 4, as: UInt8.self)
+            base.storeBytes(of: UInt8(0), toByteOffset: 5, as: UInt8.self)
+            base.storeBytes(of: UInt16(0).bigEndian, toByteOffset: 6, as: UInt16.self)
+        }
+        return data
+    }
+
+    static func decode(_ data: Data) -> SessionConfig? {
+        guard data.count >= SessionConfig.payloadSize else { return nil }
+        return data.withUnsafeBytes { raw -> SessionConfig? in
+            let base = raw.baseAddress!
+            let width = Int(UInt16(bigEndian: base.load(fromByteOffset: 0, as: UInt16.self)))
+            let height = Int(UInt16(bigEndian: base.load(fromByteOffset: 2, as: UInt16.self)))
+            let quality = base.load(fromByteOffset: 4, as: UInt8.self)
+            guard (320...7680).contains(width), (240...4320).contains(height) else { return nil }
+            return SessionConfig(width: width, height: height, quality: quality)
+        }
+    }
 }
 
 /// Actions the client asks the *server* to perform. These are deliberately not

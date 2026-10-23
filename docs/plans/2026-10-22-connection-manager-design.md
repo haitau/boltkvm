@@ -35,24 +35,35 @@ struct SavedHost: Codable, Identifiable {
 - 关闭视频窗口 = 断开并回到列表（而不是退出进程——这会改掉今天 R4 的"关窗即退出"，
   只在列表存在时成立：最后一个窗口关闭才退出）。
 
-## R2 分辨率与画质：协议改动
+## R2 分辨率：协议改动（已实现 2026-10-23）
 
-现状：分辨率是服务端启动参数（`--width/--height` 决定虚拟显示），客户端连接时无法影响。
-客户端的"画质"从未参与协议，已删除。
+现状：分辨率是服务端启动参数（`--width/--height` 决定采集尺寸，`--virtual-display-size`
+决定虚拟屏逻辑尺寸）。客户端连接时无法影响——现在可以了。
 
-方案：`authOk` 之后客户端发一个 `config` 包（新的 `PacketType.config = 11`）：
+协议：`authOk` 之后客户端发的**第一个包**是 `config`（`PacketType.config = 11`），载荷 8 字节：
 
 ```
-u16 width, u16 height, u8 fps, u8 quality   // quality: 0=pixel 1=balanced 2=smooth
+u16 width, u16 height, u8 quality, u8 reserved, u16 reserved
+// quality: 0 = standard（采集宽封顶 3840）, 1 = pixel（采集 = 2×逻辑）
 ```
 
-服务端收到后：
-1. 若与当前虚拟显示不同，重建虚拟显示（沿用 `VirtualDisplay` 的创建路径）；
-2. 用新的画质档位重配编码器（bitrate 目标 + 帧率）；
-3. 回一个 `configOk`（可复用 `authOk` 的语义或新增类型），之后才开始推流。
+服务端（`CLI.runServer`）在认证后带 1 秒读超时读这一包：
 
-兼容：老客户端不发 `config`，服务端保持现有行为；新客户端连老服务端时，`config` 包未知
-类型会被忽略（`PacketType` 解析失败时跳过），退化为"用服务端默认"。
+1. 收到 `config` 且尺寸与现有虚拟屏不同 → 销毁旧虚拟屏、按请求尺寸重建，采集尺寸按
+   quality 重新算（pixel=2×，standard=≤3840），然后才开始推流；
+2. 收到别的类型（老客户端发的是 `timeSync`）→ 丢弃，保持服务端自己的尺寸；
+3. 读超时 / 客户端不发 → 同上，老客户端零改动可用；
+4. `--virtual-display external`（别人家的屏）或重建失败 → 保持原尺寸并记日志，客户端从
+   `format` 包看到真实尺寸。
+
+为什么不做 `configOk`：`format` 包已经带真实宽高，客户端拿它校准即可；多一个确认包只是多
+一处状态机。
+
+客户端侧：列表里每台机器的 `width/height` 直接进 `SessionConfig`；命令行用
+`--request-size 2560x1440`（配 `--request-quality 0|1`）复现同一路径。
+
+服务端的自身设置（被控端面板/菜单里的分辨率）仍是默认值；客户端请求是**当次会话**的覆盖，
+helper 重启后回到服务端设置——这是有意的：headless 机器不该被上一个客户端永久改尺寸。
 
 ## R3 登录密码
 

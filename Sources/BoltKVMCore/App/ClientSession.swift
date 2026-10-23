@@ -41,6 +41,9 @@ final class ClientSession {
 
     var isActive: Bool { task != nil }
 
+    /// What the server should stream, when the user picked a size for this host.
+    var requestedConfig: SessionConfig?
+
     func connect(host: String, port: UInt16, key: Data?, forwardInput: Bool, playAudio: Bool) {
         disconnect()
         // --key on the CLI, $BOLTKVM_KEY, then ~/.boltkvm-key; the app never exits
@@ -87,7 +90,7 @@ final class ClientSession {
                     let (header, payload) = try c.recvFrame()
                     bytes += payload.count
                     switch header.type {
-                    case .command, .input, .audio:
+                    case .command, .input, .audio, .config:
                         break  // client never receives these
                     case .authChallenge:
                         challengeNonce = payload
@@ -95,6 +98,11 @@ final class ClientSession {
                     case .authOk:
                         if let challengeNonce {
                             enableClientEncryption(conn: c, nonce: challengeNonce, key: sessionKey)
+                        }
+                        // Ask for the size the connection list chose *before*
+                        // anything else: the server reads exactly one frame here.
+                        if let requested = self.requestedConfig {
+                            try? c.send(packet(type: .config, payload: requested.encode()))
                         }
                         // Encrypted ping: proves the client→server direction
                         // decrypts too, not just server→client.

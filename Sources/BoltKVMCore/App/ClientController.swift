@@ -291,6 +291,14 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             ? nil
             : resolveAuthKey(["--key", keyField.stringValue])
         session.inputView = renderer?.view
+        // Ask for the size saved for this host; nil means "whatever the server
+        // already uses", which is what an old entry gets.
+        if let preset, let width = preset.width, let height = preset.height,
+           width > 0, height > 0 {
+            session.requestedConfig = SessionConfig(width: width, height: height, quality: 1)
+        } else {
+            session.requestedConfig = nil
+        }
         session.connect(host: host, port: port, key: explicitKey,
                         forwardInput: inputCheck.state == .on,
                         playAudio: audioCheck.state == .on)

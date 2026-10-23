@@ -18,7 +18,7 @@ public enum CLI {
         defer { sleepAssertion.release() }
         // Creation must happen on the main thread, so hop there before the
         // async server loop starts.
-        let virtualDisplay = await MainActor.run { prepareVirtualDisplay(args: args) }
+        var virtualDisplay = await MainActor.run { prepareVirtualDisplay(args: args) }
         let width = argInt(args, "--width", 3840)
         let height = argInt(args, "--height", 2160)
         let port = UInt16(argInt(args, "--port", 7474))
@@ -63,7 +63,53 @@ public enum CLI {
                     }
                 }
                 let audio = args.contains("--audio")
-        let server = Server(width: width, height: height, codec: codec, connection: conn,
+
+                // Optional first packet: what the client wants streamed. New
+                // clients send it straight after authOk; old ones send a
+                // timeSync, which we simply drop here.
+                var requested: SessionConfig?
+                conn.setRecvTimeout(1)
+                do {
+                    let (head, body) = try conn.recvFrame()
+                    if head.type == .config { requested = SessionConfig.decode(body) }
+                } catch {
+                    // No packet (old client that stays silent) or a read timeout:
+                    // keep the server's own size.
+                }
+                conn.setRecvTimeout(0)
+
+                var captureW = width
+                var captureH = height
+                if let req = requested, let current = virtualDisplay,
+                   current.logicalWidth != req.width || current.logicalHeight != req.height {
+                    log("client requested \(req.width)x\(req.height) (quality \(req.quality)); recreating virtual display")
+                    let previous = virtualDisplay
+                    await MainActor.run { previous?.stop() }
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    let made = await MainActor.run {
+                        BuiltinVirtualDisplay(name: "boltKVM-\(req.width)x\(req.height)",
+                                              width: req.width, height: req.height, hiDPI: true)
+                    }
+                    if let made {
+                        virtualDisplay = made
+                        made.onLost = {
+                            log("virtual display: removed by the system; exiting so the supervisor can recreate it")
+                            exit(3)
+                        }
+                        captureW = req.quality == 0 ? min(req.width, 3840) : req.width * 2
+                        captureH = req.quality == 0
+                            ? max(2, captureW * req.height / req.width)
+                            : req.height * 2
+                        log("virtual display recreated: logical \(req.width)x\(req.height), streaming \(captureW)x\(captureH)")
+                        // Let WindowServer settle before ScreenCaptureKit looks
+                        // for the new display, otherwise it enumerates none.
+                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    } else {
+                        log("recreating the virtual display failed; keeping \(current.logicalWidth)x\(current.logicalHeight)")
+                    }
+                }
+
+                let server = Server(width: captureW, height: captureH, codec: codec, connection: conn,
                             dumpPath: dump.isEmpty ? nil : dump, audioEnabled: audio,
                             preferredDisplayID: argInt(args, "--display-id", 0) != 0
                                 ? CGDirectDisplayID(argInt(args, "--display-id", 0))
@@ -438,9 +484,19 @@ public enum CLI {
         NSApplication.shared.run()
     }
 
+    /// `--request-size 2560x1440` exercises the config packet from the CLI.
+    static func parseRequestSize(_ args: [String]) -> SessionConfig? {
+        let raw = argValue(args, "--request-size", "")
+        let parts = raw.split(separator: "x").compactMap { Int($0) }
+        guard parts.count == 2 else { return nil }
+        let quality = UInt8(argInt(args, "--request-quality", 1))
+        return SessionConfig(width: parts[0], height: parts[1], quality: quality)
+    }
+
     public static func runClient(_ args: [String]) async {
         let host = argValue(args, "--host", "127.0.0.1")
         let port = UInt16(argInt(args, "--port", 7474))
+        let requested = parseRequestSize(args)
         let seconds = Double(argInt(args, "--seconds", 20))
         let audioRecord = argValue(args, "--audio-record", "")
         let audio: AudioPlayer? = (args.contains("--audio") || !audioRecord.isEmpty)
@@ -487,8 +543,12 @@ public enum CLI {
                     case .authOk:
                         enableClientEncryption(conn: conn, nonce: challengeNonce)
                         log("auth ok")
+                        if let requested {
+                            try? conn.send(packet(type: .config, payload: requested.encode()))
+                            log("sent config \(requested.width)x\(requested.height) quality=\(requested.quality)")
+                        }
                         try? conn.send(timeSyncRequest())
-                    case .input, .authResponse:
+                    case .input, .authResponse, .config:
                         break
                     case .audio:
                         audio?.enqueue(payload)
