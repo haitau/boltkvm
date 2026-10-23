@@ -218,12 +218,12 @@ Automation 请求直接判死，连授权弹窗都不会出。
 
 同一台 Pro 上：
 
-- CLI 客户端 `--host 10.0.20.2 --port 7474` → 61.1 fps、348 帧，正常；
+- CLI 客户端 `--host <mini 桥接地址> --port 7474` → 61.1 fps、348 帧，正常；
 - GUI 客户端同一地址同一端口 → `失败：未能完成该操作。无到主机的路由`，
   而服务端日志里能看到 `client connected` 之后紧接 `auth failed: ... Connection
   reset by peer`。
 
-`nc -z 10.0.20.2 7474` 通，ping 0.4ms，两端 `~/.boltkvm-key` sha256 一致，app 无
+`nc -z <mini 桥接地址> 7474` 通，ping 0.4ms，两端 `~/.boltkvm-key` sha256 一致，app 无
 sandbox entitlement。反复重建签名（Local Network / 本地网络 TCC）是头号嫌疑，
 但 `tccutil reset LocalNetwork` 报不支持，没验成。
 
