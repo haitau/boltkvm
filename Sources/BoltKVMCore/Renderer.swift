@@ -85,10 +85,11 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var winFrames = 0
     private var winLatencies: [Double] = []
     private var winStart: UInt64 = 0
-    // GUI SLO is 50 ms capture→present (decode has its own 33 ms target). The
-    // old 33 ms tier here fired a warning every window once the SLO was split;
-    // 2026-10-23: GUI P95 is 33.2 ms with the draw pump, so 50 leaves headroom.
-    private var budgetMs: Double = 50
+    // GUI SLO is flat: 50 ms capture→present (decode has its own 33 ms target).
+    // There used to be per-frame-size tiers; they existed only to keep a single
+    // 33 ms target reachable and went away when the two paths got separate
+    // numbers. 2026-10-23: GUI P95 is 33.2 ms with the draw pump.
+    static let budgetMs: Double = 50
     private var sloWindows = 0
     private var sloHits = 0
     private var tierBreaches = 0
@@ -326,22 +327,13 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
-    /// The GUI SLO is flat: 50 ms capture→present regardless of frame size. The
-    /// per-size tiers were a workaround for the single 33 ms target that was
-    /// retired when decode and GUI got separate numbers (2026-10-23).
-    func setBudget(_ ms: Double) {
-        lock.lock(); budgetMs = ms; lock.unlock()
-    }
-
-    static func budget(forFrameKB _: Double) -> Double { 50 }
-
     func report() {
         // Copy under the lock: draw() keeps appending from the render thread,
         // and reading the array outside the lock raced with it.
         lock.lock()
         let f = frames, first = firstAt
         let sorted = latencies.sorted()
-        let budget = budgetMs
+        let budget = Self.budgetMs
         lock.unlock()
         let e = first > 0 ? Double(DispatchTime.now().uptimeNanoseconds - first) / 1e9 : 0
         let p50 = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
@@ -388,9 +380,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         let total = frames
         lock.unlock()
 
-        lock.lock()
-        let budget = budgetMs
-        lock.unlock()
+        let budget = Self.budgetMs
         let e = Double(now - start) / 1e9
         let p50 = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
         let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int((Double(sorted.count) * 0.95).rounded(.up)) - 1)]

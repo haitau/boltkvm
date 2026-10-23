@@ -466,8 +466,7 @@ public enum CLI {
                             let secs = Double(beatNow - lastBeat) / 1e9
                             let mbps = secs > 0 ? Double(winBytes) * 8 / secs / 1e6 : 0
                             let kbFrame = winFrames > 0 ? Double(winBytes) / Double(winFrames) / 1024 : 0
-                            let budget = Renderer.budget(forFrameKB: kbFrame)
-                            RenderSession.shared.renderer?.setBudget(budget)
+                            let budget = Renderer.budgetMs
                             lastBeat = beatNow
                             log(String(format: "loop.win packets=%d frames=%d reconnects=%d mbps=%.1f kbFrame=%.0f budget=%.0fms",
                                        packets, frames, reconnects, mbps, kbFrame, budget))
