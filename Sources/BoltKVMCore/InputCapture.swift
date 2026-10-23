@@ -252,12 +252,16 @@ final class WindowInputCapture {
     /// AppKit modifier bits, keyed by the key code that carries them. They are
     /// the same bits as `CGEventFlags`, which is what goes over the wire.
     private static let modifierFlag: [UInt16: UInt64] = [
-        55: 0x100000,  // command
-        56: 0x020000,  // shift
-        57: 0x010000,  // caps lock
-        58: 0x080000,  // option
-        59: 0x040000,  // control
+        55: 0x100000, 54: 0x100000,  // command (left/right)
+        56: 0x020000, 60: 0x020000,  // shift
+        57: 0x010000,                // caps lock (toggle, never "released")
+        58: 0x080000, 61: 0x080000,  // option
+        59: 0x040000, 62: 0x040000,  // control
     ]
+
+    /// Caps lock is a toggle: sending a key-up would switch it back off on the
+    /// remote, so it is never part of any release sweep.
+    private static let toggleKey: UInt16 = 57
 
     init(conn: TCPConnection, view: NSView) {
         self.conn = conn
@@ -288,7 +292,7 @@ final class WindowInputCapture {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         // Release anything we may have left down, locally and on the remote.
-        for code in forwardedKeys {
+        for code in forwardedKeys where code != Self.toggleKey {
             CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(code), keyDown: false)?
                 .post(tap: .cghidEventTap)
         }
@@ -312,7 +316,7 @@ final class WindowInputCapture {
     /// Modifiers the local side has already released but the remote still holds
     /// (the release happened while the pointer was outside the picture).
     private func releaseStaleModifiers(flags: UInt64) {
-        for code in forwardedModifiers {
+        for code in forwardedModifiers where code != Self.toggleKey {
             guard let bit = Self.modifierFlag[code], flags & bit == 0 else { continue }
             forwardedModifiers.remove(code)
             forwardedKeys.remove(code)
@@ -348,7 +352,7 @@ final class WindowInputCapture {
     /// Same release, best effort, when the session is torn down.
     private func releaseRemoteOnStop() {
         let flags: UInt64 = 0
-        for code in forwardedKeys {
+        for code in forwardedKeys where code != Self.toggleKey {
             sender.send(packet(type: .input, ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000),
                                payload: InputEvent(type: .keyUp, keyCode: code, flags: flags,
                                                    x: lastPoint.x, y: lastPoint.y).encode()), critical: true)

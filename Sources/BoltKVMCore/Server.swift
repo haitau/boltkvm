@@ -331,11 +331,16 @@ final class Server: NSObject, SCStreamOutput {
     /// next click into a right click). Release everything we may have posted.
     private func releaseInjectedInput() {
         let point = lastMousePoint ?? CGPoint(x: displayBounds.midX, y: displayBounds.midY)
-        for code in [55, 56, 57, 58, 59] as [CGKeyCode] {
+        // Release the keys we actually pressed (either hand), not just the left
+        // ones: a right ⌘ held at disconnect would stay down otherwise.
+        let keys = heldModifiers.isEmpty ? Set<CGKeyCode>([55, 56, 58, 59]) : heldModifiers
+        for code in keys {
             guard let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else { continue }
             e.flags = []
             e.post(tap: .cghidEventTap)
         }
+        heldModifiers.removeAll()
+        injectedFlags = 0
         let ups: [(CGEventType, CGMouseButton)] = [
             (.leftMouseUp, .left), (.rightMouseUp, .right), (.otherMouseUp, .center),
         ]
@@ -353,13 +358,34 @@ final class Server: NSObject, SCStreamOutput {
         }
     }
 
-    /// Modifier key codes and their bit in the flags word.
-    private static let modifierBits: [(key: CGKeyCode, bit: UInt64)] = [
-        (55, 0x100000),  // command
-        (56, 0x020000),  // shift
-        (58, 0x080000),  // option
-        (59, 0x040000),  // control
+    /// Modifier key codes and their bit in the flags word (both sides of the
+    /// keyboard: left control and right control set the same bit).
+    private static let modifierKeys: [(key: CGKeyCode, bit: UInt64)] = [
+        (55, 0x100000), (54, 0x100000),  // command
+        (56, 0x020000), (60, 0x020000),  // shift
+        (58, 0x080000), (61, 0x080000),  // option
+        (59, 0x040000), (62, 0x040000),  // control
     ]
+
+    /// One key per bit, used when the client reports a bit we are not holding.
+    private static let canonicalModifiers: [(key: CGKeyCode, bit: UInt64)] = [
+        (55, 0x100000), (56, 0x020000), (58, 0x080000), (59, 0x040000),
+    ]
+
+    /// Which modifier keys we actually pressed on the remote. Tracking the key
+    /// (not just the bit) is what lets a right-hand ⌃ be released by its own
+    /// key up instead of being mistaken for the left one.
+    private var heldModifiers = Set<CGKeyCode>()
+
+    private func modifierBit(of key: CGKeyCode) -> UInt64 {
+        Self.modifierKeys.first { $0.key == key }?.bit ?? 0
+    }
+
+    private func postModifier(_ key: CGKeyCode, down: Bool, flags: UInt64) {
+        guard let e = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: down) else { return }
+        e.flags = CGEventFlags(rawValue: flags)
+        e.post(tap: .cghidEventTap)
+    }
 
     /// Make the remote's held modifiers match the flags the client had when it
     /// sent this event. A plain left click must not arrive as a control-click
@@ -368,15 +394,27 @@ final class Server: NSObject, SCStreamOutput {
     private func syncModifiers(to flags: UInt64) {
         let mask: UInt64 = 0x1F0000  // cmd/shift/caps/option/control
         let want = flags & mask
-        let have = injectedFlags & mask
-        guard want != have else { return }
-        for (key, bit) in Self.modifierBits where (want & bit != 0) != (have & bit != 0) {
-            guard let e = CGEvent(keyboardEventSource: nil, virtualKey: key,
-                                  keyDown: want & bit != 0) else { continue }
-            e.flags = CGEventFlags(rawValue: want)
-            e.post(tap: .cghidEventTap)
+        for key in Array(heldModifiers) {
+            let bit = modifierBit(of: key)
+            if bit == 0 || want & bit == 0 {
+                postModifier(key, down: false, flags: want)
+                heldModifiers.remove(key)
+            }
+        }
+        for (key, bit) in Self.canonicalModifiers where want & bit != 0 {
+            if !heldModifiers.contains(where: { modifierBit(of: $0) == bit }) {
+                postModifier(key, down: true, flags: want)
+                heldModifiers.insert(key)
+            }
         }
         injectedFlags = (injectedFlags & ~mask) | want
+    }
+
+    /// Record a modifier key we injected directly (flagsChanged/keyDown path).
+    private func noteModifierKey(_ key: CGKeyCode, flags: UInt64) {
+        let bit = modifierBit(of: key)
+        guard bit != 0 else { return }
+        if flags & bit != 0 { heldModifiers.insert(key) } else { heldModifiers.remove(key) }
     }
 
     private func inject(_ ev: InputEvent) {
@@ -402,6 +440,7 @@ final class Server: NSObject, SCStreamOutput {
             e.flags = CGEventFlags(rawValue: ev.flags)
             e.post(tap: .cghidEventTap)
             injectedFlags = ev.flags
+            noteModifierKey(CGKeyCode(ev.keyCode), flags: ev.flags)
         case .mouseMoved, .leftMouseDown, .leftMouseUp, .leftMouseDragged,
              .rightMouseDown, .rightMouseUp, .rightMouseDragged,
              .otherMouseDown, .otherMouseUp, .otherMouseDragged:
