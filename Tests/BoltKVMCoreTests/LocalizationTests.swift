@@ -74,7 +74,7 @@ final class LocalizationTests: XCTestCase {
     func testMenuKeysAreTranslated() throws {
         // Built from a variable, so the scan above cannot see them.
         let zh = try table("zh-Hans")
-        for key in ["menu.remote", "menu.remote.missionControl", "menu.remote.showDesktop"] {
+        for key in ["menu.remote", "menu.remote.missionControl"] {
             XCTAssertNotNil(zh[key], "\(key) missing")
             XCTAssertNotEqual(zh[key], key, "\(key) not translated")
         }

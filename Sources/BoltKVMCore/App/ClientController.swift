@@ -173,11 +173,16 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         // Control and Show Desktop (com.apple.expose.front.awake) is accepted and
         // then does nothing here; the keyboard route needs Accessibility, the
         // AppleScript route needs Automation, and this app gets neither.
+        // Show Desktop used to live here too. It is gone on purpose: on macOS 15
+        // every non-interactive route to it is a no-op. The Dock notification
+        // (com.apple.showdesktop.awake) is accepted (status 0) and does nothing;
+        // the WindowManager accepts AXShowDesktop/AXHideDesktop (status 0) but
+        // leaves its own HideDesktop flag at 0; synthetic F11 is filtered like
+        // every other system shortcut. A button that cannot act is worse than no
+        // button, so Mission Control is the only remote system action left.
         let entries: [(String, String, String, Selector)] = [
             (L.t("client.toolbar.missionControl"), "square.grid.2x2",
              L.t("client.toolbar.missionControl.tip"), #selector(showMissionControl)),
-            (L.t("client.toolbar.desktop"), "display",
-             L.t("client.toolbar.desktop.tip"), #selector(showDesktop)),
         ]
         for (title, symbol, tip, action) in entries {
             let button = NSButton(title: title, target: self, action: action)
@@ -350,9 +355,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     }
 
     /// Show Desktop.
-    @objc func showDesktop() {
-        session?.sendCommand(.showDesktop)
-    }
+
 
     @objc func toggleFullScreenAction(_ sender: Any?) {
         window?.toggleFullScreen(sender)
