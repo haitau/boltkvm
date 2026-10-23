@@ -16,6 +16,11 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     /// Connection state, mirrored into the toolbar's trailing label.
     private var stateText = L.t("client.state.idle")
     private var statsText = ""
+    /// How much of 1:1 the picture gets, shown in the toolbar ("92%").
+    private var scalePercent = 100
+    /// Pixel size of the stream, kept so the percentage can be recomputed when
+    /// the window resizes (full screen is how you get back to 100%).
+    private var remotePixelSize = NSSize.zero
     private var chromeTimer: Timer?
     private var appliedFullScreen: Bool?
     private var didLogInvisibleWindow = false
@@ -271,35 +276,52 @@ final class ClientController: NSWindowController, NSWindowDelegate {
                         forwardInput: forwardInput, playAudio: playAudio)
     }
 
-    /// Match the window to the remote picture. Screen Sharing does the same:
-    /// a 16:9 remote in a 16:10 window leaves two black bands that read as "the
-    /// picture is broken", so the window adopts the stream's aspect on connect.
+    /// Match the window to the remote picture, at 1:1 when that fits.
+    ///
+    /// This used to size the window from its *current* width (1200 pt right after
+    /// creation), so a 6016x3384 stream landed in a 2400x1350 drawable — a 2.5x
+    /// downscale that makes every glyph soft, and that is what "整个界面糊了"
+    /// looked like. The target is now one stream pixel per physical pixel
+    /// (pixel size / backing scale), clamped to the visible screen; when the
+    /// clamp bites, the toolbar shows the resulting percentage so the number is
+    /// visible instead of guessed. Full screen gives 1:1 on a matching display.
     private func fitWindowToRemote(width: Int, height: Int) {
         guard width > 0, height > 0, let window else { return }
-        let aspect = NSSize(width: width, height: height)
-        window.contentAspectRatio = aspect
-        let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        var contentWidth = window.contentLayoutRect.width
-        if contentWidth <= 0 { contentWidth = 1200 }
-        var contentHeight = contentWidth * CGFloat(height) / CGFloat(width)
-        // Keep the whole window on screen, with the toolbar and title bar.
-        let maxHeight = visible.height - 80
-        if contentHeight > maxHeight {
-            contentHeight = maxHeight
-            contentWidth = contentHeight * CGFloat(width) / CGFloat(height)
+        window.contentAspectRatio = NSSize(width: width, height: height)
+        let screen = window.screen ?? NSScreen.main
+        let scale = screen?.backingScaleFactor ?? 2
+        let ideal = NSSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale)
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let chrome: CGFloat = 80  // title bar + toolbar
+        let maxWidth = visible.width
+        let maxHeight = max(400, visible.height - chrome)
+        var content = ideal
+        if ideal.width > maxWidth || ideal.height > maxHeight {
+            let factor = min(maxWidth / ideal.width, maxHeight / ideal.height)
+            content = NSSize(width: (ideal.width * factor).rounded(.down),
+                             height: (ideal.height * factor).rounded(.down))
         }
-        window.setContentSize(NSSize(width: contentWidth, height: contentHeight))
-        log(String(format: "window: fitted to remote %dx%d -> content %.0fx%.0f",
-                   width, height, contentWidth, contentHeight))
+        window.setContentSize(content)
+        remotePixelSize = NSSize(width: width, height: height)
+        let percent = Int(((content.width * scale / CGFloat(width)) * 100).rounded())
+        scalePercent = percent
+        refreshToolbarStatus()
+        log(String(format: "window: remote %dx%d px -> content %.0fx%.0f pt (%d%% of 1:1, screen %.0fx%.0f)",
+                   width, height, content.width, content.height, percent,
+                   visible.width, visible.height))
     }
 
-    /// `已连接 · 24 fps · 385 Mbps` lives in the toolbar's trailing edge.
+    /// `已连接 · 24 fps · 385 Mbps · 92%` lives in the toolbar's trailing edge.
+    /// The trailing percentage is the picture scale: 100% is 1:1 (sharp), lower
+    /// means the window is smaller than the stream and the image is resampled.
     private func refreshToolbarStatus() {
-        var text = stateText
-        if !statsText.isEmpty {
-            text = text.isEmpty ? statsText : "\(text) · \(statsText)"
+        var parts: [String] = []
+        if !stateText.isEmpty { parts.append(stateText) }
+        if !statsText.isEmpty { parts.append(statsText) }
+        if session?.isActive == true, scalePercent < 100 {
+            parts.append("\(scalePercent)%")
         }
-        toolbarStatusLabel.stringValue = text
+        toolbarStatusLabel.stringValue = parts.joined(separator: " · ")
     }
 
     // MARK: - Remote system shortcuts
@@ -331,6 +353,22 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         session?.disconnect()
         session = nil
         window?.close()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        updateScalePercent()
+    }
+
+    /// Recompute how much of 1:1 the window currently shows. The drawable is
+    /// view bounds x backing scale, which is what the picture is resampled to.
+    private func updateScalePercent() {
+        guard remotePixelSize.width > 0, let window else { return }
+        let scale = (window.screen ?? NSScreen.main)?.backingScaleFactor ?? 2
+        let points = renderer?.view.bounds.width ?? window.contentLayoutRect.width
+        let percent = Int(((points * scale / remotePixelSize.width) * 100).rounded())
+        guard percent != scalePercent else { return }
+        scalePercent = percent
+        refreshToolbarStatus()
     }
 
     func windowWillClose(_ notification: Notification) {
