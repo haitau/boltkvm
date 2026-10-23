@@ -60,6 +60,8 @@ final class Server: NSObject, SCStreamOutput {
     private var closed = false
     private var displayBounds = CGRect.zero
     private var inputCount = 0
+    /// Where the last injected event went; releases on disconnect use it.
+    private var lastMousePoint: CGPoint?
     private var keyCount = 0
     private var scrollCount = 0
     private var heartbeatTimer: DispatchSourceTimer?
@@ -315,7 +317,29 @@ final class Server: NSObject, SCStreamOutput {
         let first = !disconnectedFlag
         disconnectedFlag = true
         lockState.unlock()
-        if first { log("session: client disconnected") }
+        if first {
+            log("session: client disconnected")
+            releaseInjectedInput()
+        }
+    }
+
+    /// A client that goes away mid-chord leaves the remote with the key or
+    /// button still down (clicks then behave as drags, and a stuck ⌃ turns the
+    /// next click into a right click). Release everything we may have posted.
+    private func releaseInjectedInput() {
+        let point = lastMousePoint ?? CGPoint(x: displayBounds.midX, y: displayBounds.midY)
+        for code in [55, 56, 57, 58, 59] as [CGKeyCode] {
+            guard let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else { continue }
+            e.flags = []
+            e.post(tap: .cghidEventTap)
+        }
+        let ups: [(CGEventType, CGMouseButton)] = [
+            (.leftMouseUp, .left), (.rightMouseUp, .right), (.otherMouseUp, .center),
+        ]
+        for (type, button) in ups {
+            CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button)?
+                .post(tap: .cghidEventTap)
+        }
     }
 
     /// System-UI actions: post the shortcut into the HID stream (no TCC needed).
@@ -332,6 +356,7 @@ final class Server: NSObject, SCStreamOutput {
             y: displayBounds.minY + ev.y * displayBounds.height
         )
         inputCount += 1
+        lastMousePoint = p
         if ev.type == .keyDown || ev.type == .keyUp || ev.type == .flagsChanged { keyCount += 1 }
         if inputCount % 120 == 0 { log("input events=\(inputCount) keys=\(keyCount)") }
 

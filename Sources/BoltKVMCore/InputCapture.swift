@@ -195,6 +195,23 @@ final class WindowInputCapture {
     /// otherwise the local system is left with a keyDown and no release, which
     /// repeats the character forever (seen 2026-10-22: a stuck "aaaaa").
     private var forwardedKeys = Set<UInt16>()
+    /// Modifier key codes forwarded as down and not yet released remotely.
+    private var forwardedModifiers = Set<UInt16>()
+    /// Mouse buttons forwarded as down and not yet released remotely.
+    private var forwardedButtons = Set<UInt8>()
+    /// Last position sent, reused when a release has to be sent from outside
+    /// the picture (where there is no meaningful new position).
+    private var lastPoint: (x: Double, y: Double) = (0.5, 0.5)
+
+    /// AppKit modifier bits, keyed by the key code that carries them. They are
+    /// the same bits as `CGEventFlags`, which is what goes over the wire.
+    private static let modifierFlag: [UInt16: UInt64] = [
+        55: 0x100000,  // command
+        56: 0x020000,  // shift
+        57: 0x010000,  // caps lock
+        58: 0x080000,  // option
+        59: 0x040000,  // control
+    ]
 
     init(conn: TCPConnection, view: NSView) {
         self.conn = conn
@@ -230,8 +247,77 @@ final class WindowInputCapture {
                 .post(tap: .cghidEventTap)
         }
         if !forwardedKeys.isEmpty { log("input: released \(forwardedKeys.count) held key(s)") }
+        releaseRemoteOnStop()
         forwardedKeys.removeAll()
+        forwardedModifiers.removeAll()
+        forwardedButtons.removeAll()
         log("input: window monitor stopped sent=\(sent)")
+    }
+
+    private func transmit(_ ev: InputEvent) {
+        let pkt = packet(type: .input,
+                         ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000),
+                         payload: ev.encode())
+        do {
+            try conn.send(pkt)
+            sent += 1
+            if sent % 60 == 0 { log("input: forwarded=\(sent)") }
+        } catch {
+            log("input: send failed: \(error)")
+            stop()
+        }
+    }
+
+    /// Modifiers the local side has already released but the remote still holds
+    /// (the release happened while the pointer was outside the picture).
+    private func releaseStaleModifiers(flags: UInt64) {
+        for code in forwardedModifiers {
+            guard let bit = Self.modifierFlag[code], flags & bit == 0 else { continue }
+            forwardedModifiers.remove(code)
+            forwardedKeys.remove(code)
+            transmit(InputEvent(type: .keyUp, keyCode: code, flags: flags,
+                                x: lastPoint.x, y: lastPoint.y))
+        }
+    }
+
+    /// Give the remote every key/button we forwarded and never released.
+    private func releaseForwardedState(flags: UInt64) {
+        guard !forwardedKeys.isEmpty || !forwardedButtons.isEmpty else { return }
+        let keys = forwardedKeys
+        let modifiers = forwardedModifiers
+        let buttons = forwardedButtons
+        forwardedKeys.removeAll()
+        forwardedModifiers.removeAll()
+        forwardedButtons.removeAll()
+        for code in keys where !modifiers.contains(code) {
+            transmit(InputEvent(type: .keyUp, keyCode: code, flags: flags,
+                                x: lastPoint.x, y: lastPoint.y))
+        }
+        for code in modifiers {
+            transmit(InputEvent(type: .keyUp, keyCode: code, flags: flags,
+                                x: lastPoint.x, y: lastPoint.y))
+        }
+        for button in buttons {
+            let type: InputEventType = button == 0 ? .leftMouseUp : (button == 1 ? .rightMouseUp : .otherMouseUp)
+            transmit(InputEvent(type: type, flags: flags, x: lastPoint.x, y: lastPoint.y, button: button))
+        }
+        log("input: released \(keys.count) key(s)/\(buttons.count) button(s) on leaving the picture")
+    }
+
+    /// Same release, best effort, when the session is torn down.
+    private func releaseRemoteOnStop() {
+        let flags: UInt64 = 0
+        for code in forwardedKeys {
+            try? conn.send(packet(type: .input, ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000),
+                                  payload: InputEvent(type: .keyUp, keyCode: code, flags: flags,
+                                                      x: lastPoint.x, y: lastPoint.y).encode()))
+        }
+        for button in forwardedButtons {
+            let type: InputEventType = button == 0 ? .leftMouseUp : (button == 1 ? .rightMouseUp : .otherMouseUp)
+            try? conn.send(packet(type: .input, ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000),
+                                  payload: InputEvent(type: type, flags: flags,
+                                                      x: lastPoint.x, y: lastPoint.y, button: button).encode()))
+        }
     }
 
     private func fittedRect(in bounds: CGRect, aspect: CGFloat) -> CGRect {
@@ -268,42 +354,54 @@ final class WindowInputCapture {
         // coordinates by hand (window/view origins made that error-prone).
         let hit = window.contentView?.hitTest(inWindow)
         let inVideo = hit === view || hit?.isDescendant(of: view) == true
-        guard inVideo else { return event }
         let point = view.convert(inWindow, from: nil)
         // The picture is centred with black bars, so map only inside the picture:
         // clicks on a bar belong to nobody and are passed through.
         let fit = fittedRect(in: view.bounds, aspect: aspectProvider?() ?? 0)
-        guard fit.contains(point) else { return event }
+        let flags = UInt64(event.modifierFlags.rawValue)
+        if !inVideo || !fit.contains(point) {
+            // The pointer left the picture. Anything we forwarded and never saw
+            // the release for stays down on the remote, and a stuck ⌃ turns the
+            // next plain click into a control-click — i.e. a right click. Hand
+            // everything back instead of dropping the release.
+            releaseForwardedState(flags: flags)
+            return event
+        }
         var nx = Double((point.x - fit.minX) / max(1, fit.width))
         var ny = Double((point.y - fit.minY) / max(1, fit.height))
         if !view.isFlipped { ny = 1 - ny }
         nx = min(1, max(0, nx)); ny = min(1, max(0, ny))
-        let flags = UInt64(event.modifierFlags.rawValue)
+        // A release that happened while the pointer was elsewhere never reached
+        // the remote; correcting before this event keeps state in sync.
+        releaseStaleModifiers(flags: flags)
 
         func send(_ ev: InputEvent) {
-            let pkt = packet(type: .input,
-                             ptsMicros: Int64(Date().timeIntervalSince1970 * 1_000_000),
-                             payload: ev.encode())
-            do {
-                try conn.send(pkt)
-                sent += 1
-                if sent % 60 == 0 { log("input: forwarded=\(sent)") }
-            } catch {
-                log("input: send failed: \(error)")
-                stop()
-            }
+            var e = ev
+            e.x = nx
+            e.y = ny
+            lastPoint = (nx, ny)
+            transmit(e)
         }
 
         switch event.type {
         case .keyDown:
             forwardedKeys.insert(event.keyCode)
+            if Self.modifierFlag[event.keyCode] != nil { forwardedModifiers.insert(event.keyCode) }
             send(InputEvent(type: .keyDown, keyCode: event.keyCode, flags: flags,
                             x: nx, y: ny, isRepeat: event.isARepeat))
         case .keyUp:
             // Only swallow the release of a key we actually captured.
             guard forwardedKeys.remove(event.keyCode) != nil else { return event }
+            forwardedModifiers.remove(event.keyCode)
             send(InputEvent(type: .keyUp, keyCode: event.keyCode, flags: flags, x: nx, y: ny))
         case .flagsChanged:
+            if let bit = Self.modifierFlag[event.keyCode], flags & bit != 0 {
+                forwardedModifiers.insert(event.keyCode)
+                forwardedKeys.insert(event.keyCode)
+            } else {
+                forwardedModifiers.remove(event.keyCode)
+                forwardedKeys.remove(event.keyCode)
+            }
             send(InputEvent(type: .flagsChanged, keyCode: event.keyCode, flags: flags, x: nx, y: ny))
         case .mouseMoved:
             send(InputEvent(type: .mouseMoved, flags: flags, x: nx, y: ny))
@@ -316,8 +414,13 @@ final class WindowInputCapture {
                 .otherMouseDown: .otherMouseDown, .otherMouseUp: .otherMouseUp, .otherMouseDragged: .otherMouseDragged,
             ]
             if let t = map[event.type] {
-                send(InputEvent(type: t, flags: flags, x: nx, y: ny,
-                                button: UInt8(truncatingIfNeeded: event.buttonNumber)))
+                let button = UInt8(truncatingIfNeeded: event.buttonNumber)
+                if event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .otherMouseDown {
+                    forwardedButtons.insert(button)
+                } else {
+                    forwardedButtons.remove(button)
+                }
+                send(InputEvent(type: t, flags: flags, x: nx, y: ny, button: button))
             }
         case .scrollWheel:
             send(InputEvent(type: .scroll, flags: flags, x: nx, y: ny,
