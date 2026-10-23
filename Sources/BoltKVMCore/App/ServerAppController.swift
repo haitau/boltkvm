@@ -30,6 +30,9 @@ final class ServerAppController: NSObject {
     private var logHandle: FileHandle?
     private var wanted = false
     private var restartWork: DispatchWorkItem?
+    /// Pids we terminated on purpose; their exit callbacks must not trigger a
+    /// restart or clear the state of the process that replaced them.
+    private var expectedExits: Set<Int32> = []
     private var lastStats = ""
 
     private var settingsController: ServerSettingsController?
@@ -75,6 +78,13 @@ final class ServerAppController: NSObject {
 
     func start() {
         guard !wanted else { return }
+        guard process?.isRunning != true else {
+            // A helper is already up (its exit has not been reaped yet); mark the
+            // service wanted instead of starting a second one that would lose
+            // the flock and exit with status 9.
+            wanted = true
+            return
+        }
         wanted = true
         permissionItem?.isHidden = true
         reapOrphanHelpers()
@@ -442,7 +452,9 @@ final class ServerAppController: NSObject {
             for line in text.split(separator: "\n") { self?.ingest(String(line)) }
         }
         proc.terminationHandler = { [weak self] p in
-            DispatchQueue.main.async { self?.handleExit(status: p.terminationStatus) }
+            let pid = p.processIdentifier
+            let status = p.terminationStatus
+            DispatchQueue.main.async { self?.handleExit(status: status, pid: pid) }
         }
 
         do {
@@ -460,19 +472,53 @@ final class ServerAppController: NSObject {
     private func stopProcess() {
         pipe?.fileHandleForReading.readabilityHandler = nil
         pipe = nil
-        if let proc = process, proc.isRunning {
-            proc.terminate()
-        }
+        guard let proc = process else { return }
         process = nil
+        guard proc.isRunning else { return }
+        // Restarting settings is stop() → start(): if the old helper still holds
+        // the SingleInstance lock when the new one starts, the new one exits 9
+        // and the service looks "blocked". Wait for it to go away first.
+        expectedExits.insert(proc.processIdentifier)
+        proc.terminate()
+        let deadline = Date().addingTimeInterval(2)
+        while proc.isRunning && Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+        if proc.isRunning {
+            log("app: helper \(proc.processIdentifier) ignored SIGTERM; killing")
+            kill(proc.processIdentifier, SIGKILL)
+        }
     }
 
-    private func handleExit(status: Int32) {
+    private func handleExit(status: Int32, pid: Int32) {
+        if expectedExits.remove(pid) != nil {
+            log("app: helper \(pid) exited as requested")
+            return
+        }
+        if let running = process, running.processIdentifier != pid {
+            // The exit belongs to a helper we already replaced; clearing pipe or
+            // scheduling a restart here would orphan the current one.
+            log("app: ignoring exit of old helper \(pid) (current \(running.processIdentifier))")
+            return
+        }
         if status == 9 {
-            // SingleInstance refused: another boltkvm owns the server role. Do
-            // not restart — that would spin every 3 seconds forever.
-            wanted = false
-            setState(L.t("server.status.blocked"), detail: "another instance is running")
+            // SingleInstance refused: an orphan helper from a previous app
+            // instance still owns the server role. Reap it and try once more
+            // rather than leaving the service permanently "blocked".
+            process = nil
             log("app: helper refused to start: another server instance owns the lock")
+            guard wanted else {
+                setState(L.t("server.status.blocked"), detail: "another instance is running")
+                return
+            }
+            reapOrphanHelpers()
+            setState(L.t("server.status.restarting"), detail: "code 9")
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.wanted else { return }
+                self.launch()
+            }
+            restartWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
             return
         }
         pipe?.fileHandleForReading.readabilityHandler = nil
