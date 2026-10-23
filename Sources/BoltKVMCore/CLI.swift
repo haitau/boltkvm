@@ -515,69 +515,43 @@ public enum CLI {
             try conn.send(timeSyncRequest())
             let decoder = VideoDecoder()
             let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
-            var received = 0
-            var packets = 0
-            var lastHeader: PacketHeader?
+            let pump = SessionPump(conn: conn, decoder: decoder)
             var challengeNonce: Data?
             var authSentAt: Int64 = 0
-            var lastBeat = DispatchTime.now().uptimeNanoseconds
-            while DispatchTime.now().uptimeNanoseconds < deadline {
-                do {
-                    let (header, payload) = try conn.recvFrame()
-                    lastHeader = header
-                    packets += 1
-                    let beatNow = DispatchTime.now().uptimeNanoseconds
-                    if beatNow - lastBeat >= 60_000_000_000 {
-                        lastBeat = beatNow
-                        log("loop.win packets=\(packets) received=\(received)")
-                    }
-                    switch header.type {
-                    case .command:
-                        break  // server performs commands; a client never receives them
-                    case .format:
-                        if let f = StreamFormat.decode(payload) {
-                            try decoder.configure(f)
-                        }
-                    case .frame:
-                        received += 1
-                        decoder.decode(payload, ptsMicros: header.ptsMicros)
-                    case .heartbeat:
-                        break
-                    case .timeSync:
-                        handleTimeSync(header, payload, decoder: decoder)
-                    case .authChallenge:
-                        challengeNonce = payload
-                        authSentAt = Int64(Date().timeIntervalSince1970 * 1_000_000)
-                        try respondToAuthChallenge(conn: conn, nonce: payload)
-                    case .authOk:
-                        try enableClientEncryption(
-                            conn: conn, nonce: challengeNonce,
-                            forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
-                        log("auth ok")
-                        if header.payloadLength >= 9, payload.first == 1, authSentAt > 0 {
-                            let t2 = payload.readInt64BE(payload.startIndex + 1)
-                            let t3 = Int64(Date().timeIntervalSince1970 * 1_000_000)
-                            decoder.setClockOffset(t2 - (authSentAt + t3) / 2,
-                                                   rttMs: Double(t3 - authSentAt) / 1000.0)
-                        }
-                        if header.payloadLength >= 1, payload.first == 1, let requested {
-                            try? conn.send(packet(type: .config, payload: requested.encode()))
-                            log("sent config \(requested.width)x\(requested.height) quality=\(requested.quality)")
-                        }
-                        try? conn.send(timeSyncRequest())
-                    case .input, .authResponse, .config, .authExchange:
-                        break
-                    case .audio:
-                        audio?.enqueue(payload)
-                    }
-                } catch {
-                    log("client read error: \(error)")
-                    break
+            pump.onChallenge = { payload in
+                challengeNonce = payload
+                authSentAt = Int64(Date().timeIntervalSince1970 * 1_000_000)
+                try respondToAuthChallenge(conn: conn, nonce: payload)
+            }
+            pump.onAuthOk = { header, payload in
+                try enableClientEncryption(
+                    conn: conn, nonce: challengeNonce,
+                    forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
+                log("auth ok")
+                if header.payloadLength >= 9, payload.first == 1, authSentAt > 0 {
+                    let t2 = payload.readInt64BE(payload.startIndex + 1)
+                    let t3 = Int64(Date().timeIntervalSince1970 * 1_000_000)
+                    decoder.setClockOffset(t2 - (authSentAt + t3) / 2,
+                                           rttMs: Double(t3 - authSentAt) / 1000.0)
                 }
+                if header.payloadLength >= 1, payload.first == 1, let requested {
+                    try? conn.send(packet(type: .config, payload: requested.encode()))
+                    log("sent config \(requested.width)x\(requested.height) quality=\(requested.quality)")
+                }
+                try? conn.send(timeSyncRequest())
+            }
+            pump.onAudio = { audio?.enqueue($0) }
+            pump.onLongWindow = { packets, received in
+                log("loop.win packets=\(packets) received=\(received)")
+            }
+            do {
+                try pump.run(deadline: DispatchTime(uptimeNanoseconds: deadline))
+            } catch {
+                log("client read error: \(error)")
             }
             audio?.finish()
             decoder.report()
-            log("received frames=\(received) lastType=\(String(describing: lastHeader?.type))")
+            log("received frames=\(pump.frames) lastType=\(String(describing: pump.lastType))")
             conn.close()
             exit(0)
         } catch {

@@ -60,9 +60,6 @@ final class ClientSession {
         task = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             self.setState(.connecting)
-            var frames = 0
-            var bytes = 0
-            var lastReport = DispatchTime.now().uptimeNanoseconds
             var gotAuthOk = false
             var sentAuthResponse = false
             do {
@@ -91,78 +88,57 @@ final class ClientSession {
                 var challengeNonce: Data?
                 var wantInput = forwardInput
                 var authResponseSentAt: Int64 = 0
-                while !Task.isCancelled {
-                    let (header, payload) = try c.recvFrame()
-                    bytes += payload.count
-                    switch header.type {
-                    case .command, .input, .config, .authExchange:
-                        break  // client never receives these
-                    case .authChallenge:
-                        challengeNonce = payload
-                        authResponseSentAt = Int64(Date().timeIntervalSince1970 * 1_000_000)
-                        try respondToAuthChallenge(conn: c, nonce: payload, key: sessionKey)
-                        sentAuthResponse = true
-                    case .authOk:
-                        gotAuthOk = true
-                        // Only new servers advertise it; talking to an old one we
-                        // must not send a packet type it cannot parse.
-                        let supportsConfig = payload.first == 1
-                        // Offset from the handshake: this packet was written by
-                        // the server before it had a single frame to queue.
-                        if supportsConfig, payload.count >= 9, authResponseSentAt > 0 {
-                            let t2 = payload.readInt64BE(payload.startIndex + 1)
-                            let t3 = Int64(Date().timeIntervalSince1970 * 1_000_000)
-                            let offset = t2 - (authResponseSentAt + t3) / 2
-                            let rtt = Double(t3 - authResponseSentAt) / 1000.0
-                            decoder.setClockOffset(offset, rttMs: rtt)
-                        }
-                        if let challengeNonce {
-                            try enableClientEncryption(
-                                conn: c, nonce: challengeNonce, key: sessionKey,
-                                forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
-                        }
-                        // Ask for the size the connection list chose *before*
-                        // anything else: the server reads exactly one frame here.
-                        if supportsConfig, let requested = self.requestedConfig {
-                            try? c.send(packet(type: .config, payload: requested.encode()))
-                        }
-                        // Encrypted ping: proves the client→server direction
-                        // decrypts too, not just server→client.
-                        try? c.send(timeSyncRequest())
-                    case .format:
-                        if let format = StreamFormat.decode(payload) {
-                            try decoder.configure(format)
-                            let size = (format.width, format.height)
-                            DispatchQueue.main.async { self.onFormat?(size.0, size.1) }
-                            self.setState(.streaming)
-                            if wantInput {
-                                wantInput = false
-                                DispatchQueue.main.async { self.startInput(conn: c) }
-                            }
-                        }
-                    case .frame:
-                        frames += 1
-                        decoder.decode(payload, ptsMicros: header.ptsMicros)
-                    case .audio:
-                        self.audio?.enqueue(payload)
-                    case .timeSync:
-                        handleTimeSync(header, payload, decoder: decoder)
-                    case .heartbeat, .input, .authResponse:
-                        break
+                let pump = SessionPump(conn: c, decoder: decoder)
+                pump.onChallenge = { payload in
+                    challengeNonce = payload
+                    authResponseSentAt = Int64(Date().timeIntervalSince1970 * 1_000_000)
+                    try respondToAuthChallenge(conn: c, nonce: payload, key: sessionKey)
+                    sentAuthResponse = true
+                }
+                pump.onAuthOk = { header, payload in
+                    gotAuthOk = true
+                    // Only new servers advertise it; talking to an old one we
+                    // must not send a packet type it cannot parse.
+                    let supportsConfig = payload.first == 1
+                    // Offset from the handshake: this packet was written by the
+                    // server before it had a single frame to queue.
+                    if supportsConfig, payload.count >= 9, authResponseSentAt > 0 {
+                        let t2 = payload.readInt64BE(payload.startIndex + 1)
+                        let t3 = Int64(Date().timeIntervalSince1970 * 1_000_000)
+                        let offset = t2 - (authResponseSentAt + t3) / 2
+                        let rtt = Double(t3 - authResponseSentAt) / 1000.0
+                        decoder.setClockOffset(offset, rttMs: rtt)
                     }
-                    let now = DispatchTime.now().uptimeNanoseconds
-                    if now - lastReport >= 1_000_000_000 {
-                        let secs = Double(now - lastReport) / 1e9
-                        let fps = Double(frames) / secs
-                        let mbps = Double(bytes) * 8 / secs / 1e6
-                        // The host is already in the connect bar; the toolbar
-                        // only carries the live numbers.
-                        self.onStats?(String(format: "%.0f fps · %.0f Mbps", fps, mbps))
-                        frames = 0
-                        bytes = 0
-                        lastReport = now
+                    if let challengeNonce {
+                        try enableClientEncryption(
+                            conn: c, nonce: challengeNonce, key: sessionKey,
+                            forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
+                    }
+                    // Ask for the size the connection list chose *before*
+                    // anything else: the server reads exactly one frame here.
+                    if supportsConfig, let requested = self.requestedConfig {
+                        try? c.send(packet(type: .config, payload: requested.encode()))
+                    }
+                    // Encrypted ping: proves the client→server direction
+                    // decrypts too, not just server→client.
+                    try? c.send(timeSyncRequest())
+                }
+                pump.onFormat = { format in
+                    let size = (format.width, format.height)
+                    DispatchQueue.main.async { self.onFormat?(size.0, size.1) }
+                    self.setState(.streaming)
+                    if wantInput {
+                        wantInput = false
+                        DispatchQueue.main.async { self.startInput(conn: c) }
                     }
                 }
+                pump.onAudio = { [audio] payload in audio?.enqueue(payload) }
+                pump.onWindow = { window in
+                    // The host is already in the connect bar; the toolbar only
+                    // carries the live numbers.
+                    self.onStats?(String(format: "%.0f fps · %.0f Mbps", window.fps, window.mbps))
+                }
+                try pump.run()
             } catch {
                 if !Task.isCancelled {
                     // A reset right after we answered the challenge almost always
