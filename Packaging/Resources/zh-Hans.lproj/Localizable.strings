@@ -29,12 +29,10 @@
 "client.label.host" = "主机";
 "client.label.port" = "端口";
 "client.label.key" = "连接密码";
-"client.placeholder.host" = "例如 10.0.0.2";
 "client.placeholder.key" = "被控端面板里的 8 位连接密码";
 "client.check.input" = "转发键鼠";
 "client.check.audio" = "音频";
 "client.button.connect" = "连接";
-"client.button.disconnect" = "断开";
 "client.state.idle" = "未连接";
 "client.state.connecting" = "正在连接…";
 "client.state.streaming" = "已连接";
@@ -83,11 +81,9 @@
 "common.cancel" = "取消";
 "menu.remote" = "远程";
 "menu.remote.missionControl" = "调度中心";
-"menu.remote.appWindows" = "App";
 "menu.remote.showDesktop" = "桌面";
 
 "client.toolbar.app" = "App";
-"client.toolbar.app.tip" = "显示远端当前 App 的所有窗口";
 "client.toolbar.missionControl" = "调度中心";
 "client.toolbar.missionControl.tip" = "显示远端调度中心（多桌面）";
 "client.toolbar.desktop" = "桌面";
@@ -122,3 +118,4 @@
 "server.panel.rotate.confirm.body" = "所有主控端都会立刻连不上，直到你在它们的「编辑」面板里填入新密码。";
 "server.panel.rotate.done" = "已重新生成，新密码是 %@。服务正在用新密码重启。";
 "server.panel.rotate.failed" = "重新生成失败：%@";
+"client.state.badKey" = "被控端拒绝了连接，多半是连接密码不对（%@）";

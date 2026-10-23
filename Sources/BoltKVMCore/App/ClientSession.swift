@@ -63,6 +63,8 @@ final class ClientSession {
             var frames = 0
             var bytes = 0
             var lastReport = DispatchTime.now().uptimeNanoseconds
+            var gotAuthOk = false
+            var sentAuthResponse = false
             do {
                 // The first socket of a freshly launched app can be refused by
                 // the Local Network privacy check ("No route to host") while the
@@ -99,7 +101,9 @@ final class ClientSession {
                         challengeNonce = payload
                         authResponseSentAt = Int64(Date().timeIntervalSince1970 * 1_000_000)
                         try respondToAuthChallenge(conn: c, nonce: payload, key: sessionKey)
+                        sentAuthResponse = true
                     case .authOk:
+                        gotAuthOk = true
                         // Only new servers advertise it; talking to an old one we
                         // must not send a packet type it cannot parse.
                         let supportsConfig = payload.first == 1
@@ -159,7 +163,14 @@ final class ClientSession {
                 }
             } catch {
                 if !Task.isCancelled {
-                    self.setState(.failed(error.localizedDescription))
+                    // A reset right after we answered the challenge almost always
+                    // means the key is wrong: the server closes without a word.
+                    if sentAuthResponse && !gotAuthOk {
+                        self.setState(.failed(L.f("client.state.badKey",
+                                                  error.localizedDescription)))
+                    } else {
+                        self.setState(.failed(error.localizedDescription))
+                    }
                 }
             }
         }

@@ -158,17 +158,20 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         // Control and Show Desktop (com.apple.expose.front.awake) is accepted and
         // then does nothing here; the keyboard route needs Accessibility, the
         // AppleScript route needs Automation, and this app gets neither.
-        let entries: [(String, String, Selector)] = [
-            (L.t("client.toolbar.missionControl"), "square.grid.2x2", #selector(showMissionControl)),
-            (L.t("client.toolbar.desktop"), "display", #selector(showDesktop)),
+        let entries: [(String, String, String, Selector)] = [
+            (L.t("client.toolbar.missionControl"), "square.grid.2x2",
+             L.t("client.toolbar.missionControl.tip"), #selector(showMissionControl)),
+            (L.t("client.toolbar.desktop"), "display",
+             L.t("client.toolbar.desktop.tip"), #selector(showDesktop)),
         ]
-        for (title, symbol, action) in entries {
+        for (title, symbol, tip, action) in entries {
             let button = NSButton(title: title, target: self, action: action)
             button.image = toolbarImage(symbol)
             button.imagePosition = .imageAbove
             button.bezelStyle = .inline
             button.isBordered = false
             button.font = .systemFont(ofSize: 11)
+            button.toolTip = tip
             stack.addArrangedSubview(button)
         }
         stack.setFrameSize(stack.fittingSize)
@@ -230,12 +233,6 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
     deinit {
         chromeTimer?.invalidate()
-    }
-
-    private func label(_ text: String) -> NSTextField {
-        let field = NSTextField(labelWithString: text)
-        field.textColor = .secondaryLabelColor
-        return field
     }
 
     // MARK: - Actions

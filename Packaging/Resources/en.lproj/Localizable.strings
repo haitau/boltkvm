@@ -29,12 +29,10 @@
 "client.label.host" = "Host";
 "client.label.port" = "Port";
 "client.label.key" = "Password";
-"client.placeholder.host" = "e.g. 10.0.0.2";
 "client.placeholder.key" = "8-character password from the server panel";
 "client.check.input" = "Forward input";
 "client.check.audio" = "Audio";
 "client.button.connect" = "Connect";
-"client.button.disconnect" = "Disconnect";
 "client.state.idle" = "Not connected";
 "client.state.connecting" = "Connecting…";
 "client.state.streaming" = "Connected";
@@ -82,11 +80,9 @@
 "common.cancel" = "Cancel";
 "menu.remote" = "Remote";
 "menu.remote.missionControl" = "Mission Control";
-"menu.remote.appWindows" = "App";
 "menu.remote.showDesktop" = "Desktop";
 
 "client.toolbar.app" = "App";
-"client.toolbar.app.tip" = "Show all windows of the remote app";
 "client.toolbar.missionControl" = "Mission Control";
 "client.toolbar.missionControl.tip" = "Show the remote Mission Control";
 "client.toolbar.desktop" = "Desktop";
@@ -121,3 +117,4 @@
 "server.panel.rotate.confirm.body" = "Every client stops connecting until you enter the new password in its host editor.";
 "server.panel.rotate.done" = "New password: %@. The server is restarting with it.";
 "server.panel.rotate.failed" = "Rotation failed: %@";
+"client.state.badKey" = "The host refused the connection — most likely a wrong password (%@)";
