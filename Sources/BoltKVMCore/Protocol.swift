@@ -628,6 +628,24 @@ func resolveBindAddress(_ spec: String) throws -> BindTarget {
     return BindTarget(addr: a, label: spec)
 }
 
+/// Bind failures that can clear up on their own while the machine is still
+/// useful as a display: the Thunderbolt cable is not plugged in yet (2002), the
+/// previous helper has not released the port, or the bridge address went away
+/// between resolving it and binding. The server must not exit on these — it owns
+/// the virtual display, and exiting takes the display down with it, which is
+/// visible as the desktop flipping between two resolutions on a remote console.
+func isTransientBindError(_ error: Error) -> Bool {
+    let ns = error as NSError
+    if ns.domain == "boltkvm" && ns.code == 2002 { return true }
+    if let posix = error as? POSIXError {
+        switch posix.code {
+        case .EADDRINUSE, .EADDRNOTAVAIL, .ENETDOWN: return true
+        default: return false
+        }
+    }
+    return false
+}
+
 final class TCPListener: @unchecked Sendable {
     let fd: Int32
     let label: String

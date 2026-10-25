@@ -50,6 +50,8 @@
 "server.status.stopped" = "已停止";
 "server.status.blocked" = "另一个实例正在运行";
 "server.status.listening" = "监听中";
+"server.status.displayOnly" = "虚拟屏就绪，等待网络";
+"server.status.displayOnly.detail" = "没有雷雳网桥；插上雷雳线后自动监听，虚拟屏保持不动";
 "server.status.connected" = "已连接";
 "server.status.starting" = "启动中…";
 "server.status.restarting" = "已退出，3 秒后重启";

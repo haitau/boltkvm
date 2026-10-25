@@ -50,6 +50,8 @@
 "server.status.stopped" = "Stopped";
 "server.status.blocked" = "Another instance is running";
 "server.status.listening" = "Listening";
+"server.status.displayOnly" = "Display ready, waiting for network";
+"server.status.displayOnly.detail" = "No Thunderbolt bridge yet; it will listen once the cable is connected, without rebuilding the display";
 "server.status.connected" = "Connected";
 "server.status.starting" = "Starting…";
 "server.status.restarting" = "Exited, restarting in 3s";

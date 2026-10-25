@@ -5,6 +5,41 @@ import Darwin
 import AppKit
 import ApplicationServices
 
+/// The process owns the virtual display, and `exit()` does not run Swift
+/// deinits. A helper killed with SIGTERM therefore leaves its display in the
+/// system's list with the same identity, and the replacement helper is refused
+/// for up to 20 s — exactly the gap a resolution change cannot afford. Release
+/// the display explicitly on every exit path (normal exit, SIGTERM/SIGINT, stdin
+/// EOF and the display-lost callback all end in `exit`).
+nonisolated(unsafe) private var displayToRelease: BuiltinVirtualDisplay?
+nonisolated(unsafe) private var terminationSources: [DispatchSourceSignal] = []
+nonisolated(unsafe) private var displayCleanupInstalled = false
+
+private func installDisplayCleanup(_ display: BuiltinVirtualDisplay) {
+    displayToRelease = display
+    guard !displayCleanupInstalled else { return }
+    displayCleanupInstalled = true
+    atexit {
+        displayToRelease?.stop()
+        displayToRelease = nil
+    }
+}
+
+private func installTerminationSignalHandling() {
+    for sig in [SIGTERM, SIGINT] {
+        signal(sig, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+        source.setEventHandler {
+            log("terminating: releasing the virtual display")
+            displayToRelease?.stop()
+            displayToRelease = nil
+            exit(0)
+        }
+        source.resume()
+        terminationSources.append(source)
+    }
+}
+
 public enum CLI {
 
     public static func runServer(_ args: [String]) async {
@@ -12,6 +47,7 @@ public enum CLI {
             FileHandle.standardError.write(Data("boltkvm: another server is already running (pid \(owner))\n".utf8))
             exit(9)
         }
+        installTerminationSignalHandling()
         exitWhenParentGoesAway()
         // Held for the process lifetime; a sleeping display means no frames.
         let sleepAssertion = DisplaySleepAssertion(reason: "BoltKVM is serving a remote screen")
@@ -19,6 +55,7 @@ public enum CLI {
         // Creation must happen on the main thread, so hop there before the
         // async server loop starts.
         var virtualDisplay = await MainActor.run { prepareVirtualDisplay(args: args) }
+        if let virtualDisplay { installDisplayCleanup(virtualDisplay) }
         let width = argInt(args, "--width", 3840)
         let height = argInt(args, "--height", 2160)
         let port = UInt16(argInt(args, "--port", 7474))
@@ -57,7 +94,34 @@ public enum CLI {
             }
         }
         do {
-            let listener = try TCPListener(port: port, bind: bindSpec)
+            // The virtual display is already on screen at this point, and it is
+            // owned by this process. Exiting because the port cannot be bound
+            // (no Thunderbolt bridge on a headless Mac reached through UU/ARD,
+            // or the previous helper still holding the port) destroyed that
+            // display every few seconds: the supervisor restarted us, we made a
+            // new display, failed to bind and died again. On a remote console
+            // that reads as the desktop flipping between two resolutions.
+            // Keep the display and wait for a usable network instead.
+            var waitedForNetwork = false
+            var listener: TCPListener
+            while true {
+                do {
+                    listener = try TCPListener(port: port, bind: bindSpec)
+                    if waitedForNetwork { log("network: network is available again; starting to listen") }
+                    break
+                } catch {
+                    guard isTransientBindError(error) else { throw error }
+                    if !waitedForNetwork {
+                        let reason = (error as? POSIXError)?.code == .EADDRINUSE
+                            ? "port \(port) is still in use"
+                            : error.localizedDescription
+                        log("network: \(reason); keeping the virtual display up and retrying every 2 s")
+                        log("network: waiting for a usable network (virtual display stays up)")
+                        waitedForNetwork = true
+                    }
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                }
+            }
             let deadline: UInt64? = seconds > 0
                 ? DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
                 : nil
@@ -97,6 +161,7 @@ public enum CLI {
                     }
                     if let made {
                         virtualDisplay = made
+                        installDisplayCleanup(made)
                         made.onLost = {
                             log("virtual display: removed by the system; exiting so the supervisor can recreate it")
                             exit(3)

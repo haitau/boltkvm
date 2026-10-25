@@ -551,6 +551,11 @@ final class ServerAppController: NSObject {
             if line.contains("listening on") {
                 self.setState(L.t("server.status.listening"), detail: L.f("server.status.port", Prefs.serverPort))
                 self.lastStats = ""
+            } else if line.contains("waiting for a usable network") {
+                // The helper keeps the virtual display up when the bridge is not
+                // connected (remote console at home, UU/ARD): say so instead of
+                // leaving the menu on "starting" forever.
+                self.setState(L.t("server.status.displayOnly"), detail: L.t("server.status.displayOnly.detail"))
             } else if line.contains("client connected") {
                 self.setState(L.t("server.status.connected"), detail: L.f("server.status.port", Prefs.serverPort))
             } else if line.contains("session ended") {
