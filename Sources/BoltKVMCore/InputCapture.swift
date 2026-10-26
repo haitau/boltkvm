@@ -203,8 +203,9 @@ final class InputCapture {
                 .otherMouseDown: .otherMouseDown, .otherMouseUp: .otherMouseUp, .otherMouseDragged: .otherMouseDragged,
             ]
             let button = UInt8(truncatingIfNeeded: event.getIntegerValueField(.mouseEventButtonNumber))
+            let clickCount = UInt8(truncatingIfNeeded: max(1, event.getIntegerValueField(.mouseEventClickState)))
             ev = InputEvent(type: map[type] ?? .mouseMoved, flags: event.flags.rawValue,
-                            x: nx, y: ny, button: button)
+                            x: nx, y: ny, button: button, clickCount: clickCount)
         case .scrollWheel:
             let dy = Double(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1))
             let dx = Double(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis2))
@@ -469,12 +470,14 @@ final class WindowInputCapture {
             ]
             if let t = map[event.type] {
                 let button = UInt8(truncatingIfNeeded: event.buttonNumber)
+                let clickCount = UInt8(truncatingIfNeeded: max(1, event.clickCount))
                 if event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .otherMouseDown {
                     forwardedButtons.insert(button)
                 } else {
                     forwardedButtons.remove(button)
                 }
-                send(InputEvent(type: t, flags: flags, x: nx, y: ny, button: button))
+                send(InputEvent(type: t, flags: flags, x: nx, y: ny, button: button,
+                                clickCount: clickCount))
             }
         case .scrollWheel:
             send(InputEvent(type: .scroll, flags: flags, x: nx, y: ny,

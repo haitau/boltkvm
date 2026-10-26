@@ -246,6 +246,9 @@ struct InputEvent {
     var phase: UInt8 = 0
     var momentum: UInt8 = 0
     var isRepeat: Bool = false
+    /// 1 = single click, 2 = double click, 3 = triple click. Rides in the
+    /// byte that used to be padding, so the payload stays 48 bytes.
+    var clickCount: UInt8 = 1
 
     func encode() -> Data {
         var d = Data(capacity: 48)
@@ -260,7 +263,7 @@ struct InputEvent {
         d.append(phase)
         d.append(momentum)
         d.append(isRepeat ? 1 : 0)
-        d.append(0) // pad to 48
+        d.append(clickCount)
         return d
     }
 
@@ -278,7 +281,9 @@ struct InputEvent {
             scrollY: d.readDoubleBE(b + 36),
             phase: d[b + 44],
             momentum: d[b + 45],
-            isRepeat: d[b + 46] != 0
+            isRepeat: d[b + 46] != 0,
+            // 0 is what a pre-click-count client sends in the old pad byte.
+            clickCount: max(1, d[b + 47])
         )
     }
 }

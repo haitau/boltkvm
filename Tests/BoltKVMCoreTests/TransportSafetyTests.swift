@@ -141,7 +141,8 @@ final class TransportSafetyTests: XCTestCase {
     func testInputEventLayoutRoundTrips() throws {
         let ev = InputEvent(type: .rightMouseDown, keyCode: 0x1234, flags: 0x100000,
                             x: 0.25, y: 0.75, button: 1,
-                            scrollX: 2.5, scrollY: -3.5, phase: 2, momentum: 1, isRepeat: true)
+                            scrollX: 2.5, scrollY: -3.5, phase: 2, momentum: 1, isRepeat: true,
+                            clickCount: 2)
         let d = ev.encode()
         XCTAssertEqual(d.count, 48)
         XCTAssertEqual(d[0], InputEventType.rightMouseDown.rawValue)
@@ -154,6 +155,7 @@ final class TransportSafetyTests: XCTestCase {
         XCTAssertEqual(d[44], 2)    // phase
         XCTAssertEqual(d[45], 1)    // momentum
         XCTAssertEqual(d[46], 1)    // isRepeat
+        XCTAssertEqual(d[47], 2)    // clickCount (was padding)
         let back = try XCTUnwrap(InputEvent.decode(d))
         XCTAssertEqual(back.type, ev.type)
         XCTAssertEqual(back.keyCode, ev.keyCode)
@@ -166,6 +168,12 @@ final class TransportSafetyTests: XCTestCase {
         XCTAssertEqual(back.phase, ev.phase)
         XCTAssertEqual(back.momentum, ev.momentum)
         XCTAssertEqual(back.isRepeat, ev.isRepeat)
+        XCTAssertEqual(back.clickCount, 2)
+        // A pre-click-count client sends 0 in the old pad byte; it must read as
+        // a single click so old builds keep working.
+        var legacy = d
+        legacy[47] = 0
+        XCTAssertEqual(InputEvent.decode(legacy)?.clickCount, 1)
         XCTAssertNil(InputEvent.decode(d.prefix(47)))
     }
 

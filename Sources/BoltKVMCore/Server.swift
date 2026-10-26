@@ -497,7 +497,9 @@ final class Server: NSObject, SCStreamOutput {
             e.setIntegerValueField(.mouseEventButtonNumber, value: Int64(ev.button))
             e.flags = CGEventFlags(rawValue: ev.flags)
             if ev.type != .mouseMoved && ev.type != .leftMouseDragged && ev.type != .rightMouseDragged && ev.type != .otherMouseDragged {
-                e.setIntegerValueField(.mouseEventClickState, value: 1)
+                // A double-click is two down/up pairs; the second pair must carry
+                // click state 2 or the remote app sees two single clicks.
+                e.setIntegerValueField(.mouseEventClickState, value: Int64(max(1, ev.clickCount)))
             }
             e.post(tap: .cghidEventTap)
         case .scroll:
