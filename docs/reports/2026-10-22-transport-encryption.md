@@ -37,11 +37,11 @@ Client                                          Server
 
 | 验证项 | 方法 | 结果 |
 |---|---|---|
-| 加解密往返与篡改拒绝 | `boltkvm cryptotest`（1000 帧双向往返 + 密文/帧头/密钥 3 类篡改） | PASS |
-| X25519 协商与重键对齐 | `CryptoTests` 单元测试（11 项，含双向重键后流对齐与临时密钥敏感性） | PASS |
-| 明文注入拒绝 | `TransportSafetyTests.testPlaintextFrameIsRejectedOnceEncrypted` | PASS（返回 `EPROTO`） |
-| 并发发送 Nonce 顺序 | `TransportSafetyTests.testConcurrentSendersKeepNonceOrder`（6 线程并发） | PASS |
-| 端到端实测 | 主控端与被控端雷雳桥连接 | 日志确认 `auth: forward secrecy on (X25519)`，帧率稳定 58–60 fps |
+| 加解密往返与篡改拒绝 | `boltkvm cryptotest`（1000 帧双向往返 + 密文/帧头/密钥 3 类篡改） | 【事实】PASS |
+| X25519 协商与重键对齐 | `CryptoTests` 单元测试（11 项，含双向重键后流对齐与临时密钥敏感性） | 【事实】PASS |
+| 明文注入拒绝 | `TransportSafetyTests.testPlaintextFrameIsRejectedOnceEncrypted` | 【事实】PASS（返回 `EPROTO`） |
+| 并发发送 Nonce 顺序 | `TransportSafetyTests.testConcurrentSendersKeepNonceOrder`（6 线程并发） | 【事实】PASS |
+| 端到端实测 | 主控端与被控端雷雳桥连接 | 日志确认 `auth: forward secrecy on (X25519)`，帧率稳定 58–60 fps【未经核实】 |
 
 ## 4. 性能开销
 
@@ -58,3 +58,11 @@ Client                                          Server
 # 端到端连接验证
 .build/release/boltkvm client --host <被控端地址> --port 7474 --seconds 6
 ```
+
+## 证据分级
+
+- 【事实】第 3 节前四行的 PASS 来自 `boltkvm cryptotest` 与 XCTest 的实际输出，可用上面的命令重跑（报告记录了方法与结果）。
+- 【事实】协议常量和时序（`PacketType.authExchange = 12`、`FLAG_ENCRYPTED = 0x02`、20 字节帧头、16 字节 Poly1305 Tag、`authOk` 后与 `authExchange` 后各切一次密钥）与第 2 节时序图对应实现。
+- 【未经核实】端到端一行只有「日志确认 `auth: forward secrecy on (X25519)`、帧率稳定 58–60 fps」的结论，原始日志未入库，无法复跑核对。
+- 【推断】第 4 节「开启前后帧率与延迟无变化」建立在 Apple Silicon 硬件加速的解释上，报告没有给出开关前后的逐项对比数据。
+- 【推断】「即使预共享口令事后泄露，历史抓包也无法被解密」是对 X25519 前向保密机制的说明，报告未附抓包或离线解密的验证记录。

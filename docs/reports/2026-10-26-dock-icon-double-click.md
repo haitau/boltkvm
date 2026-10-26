@@ -47,6 +47,7 @@
 - 合成的双击打到 mini 的 Finder 标题栏后，Finder 窗口 bounds 未变化；
   该次测试的落点/焦点是否准确尚未确认。真实双击的 zoom 需要用户在
   客户端实机复核。
+- 原始命令与输出见提交 `9d028b0` 的正文/本报告摘录；日志未入库。
 
 ## 备注
 
@@ -55,3 +56,11 @@
   需要单独把它改成可缩放并调整布局。
 - 部署脚本在极短时间内 kill + open 时偶发 app 以 Foreground 注册；退出后
   重新打开会恢复 UIElement。正常登录启动不复现。
+
+## 证据分级
+
+- 【事实】部署 mini 后的 `lsappinfo` 结果：`BoltKVM`（app）为 `type="UIElement"`、`boltkvm-server` 为 `type="BackgroundOnly"`，Dock 不再出现第二个图标，进程、虚拟屏 3008×1692 与监听 7474 正常。
+- 【事实】客户端诊断日志实测第二次按下 `n=2`，服务端收到 `click=2 at (1300, 400)`；协议单测覆盖第 47 字节与旧包 0→1 的兼容。
+- 【推断】两个 Dock 图标的成因（LaunchServices 按 bundle id 把 helper 注册成第二个前台 app，以及先 `.regular` 再切 `.accessory` 的时序）是机制解释，报告未给出 `lsappinfo` 完整输出或注册时序日志。
+- 【未经核实】远端窗口双击 zoom 的实际表现：合成双击打到 mini 的 Finder 标题栏后 bounds 未变化，且该次落点/焦点是否准确未确认；真实双击需在客户端实机复核；若用户指的是 server 自己的设置面板而非远端窗口，则需单独把它改成可缩放（见备注第 1 条）。
+- 【未经核实】「部署脚本 kill + open 时偶发以 Foreground 注册、重新打开恢复」只有观察记录，未复现也未留存日志。

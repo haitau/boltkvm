@@ -55,7 +55,7 @@
 ```bash
 # 主控端重连：流式播放时杀掉被控端采集进程
 ssh <mini> 'pkill -TERM -f "boltkvm-server server"'
-tail -f <laptop>:~/Library/Logs/BoltKVM.log
+ssh <laptop> 'tail -f ~/Library/Logs/BoltKVM.log'
 # 期望：session: ... reconnecting -> auth -> decoder ready -> 恢复
 
 # 单元测试
@@ -66,3 +66,11 @@ tail -f <laptop>:~/Library/Logs/BoltKVM.log
 
 - UU 画面在改分辨率瞬间的具体表现：本次只从服务端日志确认虚拟屏被释放/重建，没有在 UU 客户端上录屏确认；「短暂黑屏/缩放」是机制推断，不是实测结论。
 - 不同 macOS/显示缓存状态下 `applySettings:` 的行为：生产 identity 已证实不可靠；未找到稳定可用的调用顺序。
+
+## 证据分级
+
+- 【事实】重连实测：对采集 helper 发 `SIGTERM` 后，主控端日志依次出现 `连接被对方还原; reconnecting` → `attempt 1/2 failed` → 重新 `auth`、`sending config 3008x1692`、`decoder ready 6016x3384`、`input: window monitor started`；mini 侧同时出现新虚拟屏 `id=301`、`listening on bridge0`、`client connected`、`capture started`。
+- 【事实】第 2 节的日志摘录：主控端上一次会话止于 `render frames=2513 elapsed=41.89s fps=60.0 drawable=6016x3384`，此后没有任何重连记录，直到手动退出；被控端 helper、虚拟屏、监听均正常。
+- 【事实】`swift build -c release` 通过、`./scripts/test.sh` 67 个 XCTest 全过；`applySettings:` 在测试 identity（`id=7`）上两步换 mode 成功，在 mini 生产 identity 上失败（`mode switch to 1728x1117 did not stick`）。
+- 【推断】「空窗约数秒」是虚拟屏重建 2.0–2.3 秒加上客户端 0.5 / 1 / 2 / 4 / 5 秒退避的估算，报告没有逐次测量从断线到恢复画面的实际时长。
+- 【未经核实】UU 改分辨率瞬间的画面表现（短暂黑屏或缩放）只由服务端日志确认了虚拟屏释放与重建，没有在 UU 客户端录屏；多次改分辨率、长时段运行的真实长期稳定性本次也未做长跑验证。

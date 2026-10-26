@@ -58,9 +58,9 @@ elapsed=15.189s fps=52.1 bitrate=2.4 Mbps avgEncodeLatency=18.67ms max=69.38ms
 
 - SCK 6K→4K 缩放与本地 WindowServer 6K→4K 缩放的画质差异（SSIM/PSNR）；
 - 4K 动态内容下的码率上限与延迟；
-- 客户端 4K 1× 模式切换的黑屏时间与恢复；
-- 端到端 glass-to-glass 延迟；
-- 4:2:0 与 4:4:4 对彩色文字边缘的影响。
+- 客户端 4K 1× 模式切换的黑屏时间与恢复（后续已实现：同目录 [m1-pipeline 报告](2026-10-21-m1-pipeline.md) 中全屏 1× 切换实测成功；黑屏时长仍未记录）；
+- 端到端 glass-to-glass 延迟（仍未完成）；
+- 4:2:0 与 4:4:4 对彩色文字边缘的影响（后续有初步数据：同目录 m1-pipeline 报告给出文字区 SSIM 0.9904、2px/4px 彩色高频棋盘格 SSIM 0.9622；4:4:4 未实测）。
 
 ## 5. 复跑
 
@@ -73,3 +73,10 @@ xcrun swiftc -O -parse-as-library tools/vt-probe.swift -o /tmp/vt-probe
 xcrun swiftc -O -parse-as-library tools/capture-encode-probe.swift -o /tmp/ce-probe
 /tmp/ce-probe 3840 2160 15
 ```
+
+## 证据分级
+
+- 【事实】合成帧探针的三档吞吐（1080p 150.1 fps、4K 49.1 fps、6K 19.0 fps）与真实桌面两段原始输出（6K 23.2 fps / 162.89 ms；4K 52.1 fps / 18.67 ms），均在报告中贴出。
+- 【推断】6K 达不到 60fps 的原因是当前硬件编码器容量不足，而非采集或雷雳链路；随机噪声帧是最坏情况，真实桌面的数值不能直接外推到全动态内容。
+- 【未经核实】6K→4K 缩放与本地 WindowServer 缩放的画质差异（SSIM/PSNR）、4K 动态内容下的码率上限与延迟，本报告未测。
+- 【未经核实】端到端 glass-to-glass 延迟仍未完成；4:2:0 对彩色文字的影响只有同目录 m1-pipeline 报告的初步 SSIM 数据，4:4:4 未实测。
