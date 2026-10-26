@@ -19,7 +19,7 @@ Grab the latest `BoltKVM-<version>.zip` and its `.sha256` from [Releases](https:
 ```bash
 V=0.12   # replace with the release version
 unzip BoltKVM-$V.zip -d BoltKVM-$V
-shasum -a 256 BoltKVM-$V.zip      # compare against the value in the .sha256 file
+shasum -a 256 -c BoltKVM-$V.zip.sha256
 open BoltKVM-$V/BoltKVM.app
 ```
 

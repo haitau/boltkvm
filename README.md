@@ -19,7 +19,7 @@
 ```bash
 V=0.12   # 换成实际发布版本
 unzip BoltKVM-$V.zip -d BoltKVM-$V
-shasum -a 256 BoltKVM-$V.zip      # 与 .sha256 文件里的值逐字对比
+shasum -a 256 -c BoltKVM-$V.zip.sha256
 open BoltKVM-$V/BoltKVM.app
 ```
 

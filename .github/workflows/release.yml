@@ -48,7 +48,9 @@ jobs:
           bash Packaging/build-app.sh
           mkdir -p out
           ditto -c -k --sequesterRsrc --keepParent dist/BoltKVM.app "out/BoltKVM-${{ steps.ver.outputs.version }}.zip"
-          shasum -a 256 "out/BoltKVM-${{ steps.ver.outputs.version }}.zip" > "out/BoltKVM-${{ steps.ver.outputs.version }}.zip.sha256"
+          # Keep the checksum file portable: users download both files into one
+          # directory, so it must name the zip without the local "out/" prefix.
+          ( cd out && shasum -a 256 "BoltKVM-${{ steps.ver.outputs.version }}.zip" > "BoltKVM-${{ steps.ver.outputs.version }}.zip.sha256" )
 
       - name: Sign with Developer ID (optional)
         env:
@@ -80,7 +82,9 @@ jobs:
           BOLTKVM_CODESIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application}" bash Packaging/build-app.sh
           rm -f "out/"*.zip "out/"*.sha256
           ditto -c -k --sequesterRsrc --keepParent dist/BoltKVM.app "out/BoltKVM-${{ steps.ver.outputs.version }}.zip"
-          shasum -a 256 "out/BoltKVM-${{ steps.ver.outputs.version }}.zip" > "out/BoltKVM-${{ steps.ver.outputs.version }}.zip.sha256"
+          # Keep the checksum file portable: users download both files into one
+          # directory, so it must name the zip without the local "out/" prefix.
+          ( cd out && shasum -a 256 "BoltKVM-${{ steps.ver.outputs.version }}.zip" > "BoltKVM-${{ steps.ver.outputs.version }}.zip.sha256" )
 
       - uses: actions/upload-artifact@v4
         with:
