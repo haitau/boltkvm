@@ -393,6 +393,13 @@ final class WindowInputCapture {
         return CGRect(x: bounds.minX, y: bounds.midY - h / 2, width: bounds.width, height: h)
     }
 
+    /// True when the pointer is above the top edge of the picture. In full
+    /// screen that band is the revealed toolbar (and the menu bar); forwarding a
+    /// click there is the click-through regression this type must not repeat.
+    static func pointerIsInChrome(pointerY: CGFloat, videoTop: CGFloat) -> Bool {
+        pointerY > videoTop
+    }
+
     private func handle(_ event: NSEvent) -> NSEvent? {
         // Escape hatch: ⌃⌥⌘Q always reaches the local Mac (disconnect + quit).
         if event.type == .keyDown,
@@ -403,6 +410,22 @@ final class WindowInputCapture {
             return nil
         }
         guard let view, let window = view.window else { return event }
+        // Local monitors receive events for every window in the app, including
+        // the fullscreen toolbar overlay. Never let an event that AppKit has
+        // already routed to another window fall through to the video hit test:
+        // the toolbar floats above the shifted picture, and treating its click
+        // as a picture click is exactly the old B16 "click-through" bug.
+        if let eventWindow = event.window, eventWindow !== window {
+            return event
+        }
+        // The first click on an inactive window belongs to AppKit (activate the
+        // window / toolbar), not to the remote Mac. Forwarding it would make a
+        // click on the toolbar act on the remote app instead.
+        if event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .otherMouseDown,
+           !window.isKeyWindow {
+            window.makeKeyAndOrderFront(nil)
+            return event
+        }
         // "Is the pointer over the picture" decides whether the remote or the
         // local app gets the event, and it has to come from the screen position:
         // in fullscreen a click on the revealing toolbar reported
@@ -420,8 +443,18 @@ final class WindowInputCapture {
         // The picture is centred with black bars, so map only inside the picture:
         // clicks on a bar belong to nobody and are passed through.
         let fit = fittedRect(in: view.bounds, aspect: aspectProvider?() ?? 0)
+        // Fullscreen reveals the toolbar as a separate overlay and shifts the
+        // picture down; points above the picture's top edge are chrome even if
+        // the theme-frame hit test happened to resolve them to the video. Use
+        // screen coordinates so this stays correct while the layout is moving.
+        let videoTopInWindow = view.convert(NSPoint(x: 0, y: view.bounds.maxY), to: nil).y
+        let videoTopInScreen = window.convertPoint(toScreen: NSPoint(x: 0, y: videoTopInWindow)).y
+        let inChrome = Self.pointerIsInChrome(pointerY: NSEvent.mouseLocation.y, videoTop: videoTopInScreen)
         let flags = UInt64(event.modifierFlags.rawValue)
-        if !inVideo || !fit.contains(point) {
+        if inChrome, event.type == .leftMouseDown {
+            log("input: chrome click kept local (pointerY=\(Int(NSEvent.mouseLocation.y)) videoTop=\(Int(videoTopInScreen)))")
+        }
+        if !inVideo || !fit.contains(point) || inChrome {
             // The pointer left the picture. Anything we forwarded and never saw
             // the release for stays down on the remote, and a stuck ⌃ turns the
             // next plain click into a control-click — i.e. a right click. Hand
