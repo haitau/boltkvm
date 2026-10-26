@@ -74,7 +74,8 @@ A single app bundle supports both roles:
 
 - Opens to the saved host list—double-click a host to connect, or click **Edit** to configure display name, IP address, port, resolution, password, color mode, and input/audio toggles per host;
 - After connecting, the window maps one stream pixel to one physical pixel (**1:1**) when it fits; otherwise it scales down proportionally to the visible area and the toolbar shows the scale percentage (only when below 100%). Full screen (⌃⌘F) on a matching display is 100%, giving the crispest text;
-- The centered toolbar provides **Mission Control** and **Desktop** shortcuts for the remote Mac, with live `fps · Mbps` metrics on the right; in full screen, the toolbar auto-hides and reveals when the pointer reaches the top edge;
+- The centered toolbar provides **Mission Control** and **Desktop** shortcuts for the remote Mac, with live `fps · Mbps` metrics on the right;
+- In full screen the toolbar is an overlay: it auto-hides and reveals after a short dwell at the top edge, and the remote picture moves down by exactly one toolbar height without being resized or re-scaled (the bottom goes off-screen). This matches macOS Screen Sharing instead of squeezing the drawable;
 - Closing the video window disconnects the session and returns to the host list;
 - Keyboard and mouse events are forwarded only while the pointer is inside the video view. Pressing keys or mouse buttons and then moving the pointer out, unfocusing the window, or disconnecting automatically synthesizes release events; modifier flags are also reconciled before each key event to prevent stuck modifiers.
 
@@ -232,7 +233,8 @@ Reboot ──► SSH ready ──► Auto-login into Aqua desktop session
 - **Stale Server Processes**: Ensure no orphaned `boltkvm server` process is running before starting the CLI server manually, or `SCStream` initialization may hang.
 - **Secure Input & Lock Screen**: macOS blocks session-level event capture and injection while the lock screen or a Secure Input password field is active; use built-in macOS Screen Sharing (VNC) to unlock a locked screen.
 - **Single-Monitor Streaming**: The server creates and captures a single virtual display per session.
-- **No Audio Output Device**: If `--audio` is enabled on a machine without a usable output device (e.g. a CI runner), the audio path degrades to silence and logs `audio: playback unavailable (...)`; video and input keep working and the server no longer crashes.
+- **No Audio Output Device**: If `--audio` is enabled on a machine without a usable output device (e.g. a CI runner), the audio path degrades to silence and logs `audio: playback unavailable (...)`; video and input keep working, the server no longer crashes, and the client retries when a device appears.
+- **Output Route Changes / Bluetooth Reconnect**: When Bluetooth headphones disconnect and reconnect, or a display with speakers is plugged in, the default output changes. The client rebuilds its audio output graph automatically (log: `audio: playing to default output (...; graph #n)`), so the session does not need to be reconnected. If audio is still silent, look for `audio: retrying output` / `audio: playback unavailable`.
 - **Virtual Display Failure**: If the virtual display still cannot be created after retries, the server exits with status 3 and lets the supervisor restart it; it never falls back to streaming the operator's local desktop.
 
 ## Milestones

@@ -13,7 +13,7 @@
 | P1-应用化 | 单应用双角色 + 内建虚拟显示 | **已完成**：阶段 1–9 全部落地，实测 GUI 12 分钟稳定运行与音频转发 | [应用化方案](2026-10-22-app-and-vdscreen-integration.md)、[音频与 GUI 稳定性报告](../reports/2026-10-23-audio-and-gui-stability.md) |
 | P1-连接管理 | 被控端列表（R1）与按主机配置分辨率（R2） | **已完成**：启动展示主机列表，连接时通过 `config` 包动态调整服务端虚拟屏尺寸 | [连接管理设计](2026-10-22-connection-manager-design.md) |
 | P1-密码 | 8 位连接密码、256 位静态密钥与前向保密 | **已完成**：首次启动自动生成 8 位口令（PBKDF2 拉伸），支持切换 64 个十六进制字符（256 位）的静态密钥，每会话 X25519 密钥交换 | [ADR-0004](../adr/0004-psk-over-pairing-code.md) |
-| P1-发布 | GitHub Actions 自动构建与发布 | **已就绪**：`ci.yml`（构建 + 全部 XCTest 单元测试（当前 71 项；无音频输出设备的 runner 会跳过音频回归）+ selftest + cryptotest + 打包）与 `release.yml`（推送 `v*` 标签自动发布） | [发布流程](../releasing.md) |
+| P1-发布 | GitHub Actions 自动构建与发布 | **已就绪**：`ci.yml`（构建 + 全部 XCTest 单元测试（当前 77 项；无音频输出设备的 runner 会跳过音频回归）+ selftest + cryptotest + 打包）与 `release.yml`（推送 `v*` 标签自动发布） | [发布流程](../releasing.md) |
 | B5 | 解码与 GUI 呈现延迟 SLO 核定 | **已完成**：解码链路 P95 25.4–27.0 ms（< 33 ms）；GUI 采集→上屏 P95 33.2 ms（< 50 ms） | [B5 延迟报告](../reports/2026-10-23-b5-latency.md) |
 | B6 | 服务端慢客户端防堆积与超时保护 | **已完成**：发送队列限制 4 帧 / 8 MB 上限并配合 `SO_SNDTIMEO` 2 秒超时，防止慢客户端拖垮服务端内存 | — |
 | B7 | GUI 呈现排队消除 | **已完成**：`Renderer` 改为到帧即时泵送 `view.draw()`，消除 60Hz 显示链路平均 8 ms 等待 | [B5 延迟报告](../reports/2026-10-23-b5-latency.md) |
@@ -28,6 +28,7 @@
 | 睡眠/唤醒、物理拔插雷雳线、网络切换恢复 | 待人工实测 | 需人工在物理设备前执行合盖与拔插操作 |
 | Glass-to-glass 高速相机延迟基准 | 待外部设备实测 | 需使用外部高速相机同时拍摄本地与远端显示器测量含面板响应的物理延迟 |
 | macOS 大版本升级后 TCC 回归 | 按需执行 | 待系统升级时使用 `boltkvm doctor` 验证 |
+| 蓝牙耳机物理断电/重连后音频恢复 | 修复后已用「默认输出来回切换」验证 | 需用户按原始步骤实际关闭耳机再连接复核；等价触发见 [B18 报告](../reports/2026-10-26-audio-route-and-fullscreen-chrome.md) |
 | 本地构建版本号盖章 | **下次发版一并解决** | `Packaging/build-app.sh` 只拷 `Info.plist`、不写版本，本地包恒显示 `0.1.0`/`1`；`release.yml` 仅在 `v*` 标签时用 tag 与 run number 覆盖。下次发版时在 `build-app.sh` 用 `git describe --tags --always --dirty` 写 `CFBundleShortVersionString`、用 `git rev-list --count HEAD` 写 `CFBundleVersion`，并同步 README/releasing。注意重建会改 cdhash，需重新授权一次 |
 
 ## 3. 历史问题与排查备忘
@@ -47,5 +48,7 @@
 | **B15** 键鼠发送阻塞主线程导致 UI 卡顿与 tap 被禁用 | **已修**：新增 `InputSender`，发送移到独立串行队列，队列上限 64，拥塞时丢弃过时输入；按键/鼠标释放包绕过上限，避免远端卡住按键或鼠标键。发送不再占用主线程，全局 tap 不会因回调超时被系统禁用 |
 | **B16** 全屏下工具栏点击被当成画面点击转发远端 | **已修**：全屏时工具栏浮在内容视图之上，`locationInWindow` 会落在画面区域内，导致「调度中心 / 桌面」点击被转发并被远端吞掉；现改为按屏幕坐标对主题框做命中测试，工具栏与黑边点击留在本地 |
 | **B17** ProRes 一律按 10-bit 解码 | **已修**：ProRes 422 线路上是 10-bit 4:2:2，原实现标准模式让 VideoToolbox 解成 8-bit YUV，量化发生在解码步；现 ProRes 统一解到 `422YpCbCr10`，标准模式也不再降 8-bit，GPU 实测 1.8 ms |
+| **B18** 蓝牙耳机断开重连后音频不再播放 | **已修**：旧输出图在路线变化后仍报 `running/playing`，但缓冲区只进不出（`scheduled` 涨到 256）。现每次默认输出变化都重建 `AVAudioEngine` + `AVAudioPlayerNode`，CoreAudio 监听 + 2 秒健康检查兜底，150 ms 去重；实测来回切换输出 graph #1→#2→#3，见 [报告](../reports/2026-10-26-audio-route-and-fullscreen-chrome.md) |
+| **B19** 全屏工具栏浮现时远端画面变形/显示不全 | **已修**：普通窗口样式下 AppKit 会把全屏窗口从 1692 pt 缩到 1640 pt，Metal drawable 比例变化导致画面重缩放。现改用 `.fullSizeContentView`，工具栏只作浮层，画面保持原尺寸整体下移 52 pt；点击工具栏仍由本地消费，见 [报告](../reports/2026-10-26-audio-route-and-fullscreen-chrome.md) |
 | **环境提示**：替换二进制时出现 `SIGKILL (Code Signature Invalid)` | **进程运行中覆盖二进制**：macOS `taskgated` 检测到磁盘签名与内存映射不一致会直接杀死进程；重新部署前需先停止正在运行的 `BoltKVM` 与 `boltkvm-server`（`scripts/deploy-app.sh` 已内置） |
 | **环境提示**：GUI 客户端报 `No route to host` 而同机 CLI 正常 | **本地网络 TCC 权限未开**：macOS 15+ 将局域网/雷雳桥访问纳入「本地网络」权限，ad-hoc 重编译会重置该授权。前往「系统设置 → 隐私与安全性 → 本地网络」勾选 `BoltKVM` 即可，日常开发建议使用 `BoltKVM Local` 自签名证书 |

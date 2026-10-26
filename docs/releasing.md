@@ -39,7 +39,7 @@ git push origin v0.11
 3. 运行 `selftest` 与 `cryptotest`；
 4. 执行 `Packaging/build-app.sh` 组装应用并上传为构建产物（Artifact）。
 
-当前 CI 跑全部 XCTest（当前 71 项，不写死数量）；没有音频输出设备的 runner 会跳过音频回归项（见 [音频设备报告](reports/2026-10-26-audio-no-output-device.md)）。
+当前 CI 跑全部 XCTest（当前 77 项，不写死数量）；没有音频输出设备的 runner 会跳过音频回归项（见 [音频设备报告](reports/2026-10-26-audio-no-output-device.md)）。
 
 ## 开发环境与工具链
 

@@ -26,6 +26,14 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private var chromeTimer: Timer?
     private var appliedFullScreen: Bool?
     private var didLogInvisibleWindow = false
+    /// Height of the native titlebar + toolbar band, measured while windowed.
+    /// Full screen reuses it for the one tick between "toolbar shown" and the
+    /// window reporting the new content layout rect.
+    private var chromeHeight: CGFloat = 52
+    /// When the pointer first reached the top edge; the toolbar only appears
+    /// after a short dwell so brushing the edge mid-click does not move the
+    /// picture.
+    private var topEdgeEnteredAt: Date?
 
     private static let tbRemote = NSToolbarItem.Identifier("boltkvm.remote")
     private static let tbStatus = NSToolbarItem.Identifier("boltkvm.status")
@@ -47,7 +55,12 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         self.preset = preset
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 760),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            // Full-size content is what keeps AppKit from *resizing* the
+            // fullscreen window when the toolbar reappears. Without it the
+            // window loses the toolbar's height, the Metal drawable changes
+            // aspect, and the remote picture is rescaled instead of moving down
+            // as one piece (the Screen Sharing behaviour).
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -69,19 +82,19 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     // MARK: - Layout
 
     private func build(in window: NSWindow) {
-        videoView = NSView()
+        videoView = NSView(frame: .zero)
         videoView.wantsLayer = true
         videoView.layer?.backgroundColor = NSColor.black.cgColor
-        videoView.translatesAutoresizingMaskIntoConstraints = false
+        videoView.translatesAutoresizingMaskIntoConstraints = true
 
         let content = window.contentView!
+        // The video is laid out by `layoutVideo()` rather than pinned to all
+        // four edges: in fullscreen the toolbar is an overlay and the picture
+        // has to move down without being resized.
+        content.wantsLayer = true
+        content.layer?.backgroundColor = NSColor.black.cgColor
         content.addSubview(videoView)
-        NSLayoutConstraint.activate([
-            videoView.topAnchor.constraint(equalTo: content.topAnchor),
-            videoView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            videoView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            videoView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-        ])
+        layoutVideo()
 
         do {
             guard let device = MTLCreateSystemDefaultDevice() else {
@@ -137,6 +150,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         toolbarStatusLabel.alignment = .right
         installToolbar()
         setupFullScreenChrome()
+        layoutVideo()
     }
 
     private func stopReportTimer(report: Bool) {
@@ -206,6 +220,54 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Fullscreen chrome
 
+    /// Where the remote picture lives inside the content view.
+    ///
+    /// Windowed: below the titlebar + toolbar band, which is what the old
+    /// Auto Layout pinning did.
+    /// Fullscreen, toolbar hidden: the whole screen.
+    /// Fullscreen, toolbar shown: the same size, shifted down by the toolbar
+    /// height. The top of the remote screen starts just below the toolbar and
+    /// the bottom goes off-screen, exactly like Screen Sharing; the drawable is
+    /// never resized, so the picture cannot change aspect ratio. `chrome` is
+    /// the band height (52 pt on this macOS), passed in so the geometry is unit
+    /// testable without a window.
+    enum ChromeLayout {
+        static func videoFrame(content: CGSize, chrome: CGFloat,
+                               fullScreen: Bool, toolbarVisible: Bool) -> CGRect {
+            let width = max(0, content.width)
+            let height = max(0, content.height)
+            if fullScreen, toolbarVisible {
+                let shift = min(max(0, chrome), height)
+                return CGRect(x: 0, y: -shift, width: width, height: height)
+            }
+            let visibleHeight = fullScreen ? height : max(0, height - chrome)
+            return CGRect(x: 0, y: 0, width: width, height: visibleHeight)
+        }
+    }
+
+    /// Recompute the video frame from the window's current chrome state. Cheap
+    /// enough to call from the 5 Hz fullscreen poll.
+    private func layoutVideo() {
+        guard let window, let content = window.contentView else { return }
+        let bounds = content.bounds
+        let measured = max(0, bounds.height - window.contentLayoutRect.height)
+        if measured > 0 { chromeHeight = measured }
+        let toolbarVisible = window.toolbar?.isVisible ?? false
+        // The tick that reveals the toolbar runs before AppKit publishes the
+        // new contentLayoutRect; use the last known band height for that frame
+        // instead of showing one unshifted frame.
+        let chrome = measured > 0 ? measured : (toolbarVisible ? chromeHeight : 0)
+        let frame = ChromeLayout.videoFrame(
+            content: bounds.size,
+            chrome: chrome,
+            fullScreen: window.styleMask.contains(.fullScreen),
+            toolbarVisible: toolbarVisible
+        )
+        if videoView.frame != frame {
+            videoView.frame = frame
+        }
+    }
+
     /// Neither the `windowWillEnterFullScreen` delegate callbacks nor the
     /// did-* notifications fired for this window (verified with temporary logs),
     /// so the fullscreen chrome is polled instead: the style mask is the truth,
@@ -236,21 +298,45 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         if appliedFullScreen != fullScreen {
             appliedFullScreen = fullScreen
             window.toolbar?.isVisible = !fullScreen
-            log("fs: chrome applied (fullscreen=\(fullScreen))")
+            topEdgeEnteredAt = nil
+            layoutVideo()
+            log("fs: chrome applied (fullscreen=\(fullScreen), fullSizeContent=true)")
         }
-        guard fullScreen, let screen = window.screen else { return }
+        guard fullScreen, let screen = window.screen else {
+            layoutVideo()
+            return
+        }
         let y = NSEvent.mouseLocation.y
         let top = screen.frame.maxY
         let visible = window.toolbar?.isVisible ?? false
-        // Revealing the toolbar pushes the pointer down by the toolbar height,
-        // so the hide threshold has to clear that band or the two states fight.
-        if y > top - 4, !visible {
-            window.toolbar?.isVisible = true
-            log("fs: toolbar shown at the top edge")
-        } else if y < top - 110, visible {
-            window.toolbar?.isVisible = false
-            log("fs: toolbar hidden")
+        // A short dwell at the edge avoids popping the chrome (and moving the
+        // picture) when the pointer merely crosses the top on its way to a
+        // remote menu item.
+        if y > top - 4 {
+            if visible {
+                topEdgeEnteredAt = nil
+            } else {
+                if topEdgeEnteredAt == nil { topEdgeEnteredAt = Date() }
+                if let entered = topEdgeEnteredAt, Date().timeIntervalSince(entered) >= 0.2 {
+                    window.toolbar?.isVisible = true
+                    topEdgeEnteredAt = nil
+                    layoutVideo()
+                    log("fs: toolbar shown at the top edge (content shifted down by \(Int(chromeHeight)) pt)")
+                }
+            }
+        } else {
+            topEdgeEnteredAt = nil
+            // Revealing the toolbar moves the pointer's relative position by the
+            // toolbar height; the hide threshold has to clear that band or the
+            // two states fight (the old 110 pt hysteresis).
+            if y < top - 110, visible {
+                window.toolbar?.isVisible = false
+                layoutVideo()
+                log("fs: toolbar hidden")
+            }
         }
+        // Covers the window/content relayout that follows a toolbar change.
+        layoutVideo()
     }
 
     deinit {
@@ -291,32 +377,44 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
     /// Match the window to the remote picture, at 1:1 when that fits.
     ///
-    /// This used to size the window from its *current* width (1200 pt right after
-    /// creation), so a 6016x3384 stream landed in a 2400x1350 drawable — a 2.5x
-    /// downscale that makes every glyph soft, and that is what "整个界面糊了"
-    /// looked like. The target is now one stream pixel per physical pixel
-    /// (pixel size / backing scale), clamped to the visible screen; when the
-    /// clamp bites, the toolbar shows the resulting percentage so the number is
-    /// visible instead of guessed. Full screen gives 1:1 on a matching display.
+    /// The window is now full-size content (`styleMask` contains
+    /// `.fullSizeContentView`), so its content height includes the titlebar +
+    /// toolbar band. The *picture* height is therefore content height minus
+    /// that band; the old calculation added the chrome through
+    /// `frameRect(forContentRect:)`, which no longer grows the frame. Keeping
+    /// the picture area at one stream pixel per physical pixel is what makes
+    /// text sharp, and full screen on a matching display is still 100%.
     private func fitWindowToRemote(width: Int, height: Int) {
         guard width > 0, height > 0, let window else { return }
-        window.contentAspectRatio = NSSize(width: width, height: height)
+        remotePixelSize = NSSize(width: width, height: height)
+
+        // A resolution change while fullscreen must not resize the window: the
+        // renderer letterboxes the new aspect, and layoutVideo keeps the
+        // toolbar shift intact.
+        if window.styleMask.contains(.fullScreen) {
+            layoutVideo()
+            updateScalePercent()
+            log("window: remote \(width)x\(height) px while fullscreen; drawable left unchanged")
+            return
+        }
+
         let screen = window.screen ?? NSScreen.main
         let scale = screen?.backingScaleFactor ?? 2
-        let ideal = NSSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale)
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let chrome: CGFloat = 80  // title bar + toolbar
+        let chrome = measuredChromeHeight(in: window)
+        let ideal = NSSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale)
         let maxWidth = visible.width
         let maxHeight = max(400, visible.height - chrome)
-        var content = ideal
+        var picture = ideal
         if ideal.width > maxWidth || ideal.height > maxHeight {
             let factor = min(maxWidth / ideal.width, maxHeight / ideal.height)
-            content = NSSize(width: (ideal.width * factor).rounded(.down),
+            picture = NSSize(width: (ideal.width * factor).rounded(.down),
                              height: (ideal.height * factor).rounded(.down))
         }
-        // Resize around the centre of the visible area, not around the old
-        // bottom-left corner: setContentSize keeps the origin, so a window that
-        // grew from a 1200x760 default ended up hanging off the top-right edge.
+        // Keep the window's content aspect equal to picture + chrome; at the
+        // fitted size that gives the picture the remote aspect exactly.
+        window.contentAspectRatio = NSSize(width: picture.width, height: picture.height + chrome)
+        let content = NSSize(width: picture.width, height: picture.height + chrome)
         let frameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: content)).size
         let origin = NSPoint(x: (visible.width - frameSize.width) / 2,
                              y: (visible.height - frameSize.height) / 2)
@@ -324,13 +422,23 @@ final class ClientController: NSWindowController, NSWindowDelegate {
                            y: visible.minY + origin.y.rounded(.down),
                            width: frameSize.width, height: frameSize.height)
         window.setFrame(frame, display: true)
-        remotePixelSize = NSSize(width: width, height: height)
-        let percent = Int(((content.width * scale / CGFloat(width)) * 100).rounded())
+        layoutVideo()
+        let percent = Int(((picture.width * scale / CGFloat(width)) * 100).rounded())
         scalePercent = percent
         refreshToolbarStatus()
-        log(String(format: "window: remote %dx%d px -> content %.0fx%.0f pt (%d%% of 1:1, screen %.0fx%.0f, origin %.0f,%.0f)",
-                   width, height, content.width, content.height, percent,
-                   visible.width, visible.height, frame.minX, frame.minY))
+        log(String(format: "window: remote %dx%d px -> picture %.0fx%.0f pt (%d%% of 1:1, chrome %.0f, window %.0fx%.0f, screen %.0fx%.0f, origin %.0f,%.0f)",
+                   width, height, picture.width, picture.height, percent, chrome,
+                   frame.width, frame.height, visible.width, visible.height, frame.minX, frame.minY))
+    }
+
+    /// Native titlebar + toolbar band height in the current window. Measured
+    /// rather than hard-coded: `.unified` vs `.unifiedCompact` and future macOS
+    /// releases differ, and fullscreen must shift by exactly that band.
+    private func measuredChromeHeight(in window: NSWindow) -> CGFloat {
+        let contentHeight = window.contentView?.bounds.height ?? window.frame.height
+        let measured = max(0, contentHeight - window.contentLayoutRect.height)
+        if measured > 0 { chromeHeight = measured }
+        return measured > 0 ? measured : chromeHeight
     }
 
     /// `已连接 · 24 fps · 385 Mbps · 92%` lives in the toolbar's trailing edge.
@@ -392,6 +500,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     }
 
     func windowDidResize(_ notification: Notification) {
+        layoutVideo()
         updateScalePercent()
     }
 
