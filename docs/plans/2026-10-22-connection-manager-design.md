@@ -1,6 +1,6 @@
 # 连接管理器（R1/R2/R3）实现与协议规范
 
-- 状态：已实现（2026-10-23）
+- 状态：已实现（2026-10-23；2026-10-26 补入主机的色彩模式字段与自定义尺寸键变更）
 - 关联：[连接管理需求](2026-10-22-connection-manager.md)
 
 ## 1. 数据模型与存储（R1）
@@ -14,12 +14,15 @@ struct SavedHost: Codable, Identifiable, Equatable {
     var pskAccount: String?   // keys/ 目录下的凭据文件名，nil 时回退读取 ~/.boltkvm-key
     var width: Int?           // 请求的虚拟屏逻辑宽度（见第 2 节）
     var height: Int?          // 请求的虚拟屏逻辑高度
+    var forwardInput: Bool?   // nil：沿用全局开关；编辑器会显式写入
+    var audio: Bool?          // 同上
+    var color: UInt8?         // 0 = 标准 BT.709 8-bit，1 = 广色域 10-bit P3；nil 兼容旧记录
     var lastConnected: Date?
 }
 ```
 
 - **主机列表文件**：保存在 `~/Library/Application Support/BoltKVM/hosts.json`。首次启动若列表为空且存在旧版 `Prefs.host/port`，自动迁移为第一条记录并清理旧偏好键；
-- **分辨率预设**：内置 `1280×720` 至 `3840×2160` 常用比例预设，支持添加自定义分辨率（宽高范围 `640...7680` × `480...4320` 且为偶数，持久化在 `UserDefaults` 的 `hosts.customResolutions`）；
+- **分辨率预设**：内置六个预设，前两个是本项目目标尺寸 `3008×1692`、`1728×1117`，后接 `1920×1080`、`2560×1440`、`2880×1620`、`3840×2160`；支持添加自定义分辨率（宽高范围 `640...7680` × `480...4320`，允许奇数，1× 码流在服务端向下取偶），持久化在 `UserDefaults` 的 `display.customSizes`（旧键 `hosts.customResolutions` 仅作为迁移来源读取）；
 - **画面质量归属**：编码画质（「标准」与「清晰」）属于被控端全局设置，在被控端菜单栏或设置面板中切换；
 - **密码生成与保存**：
   - 被控端首次启动无密钥时，自动生成 8 位连接密码（剔除 `0/o/1/l/i` 的小写字母+数字）写入 `~/.boltkvm-key`（`0600`），并在被控端设置面板中展示密码与 SHA-256 指纹；
@@ -40,8 +43,8 @@ struct SavedHost: Codable, Identifiable, Equatable {
 struct SessionConfig (8 bytes, big-endian):
   u16 width      // 逻辑宽度 (320...7680)
   u16 height     // 逻辑高度 (240...4320)
-  u8  quality    // 0 = standard (最大编码宽度 3840), 1 = pixel (2x backing 原画)
-  u8  reserved
+  u8  quality    // 0 = standard (最大编码宽度 3840), 1 = pixel (2x backing 原画, 宽度上限 8192)
+  u8  color      // 0 = 标准 BT.709 8-bit, 1 = 广色域 10-bit P3（旧版服务端读作 0）
   u16 reserved
 ```
 

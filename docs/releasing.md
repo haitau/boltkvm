@@ -6,8 +6,8 @@
 
 ```bash
 # Info.plist 中的版本号仅为默认值，CI 构建时会用 tag 覆盖
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.11
+git push origin v0.11
 ```
 
 `.github/workflows/release.yml` 执行步骤：
@@ -21,6 +21,8 @@ git push origin v0.2.0
 
 也可在 GitHub Actions 页面选择 Release 工作流手动触发（`workflow_dispatch`）。
 
+**只推送 `main` 不会发布**：`release.yml` 只监听 `v*` 标签，普通提交只触发 `ci.yml`。因此日常合并、文档修正都不需要担心误发版；要发版时先确认 `main` 的 CI 全绿，再打标签。
+
 ## 持续集成（CI）
 
 `.github/workflows/ci.yml` 在每次推送 `main` 或发起 PR 时执行：
@@ -30,6 +32,20 @@ git push origin v0.2.0
    音频回归项，GitHub 的 macOS runner 就属于这种）；
 3. 运行 `selftest` 与 `cryptotest`；
 4. 执行 `Packaging/build-app.sh` 组装应用并上传为构建产物（Artifact）。
+
+当前 CI 跑 71 个 XCTest；没有音频输出设备的 runner 会跳过音频回归项（见 [音频设备报告](reports/2026-10-26-audio-no-output-device.md)）。
+
+## 开发环境与工具链
+
+CI 使用 `macos-15` runner 自带的 **Swift 6.1.2**，本地通常更新（例如 6.4 / SDK 27）。两者在类型检查上可能不同，出现过只有 CI 报错的情况：
+
+- `Sources/BoltKVMCore/InputCapture.swift` 的 14 项事件掩码或链在 6.1.2 上触发 `the compiler is unable to type-check this expression in reasonable time`，本地 6.4 不复现；改为事件类型列表 + `reduce` 折叠后通过，掩码值不变。详见 [报告](reports/2026-10-26-input-event-mask.md)。
+
+实践建议：
+
+- 不要写长串整数字面量的按位或/算术表达式，尤其是把 `1 << …` 与枚举转换混在一起；先收集到数组再用 `reduce` 折叠；
+- 本地编译通过不代表 CI 通过；遇到只在 CI 出现的类型检查超时，可下载对应的 swift.org 工具链加最小类型桩复现，避免盲改；
+- 以 CI 结果作为发布门槛，本机 SDK 较新时尤其如此。
 
 ## 签名与公证限制
 

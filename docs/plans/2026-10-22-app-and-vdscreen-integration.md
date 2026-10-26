@@ -1,6 +1,6 @@
 # 内建虚拟显示与应用化：方案与实施记录
 
-- 状态：已完成（阶段 1–9 全部落地并实测，2026-10-22）
+- 状态：已完成（阶段 1–9 全部落地并实测，2026-10-22；阶段 7–9 的逐项证据见第 4 节与后续的音频/GUI、B5 报告）
 - 日期：2026-10-22
 - 关联：[ADR 0001](../adr/0001-thin-self-built-layer.md)、[应用化验证报告](../reports/2026-10-22-app-conversion.md)
 
@@ -40,12 +40,17 @@ Sources/
 
 ```c
 typedef struct BKVVirtualDisplay BKVVirtualDisplay;
-BKVVirtualDisplay *BKVVirtualDisplayCreate(const char *name, int w, int h, int hiDPI,
-                                           void (*onTermination)(void *ctx), void *ctx);
-uint32_t BKVVirtualDisplayGetDisplayID(BKVVirtualDisplay *d);
-int      BKVVirtualDisplayIsHiDPI(uint32_t displayID, int logicalW, int logicalH);
-void     BKVVirtualDisplayDestroy(BKVVirtualDisplay *d);
+
+BKVVirtualDisplay *BKVVirtualDisplayCreate(const char *name, int width, int height, int hiDPI);
+uint32_t BKVVirtualDisplayID(const BKVVirtualDisplay *display);
+int      BKVVirtualDisplayIsHiDPI(const BKVVirtualDisplay *display);
+int      BKVVirtualDisplayBackingPixels(const BKVVirtualDisplay *display, int *outWidth, int *outHeight);
+void     BKVVirtualDisplaySetLostHandler(BKVVirtualDisplay *display,
+                                         void (*handler)(void *context), void *context);
+void     BKVVirtualDisplayDestroy(BKVVirtualDisplay *display);
 ```
+
+`BKVVirtualDisplayCreate` 只在主线程调用：私有 API 会把工作交给主队列，函数内部泵主 run loop 等待模式生效（HiDPI 协商时最长约 4 秒）；系统拒绝创建时返回 `NULL`，服务端据此以退出码 `3` 退出，由父进程重启。
 
 ## 3. 单应用双角色架构
 
@@ -90,3 +95,5 @@ void     BKVVirtualDisplayDestroy(BKVVirtualDisplay *d);
 | 7 | 中英双语本地化 | `Localizable.strings` 覆盖全部界面文案，并由 `LocalizationTests` 校验键值完整性 |
 | 8 | 主控端免 TCC 窗口输入捕获 | `NSEvent` 本地监听 + 画面区域 `hitTest` 分流，移出画面或失焦自动释放修饰键 |
 | 9 | 无头虚拟屏防休眠 | 服务端常驻持有 `PreventUserIdleDisplaySleep` 断言，消除静止桌面休眠冻屏问题 |
+
+阶段 7–9 的原始验收数据不在本文件，分别见 [应用化报告](../reports/2026-10-22-app-conversion.md)、[音频与 GUI 稳定性报告](../reports/2026-10-23-audio-and-gui-stability.md) 与 [B5 延迟报告](../reports/2026-10-23-b5-latency.md)。
