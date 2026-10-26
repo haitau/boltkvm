@@ -80,6 +80,27 @@ final class InputCapture {
         return sender
     }()
 
+    /// Event types the tap subscribes to. Written as a list folded into a mask
+    /// rather than one long `(1 << …) | (1 << …)` chain: with Swift 6.0/6.1
+    /// (the toolchain GitHub's macos-15 runners ship) that chain makes the type
+    /// checker give up with "unable to type-check this expression in reasonable
+    /// time", while newer toolchains accept it in ~2 ms. Keep the literals out
+    /// of the fold so the solver has nothing to disambiguate.
+    static let capturedEventTypes: [CGEventType] = [
+        .keyDown, .keyUp, .flagsChanged,
+        .mouseMoved,
+        .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+        .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+        .otherMouseDown, .otherMouseUp, .otherMouseDragged,
+        .scrollWheel,
+    ]
+
+    /// One bit per event type in `capturedEventTypes`, fully typed as
+    /// `CGEventMask` (UInt64) so no integer-literal overloading is involved.
+    static let eventMask: CGEventMask = capturedEventTypes.reduce(into: CGEventMask(0)) { mask, type in
+        mask |= CGEventMask(1) << CGEventMask(type.rawValue)
+    }
+
     init(conn: TCPConnection, tapLocation: CGEventTapLocation = .cgSessionEventTap) {
         self.conn = conn
         self.tapLocation = tapLocation
@@ -91,21 +112,7 @@ final class InputCapture {
             log("input: listen-event access not granted (Input Monitoring)")
             return false
         }
-        let mask: CGEventMask =
-            (1 << CGEventType.keyDown.rawValue) |
-            (1 << CGEventType.keyUp.rawValue) |
-            (1 << CGEventType.flagsChanged.rawValue) |
-            (1 << CGEventType.mouseMoved.rawValue) |
-            (1 << CGEventType.leftMouseDown.rawValue) |
-            (1 << CGEventType.leftMouseUp.rawValue) |
-            (1 << CGEventType.leftMouseDragged.rawValue) |
-            (1 << CGEventType.rightMouseDown.rawValue) |
-            (1 << CGEventType.rightMouseUp.rawValue) |
-            (1 << CGEventType.rightMouseDragged.rawValue) |
-            (1 << CGEventType.otherMouseDown.rawValue) |
-            (1 << CGEventType.otherMouseUp.rawValue) |
-            (1 << CGEventType.otherMouseDragged.rawValue) |
-            (1 << CGEventType.scrollWheel.rawValue)
+        let mask = Self.eventMask
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
