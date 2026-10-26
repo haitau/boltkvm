@@ -6,7 +6,7 @@
 
 ## 1. 现象
 
-CI 的 `swift build -c release` 在 `Sources/BoltKVMCore/InputCapture.swift:94` 失败：
+CI 的 `swift build -c release` 在 `Sources/BoltKVMCore/InputCapture.swift` 的事件掩码表达式（修复前第 94 行，位于 `start()`）失败：
 
 ```text
 error: the compiler is unable to type-check this expression in reasonable time
