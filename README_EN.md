@@ -12,17 +12,30 @@ Low-latency screen control between two Macs. A single app bundle serves both rol
 - **Unidirectional Control**: The controller only captures input and renders video, while the controlled Mac only captures the screen and injects input—eliminating feedback loops by topology.
 - **Automatic Reconnect**: If the controlled Mac restarts its capture helper (resolution change, update) or the link drops briefly, the controller reconnects and shows the attempt count instead of freezing on the last frame. A wrong key still fails immediately.
 
+## Download & Install
+
+Grab the latest `BoltKVM-<version>.zip` and its `.sha256` from [Releases](https://github.com/haitau/boltkvm/releases):
+
+```bash
+V=0.11   # replace with the release version
+unzip BoltKVM-$V.zip -d BoltKVM-$V
+shasum -a 256 BoltKVM-$V.zip      # compare against the value in the .sha256 file
+open BoltKVM-$V/BoltKVM.app
+```
+
+Release builds are ad-hoc signed: allow the app in **System Settings → Privacy & Security** on first launch. For stable TCC grants, create and trust a local certificate as described under **Required Permissions**, or build from source.
+
 ## Measured Performance (2026-10-23)
 
 | Metric | Target | Measured | Status |
 |---|---|---|---|
 | Visual fidelity | SSIM > 0.98 | SSIM **0.984** | Pass |
-| Decode throughput | 60 fps | **57.6–58.0 fps** | Pass |
-| Capture-to-decode latency | P95 < 33 ms | P95 **25.4–27.0 ms** | Pass (all 20 sampling windows within 33 ms) |
+| Decode throughput | 60 fps | **54.1–58.0 fps** (three runs) | Pass |
+| Capture-to-decode latency | P95 < 33 ms | P95 **25.4–27.0 ms** | Pass (all three decode runs stayed under 33 ms) |
 | GUI capture-to-present latency | P95 < 50 ms | P50 **31.0 ms**, P95 **33.2 ms**, 60.0 fps | Pass ([B5 Latency Report](docs/reports/2026-10-23-b5-latency.md)) |
 | Stability | 8-hour soak | 8h00m01s: 0 disconnects, 0 decode errors, 0 watchdog rebuilds | Pass |
 | Audio | 0 bytes by default | Off by default; 1.54 Mbps / −34 dBFS when enabled, RSS 134→135 MB over 12 min | Pass (optional) |
-| Input continuity | 8 hours without dropped events | 466 forwarded batches over 8h, 0 tap failures (CLI client; 8h GUI soak pending) | Partial |
+| Input continuity | 8 hours without dropped events | 466 forwarded batches over 8h, 0 tap failures (CLI client; the probe delivered 458 events, so the 8-event difference is unverified; 8h GUI soak pending) | Partial |
 
 Decode latency and GUI presentation latency are tracked separately: capture-to-decode P95 stays under 27 ms, while the GUI renderer triggers `MTKView.draw()` immediately upon frame arrival rather than waiting for the next display vsync tick, keeping capture-to-present P95 at 33.2 ms. See the [B5 Latency Report](docs/reports/2026-10-23-b5-latency.md) and [Audio & GUI Stability Report](docs/reports/2026-10-23-audio-and-gui-stability.md) for raw logs.
 
@@ -30,7 +43,7 @@ Decode latency and GUI presentation latency are tracked separately: capture-to-d
 
 ```text
 [Controlled Mac]                                  [Controller]
-Virtual Display (default 3008×1692 logical @2x → 6016×3384 pixels, configurable)
+Virtual Display (app default 3008×1692 logical @2x → 6016×3384 pixels, configurable; CLI defaults to 3840×2160 capture with a 1920×1080 logical display)
         │
 ScreenCaptureKit capture
         │
@@ -39,7 +52,7 @@ VideoToolbox encode (ProRes 422 / HEVC) ── TCP ──► VideoToolbox decode
 CGEvent injection         ◄── input & audio ────── CGEvent/NSEvent capture + Metal present
 ```
 
-- **Transport & Security**: Raw TCP with a 20-byte big-endian frame header (`TCP_NODELAY` enabled). After HMAC-SHA256 challenge–response authentication, both peers exchange ephemeral X25519 public keys and derive directional session keys with HKDF-SHA256 over the pre-shared key. Every frame is sealed with ChaCha20-Poly1305 (frame header bound as AAD), providing forward secrecy and automatic rekeying every $2^{20}$ packets.
+- **Transport & Security**: Raw TCP with a 20-byte big-endian frame header (`TCP_NODELAY` enabled). After HMAC-SHA256 challenge–response authentication, both peers exchange ephemeral X25519 public keys and derive directional session keys with HKDF-SHA256 over the pre-shared key. Every frame is sealed with ChaCha20-Poly1305 (frame header bound as AAD), providing forward secrecy. Keys are negotiated per connection; there is no periodic packet-count rekey.
 - **Video Codec**: Defaults to ProRes 422 ([ADR-0003](docs/adr/0003-prores-422-primary.md)); switchable to HEVC via `--codec hevc`.
 
 ## App Mode (Recommended)
@@ -59,11 +72,24 @@ A single app bundle supports both roles:
 
 **Controller** (single window)
 
-- Opens to the saved host list—double-click a host to connect, or click **Edit** to configure display name, IP address, port, resolution, password, and input/audio toggles per host;
-- The video window automatically locks its aspect ratio to match the remote display;
+- Opens to the saved host list—double-click a host to connect, or click **Edit** to configure display name, IP address, port, resolution, password, color mode, and input/audio toggles per host;
+- After connecting, the window maps one stream pixel to one physical pixel (**1:1**) when it fits; otherwise it scales down proportionally to the visible area and the toolbar shows the scale percentage (only when below 100%). Full screen (⌃⌘F) on a matching display is 100%, giving the crispest text;
 - The centered toolbar provides **Mission Control** and **Desktop** shortcuts for the remote Mac, with live `fps · Mbps` metrics on the right; in full screen, the toolbar auto-hides and reveals when the pointer reaches the top edge;
 - Closing the video window disconnects the session and returns to the host list;
 - Keyboard and mouse events are forwarded only while the pointer is inside the video view. Pressing keys or mouse buttons and then moving the pointer out, unfocusing the window, or disconnecting automatically synthesizes release events; modifier flags are also reconciled before each key event to prevent stuck modifiers.
+
+## Color Modes
+
+The controller's **Edit → Color** offers two choices; the setting is sent to the server in the `config` packet:
+
+| Mode | Capture | Encode | Bitrate (6016×3384 desktop) | When to use |
+|---|---|---|---|---|
+| Standard (default) | 8-bit 4:2:0 BT.709 | ProRes 422 | ~1.9 Gbps | Everyday use |
+| Wide gamut | 10-bit 4:2:2 Display P3 | ProRes 422 (P3 tagged) | ~1.85 Gbps | Smoother gradients; real wide-gamut gain only when capturing a physical P3 display |
+
+To be precise: when the server uses a **virtual display**, that display's framebuffer is sRGB (measured: pure red in that space maps to P3 as `0.918 / 0.200 / 0.139`, i.e. sRGB red), so wide gamut does **not** widen the gamut at this layer—it only removes one intermediate quantization step. The real benefit appears when `--display-id` captures a physical P3 display. The controller shows a `P3` badge at the right end of the toolbar for a wide-gamut stream.
+
+ProRes 422 is 10-bit 4:2:2 on the wire, so the client always decodes ProRes to 10-bit—even in Standard mode; the 8-bit figure above refers to the capture pixel format. The HEVC path remains 8-bit 4:2:0.
 
 The UI is localized in English and Simplified Chinese (`Packaging/Resources/{en,zh-Hans}.lproj/Localizable.strings`).
 
@@ -127,7 +153,7 @@ Launch the app, select **As the controller**, click **Add Remote Mac**, and ente
 
 ### 4. Connect
 
-Double-click the host or click **Connect**. Changing the resolution in the host editor automatically rebuilds the remote virtual display on the next connection; picture quality (**Standard** caps stream width at 3840, **Sharp** streams the full 2× backing pixels) can be toggled from the controlled Mac's menu bar or settings panel.
+Double-click the host or click **Connect**. Changing the resolution in the host editor automatically rebuilds the remote virtual display on the next connection; picture quality (**Standard** caps stream width at 3840, **Sharp** streams the full 2× backing pixels, capped at 8192 wide for custom sizes over 4096 logical) can be toggled from the controlled Mac's menu bar or settings panel.
 
 The controlled Mac's menu, the settings panel, and the host editor share one resolution catalog: the first two entries are this project's targets, 3008×1692 (Thunderbolt bridge / 32-inch display) and 1728×1117 (MacBook Pro panel), followed by 1920×1080, 2560×1440, 2880×1620, and 3840×2160. A custom size is added to this Mac's catalog and the controlled Mac's menu also lists the current custom size. Custom entries live in this Mac's preferences and are not synchronized to the other machine.
 
@@ -143,7 +169,7 @@ The `boltkvm` CLI shares `BoltKVMCore` with the GUI app and is used for scripted
 .build/release/boltkvm client --host <server-ip> --port 7474 --seconds 28800 \
   --render --switch-mode --input --reconnect
 
-# Run the test suite (48 XCTest unit tests; falls back to CLI self-tests on CLT-only machines)
+# Run the test suite (all XCTest unit tests; falls back to CLI self-tests on CLT-only machines)
 ./scripts/test.sh
 
 # Protocol and crypto self-tests (no TCC permissions required)
@@ -162,7 +188,7 @@ Common server flags:
 --virtual-display builtin          # Built-in CGVirtualDisplay (default); "external" uses an existing display
 --virtual-display-size 3008x1692   # Logical resolution of the virtual display
 --bind auto                        # Bind only bridge* interfaces by default; pass 127.0.0.1 for loopback tests
---audio                            # Enable system audio capture (48 kHz stereo Float32 PCM, ~1.5 Mbps)
+--audio                            # Enable system audio capture (48 kHz stereo signed 16-bit PCM, ~1.5 Mbps)
 --codec hevc                       # Use HEVC instead of the default ProRes 422 encoder
 ```
 
@@ -179,8 +205,10 @@ Soak and rescue helper scripts:
 Pushing a `v*` tag triggers GitHub Actions to build, run self-tests, package and sign the app bundle, and publish a GitHub Release:
 
 ```bash
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.11 && git push origin v0.11
 ```
+
+Pushing `main` alone never publishes a release—`release.yml` only runs for `v*` tags. Make sure CI is green on `main` before tagging. See [docs/releasing.md](docs/releasing.md) for code signing and notarization details.
 
 See [docs/releasing.md](docs/releasing.md) for code signing and notarization details.
 
@@ -204,15 +232,17 @@ Reboot ──► SSH ready ──► Auto-login into Aqua desktop session
 - **Stale Server Processes**: Ensure no orphaned `boltkvm server` process is running before starting the CLI server manually, or `SCStream` initialization may hang.
 - **Secure Input & Lock Screen**: macOS blocks session-level event capture and injection while the lock screen or a Secure Input password field is active; use built-in macOS Screen Sharing (VNC) to unlock a locked screen.
 - **Single-Monitor Streaming**: The server creates and captures a single virtual display per session.
+- **No Audio Output Device**: If `--audio` is enabled on a machine without a usable output device (e.g. a CI runner), the audio path degrades to silence and logs `audio: playback unavailable (...)`; video and input keep working and the server no longer crashes.
+- **Virtual Display Failure**: If the virtual display still cannot be created after retries, the server exits with status 3 and lets the supervisor restart it; it never falls back to streaming the operator's local desktop.
 
 ## Milestones
 
 Background and target metrics are documented in the [Project Charter](docs/design/project-charter.md).
 
-- [x] **M0 Preflight**: Virtual display and Thunderbolt Bridge baseline ([report](docs/reports/2026-10-21-m0-display.md))
+- [x] **M0 Preflight**: Virtual display and Thunderbolt Bridge baseline ([report](docs/reports/2026-10-21-m0-display.md); the display layer passed, while physical unplug/headless re-test, sleep/wake, audible audio, and the physical latency baseline remain tracked in [Open Items](docs/plans/open-items.md))
 - [x] **M1 Visual Equivalence**: Capture → hardware encode → direct TCP → hardware decode → Metal present at 60 fps, SSIM 0.984 ([report](docs/reports/2026-10-21-m1-pipeline.md))
 - [x] **M2 Input Pipeline**: System shortcuts, modifier synchronization, and continuous scroll phases ([report](docs/reports/2026-10-21-m2-input.md))
-- [x] **M3 Stability**: TCC preflight, auto-reconnect, 8-hour soak test, and input continuity ([report](docs/reports/2026-10-22-m3-soak-8h.md))
+- [x] **M3 Stability**: TCC preflight, auto-reconnect, 8-hour soak ([soak report](docs/reports/2026-10-22-m3-soak-8h.md)) and 8-hour CLI input continuity ([night-run report](docs/reports/2026-10-22-night-run.md))
 - [x] **App Packaging**: Dual-role app bundle, built-in virtual display, multi-host manager, optional audio, and CI releases ([report](docs/reports/2026-10-22-app-conversion.md))
 
 ## Documentation Index
@@ -226,13 +256,15 @@ Background and target metrics are documented in the [Project Charter](docs/desig
 - [B5 Frame Rate & Latency Report](docs/reports/2026-10-23-b5-latency.md)
 - [Audio & GUI Stability Report](docs/reports/2026-10-23-audio-and-gui-stability.md)
 - [Transport Encryption Report](docs/reports/2026-10-22-transport-encryption.md)
-- [Architecture Decision Records (ADR)](docs/adr/), [Verification Reports](docs/reports/), [Plans](docs/plans/)
+- [Verification Report Index](docs/reports/README.md)
+- [Architecture Decision Records (ADR) Index](docs/adr/README.md), [Plans](docs/plans/)
 
 ## Requirements
 
 - macOS 15+ on Apple Silicon;
 - Direct Thunderbolt Bridge connection, or any routable LAN IP connection;
-- Swift 6 / Xcode Command Line Tools to build from source.
+- Swift 6 / Xcode Command Line Tools to build from source;
+- CI runs on `macos-15` with the runner's Swift 6.1.2, which can differ from a newer local toolchain—trust CI for release behaviour (toolchain pitfalls are recorded in [docs/releasing.md](docs/releasing.md)).
 
 ## Contributing
 
