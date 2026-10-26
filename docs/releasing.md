@@ -21,6 +21,12 @@ git push origin v0.11
 
 也可在 GitHub Actions 页面选择 Release 工作流手动触发（`workflow_dispatch`）。
 
+发版前检查：
+
+- `main` 的 CI 全绿；
+- 本地构建的版本号已盖章——当前 `build-app.sh` 尚未实现，本地包会显示 `0.1.0`/`1`，下次发版需一并改掉（见 [未完成事项](plans/open-items.md) 的「本地构建版本号盖章」）；
+- 只给要发布的提交打 `v*` 标签，不要在普通提交上打标签。
+
 **只推送 `main` 不会发布**：`release.yml` 只监听 `v*` 标签，普通提交只触发 `ci.yml`。因此日常合并、文档修正都不需要担心误发版；要发版时先确认 `main` 的 CI 全绿，再打标签。
 
 ## 持续集成（CI）

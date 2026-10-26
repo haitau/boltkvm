@@ -28,6 +28,7 @@
 | 睡眠/唤醒、物理拔插雷雳线、网络切换恢复 | 待人工实测 | 需人工在物理设备前执行合盖与拔插操作 |
 | Glass-to-glass 高速相机延迟基准 | 待外部设备实测 | 需使用外部高速相机同时拍摄本地与远端显示器测量含面板响应的物理延迟 |
 | macOS 大版本升级后 TCC 回归 | 按需执行 | 待系统升级时使用 `boltkvm doctor` 验证 |
+| 本地构建版本号盖章 | **下次发版一并解决** | `Packaging/build-app.sh` 只拷 `Info.plist`、不写版本，本地包恒显示 `0.1.0`/`1`；`release.yml` 仅在 `v*` 标签时用 tag 与 run number 覆盖。下次发版时在 `build-app.sh` 用 `git describe --tags --always --dirty` 写 `CFBundleShortVersionString`、用 `git rev-list --count HEAD` 写 `CFBundleVersion`，并同步 README/releasing。注意重建会改 cdhash，需重新授权一次 |
 
 ## 3. 历史问题与排查备忘
 
