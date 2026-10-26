@@ -38,6 +38,7 @@
 "client.button.connect" = "Connect";
 "client.state.idle" = "Not connected";
 "client.state.connecting" = "Connecting…";
+"client.state.reconnecting" = "Connection lost — reconnecting… (attempt %d)";
 "client.state.streaming" = "Connected";
 "client.state.failed" = "Failed: %@";
 "client.host.required" = "Enter a host first";

@@ -323,7 +323,11 @@ final class ServerAppController: NSObject {
         guard wanted else { return }
         log("app: restarting helper for new display settings")
         stopProcess()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        // stopProcess() only returns after the helper is gone, and the helper
+        // releases the virtual display in its SIGTERM handler, so the new one
+        // can start immediately. The old 2 s sleep made a resolution change
+        // feel like a freeze on the client.
+        DispatchQueue.main.async { [weak self] in
             guard let self, self.wanted else { return }
             self.launch()
         }

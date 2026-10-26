@@ -38,6 +38,7 @@
 "client.button.connect" = "连接";
 "client.state.idle" = "未连接";
 "client.state.connecting" = "正在连接…";
+"client.state.reconnecting" = "连接中断，正在重连…（第 %d 次）";
 "client.state.streaming" = "已连接";
 "client.state.failed" = "失败：%@";
 "client.host.required" = "先填主机地址";

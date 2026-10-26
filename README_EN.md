@@ -10,6 +10,7 @@ Low-latency screen control between two Macs. A single app bundle serves both rol
 - **Low-Latency Interaction**: Capture-to-decode P95 < 33 ms; GUI capture-to-present P95 < 50 ms.
 - **Audio Isolation by Default**: Zero audio capture or transmission unless explicitly enabled, leaving the controller's audio output untouched.
 - **Unidirectional Control**: The controller only captures input and renders video, while the controlled Mac only captures the screen and injects input—eliminating feedback loops by topology.
+- **Automatic Reconnect**: If the controlled Mac restarts its capture helper (resolution change, update) or the link drops briefly, the controller reconnects and shows the attempt count instead of freezing on the last frame. A wrong key still fails immediately.
 
 ## Measured Performance (2026-10-23)
 
