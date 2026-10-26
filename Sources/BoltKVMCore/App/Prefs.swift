@@ -75,6 +75,57 @@ enum Prefs {
         ("3840x2160", 3840, 2160),
     ]
 
+    /// User-added sizes, shared by the controlled Mac's menu/settings and the
+    /// controller's host editor *on this Mac*. They are not protocol data: a
+    /// size added on one machine does not appear on the other.
+    static var customDisplaySizes: [(Int, Int)] {
+        get {
+            var stored = d.stringArray(forKey: "display.customSizes") ?? []
+            // The controller kept its own list before both roles shared one
+            // catalog; adopt it instead of dropping the user's entries.
+            if stored.isEmpty, let legacy = d.stringArray(forKey: "hosts.customResolutions") {
+                stored = legacy
+                d.set(legacy, forKey: "display.customSizes")
+            }
+            return stored.compactMap { text in
+                guard let size = DisplaySize.parse(text) else { return nil }
+                return (size.width, size.height)
+            }
+        }
+        set {
+            d.set(newValue.map { "\($0.0)x\($0.1)" }, forKey: "display.customSizes")
+        }
+    }
+
+    /// Presets first, then user-added sizes, de-duplicated. Both the controlled
+    /// Mac's resolution UI and the controller's host editor read this list.
+    static func mergedDisplayOptions(presets: [(String, Int, Int)],
+                                     custom: [(Int, Int)]) -> [(Int, Int)] {
+        var options = presets.map { ($0.1, $0.2) }
+        for size in custom where !options.contains(where: { $0.0 == size.0 && $0.1 == size.1 }) {
+            options.append(size)
+        }
+        return options
+    }
+
+    static var displayOptions: [(Int, Int)] {
+        mergedDisplayOptions(presets: displayPresets, custom: customDisplaySizes)
+    }
+
+    /// Adds a custom size to the shared catalog; built-in sizes are ignored.
+    static func rememberDisplaySize(_ size: (Int, Int)) {
+        guard !displayPresets.contains(where: { $0.1 == size.0 && $0.2 == size.1 }) else { return }
+        var custom = customDisplaySizes
+        guard !custom.contains(where: { $0.0 == size.0 && $0.1 == size.1 }) else { return }
+        custom.append(size)
+        customDisplaySizes = custom
+    }
+
+    /// "3008x1692" -> "3008×1692": one title format for both sides.
+    static func displayTitle(_ label: String) -> String {
+        label.replacingOccurrences(of: "x", with: "×")
+    }
+
     static var serverAudio: Bool {
         get { d.object(forKey: "server.audio") as? Bool ?? false }
         set { d.set(newValue, forKey: "server.audio") }

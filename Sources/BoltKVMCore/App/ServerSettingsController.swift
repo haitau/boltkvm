@@ -239,15 +239,17 @@ final class ServerSettingsController: NSWindowController {
         copyButton.isHidden = currentPassword == nil
         let current = Prefs.serverDisplaySize
         resolutionPopup.removeAllItems()
-        var labels: [(String, String)] = []
-        for (label, w, h) in Prefs.displayPresets {
-            labels.append((label.replacingOccurrences(of: "x", with: "×"), "\(w)x\(h)"))
+        var options = Prefs.displayOptions
+        if let size = DisplaySize.parse(current),
+           !options.contains(where: { $0.0 == size.width && $0.1 == size.height }) {
+            options.append((size.width, size.height))
         }
-        if !labels.contains(where: { $0.1 == current }) {
-            labels.append((current.replacingOccurrences(of: "x", with: "×"), current))
+        let keys = options.map { "\($0.0)x\($0.1)" }
+        resolutionPopup.addItems(withTitles: options.map { Prefs.displayTitle("\($0.0)x\($0.1)") })
+        for (index, key) in keys.enumerated() {
+            resolutionPopup.item(at: index)?.representedObject = key
         }
-        resolutionPopup.addItems(withTitles: labels.map { $0.0 })
-        if let index = labels.firstIndex(where: { $0.1 == current }) {
+        if let index = keys.firstIndex(of: current) {
             resolutionPopup.selectItem(at: index)
         }
         qualityPopup.selectItem(at: Prefs.serverQuality == "standard" ? 0 : 1)
@@ -259,11 +261,8 @@ final class ServerSettingsController: NSWindowController {
     // MARK: - Actions
 
     @objc private func settingsChanged() {
-        let index = resolutionPopup.indexOfSelectedItem
-        let presets = Prefs.displayPresets
-        if index < presets.count {
-            let preset = presets[index]
-            Prefs.serverDisplaySize = "\(preset.1)x\(preset.2)"
+        if let key = resolutionPopup.selectedItem?.representedObject as? String {
+            Prefs.serverDisplaySize = key
         }
         Prefs.serverQuality = qualityPopup.indexOfSelectedItem == 0 ? "standard" : "pixel"
         let port = Int(portField.stringValue) ?? Prefs.serverPort
@@ -293,6 +292,7 @@ final class ServerSettingsController: NSWindowController {
         guard alert.runModal() == .alertFirstButtonReturn,
               let size = DisplaySize.parse("\(widthField.stringValue)x\(heightField.stringValue)")
         else { return }
+        Prefs.rememberDisplaySize((size.width, size.height))
         Prefs.serverDisplaySize = "\(size.width)x\(size.height)"
         reload()
         server?.restartForSettings()

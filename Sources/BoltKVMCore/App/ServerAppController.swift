@@ -236,11 +236,18 @@ final class ServerAppController: NSObject {
     private func buildResolutionMenu() -> NSMenu {
         let menu = NSMenu(title: L.t("server.menu.resolution"))
         let current = Prefs.serverDisplaySize
-        for (label, w, h) in Prefs.displayPresets {
-            let item = NSMenuItem(title: label, action: #selector(pickResolution(_:)), keyEquivalent: "")
+        var entries = Prefs.displayOptions
+        if let size = DisplaySize.parse(current),
+           !entries.contains(where: { $0.0 == size.width && $0.1 == size.height }) {
+            entries.append((size.width, size.height))
+        }
+        for (w, h) in entries {
+            let value = "\(w)x\(h)"
+            let item = NSMenuItem(title: Prefs.displayTitle(value),
+                                  action: #selector(pickResolution(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = "\(w)x\(h)"
-            item.state = current == "\(w)x\(h)" ? .on : .off
+            item.representedObject = value
+            item.state = current == value ? .on : .off
             menu.addItem(item)
         }
         menu.addItem(.separator())
@@ -297,6 +304,7 @@ final class ServerAppController: NSObject {
             bad.runModal()
             return
         }
+        Prefs.rememberDisplaySize((size.width, size.height))
         Prefs.serverDisplaySize = "\(size.width)x\(size.height)"
         refreshMenus()
         restartHelper()

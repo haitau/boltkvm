@@ -156,34 +156,19 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
     /// from it instead of a meaningless "default".
     static let defaultSize = (3008, 1692)
 
-    /// Single source of truth shared with the controlled Mac's menu, so the
-    /// controller never offers a size the server side does not list.
-    private static var presetSizes: [(Int, Int)] {
-        Prefs.displayPresets.map { ($0.1, $0.2) }
-    }
-
-    private static let customResolutionsKey = "hosts.customResolutions"
-
+    /// The one catalog shared with the controlled Mac's menu: built-in presets
+    /// plus the custom sizes remembered on this Mac.
     static func resolutionOptions() -> [(Int, Int)] {
-        var options = presetSizes
-        let stored = UserDefaults.standard.array(forKey: customResolutionsKey) as? [String] ?? []
-        for text in stored {
-            guard let size = DisplaySize.parse(text),
-                  !options.contains(where: { $0.0 == size.width && $0.1 == size.height }) else { continue }
-            options.append((size.width, size.height))
-        }
-        return options
+        Prefs.displayOptions
     }
 
     static func rememberCustomResolution(_ size: (Int, Int)) {
-        var stored = UserDefaults.standard.array(forKey: customResolutionsKey) as? [String] ?? []
-        let text = "\(size.0)x\(size.1)"
-        guard !stored.contains(text) else { return }
-        stored.append(text)
-        UserDefaults.standard.set(stored, forKey: customResolutionsKey)
+        Prefs.rememberDisplaySize(size)
     }
 
-    static func sizeTitle(_ size: (Int, Int)) -> String { "\(size.0)×\(size.1)" }
+    static func sizeTitle(_ size: (Int, Int)) -> String {
+        Prefs.displayTitle("\(size.0)x\(size.1)")
+    }
 
     /// Asks for an explicit W×H. Returns nil when cancelled or invalid.
     private func askForCustomResolution() -> (Int, Int)? {

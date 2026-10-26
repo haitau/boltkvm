@@ -129,7 +129,7 @@ Launch the app, select **As the controller**, click **Add Remote Mac**, and ente
 
 Double-click the host or click **Connect**. Changing the resolution in the host editor automatically rebuilds the remote virtual display on the next connection; picture quality (**Standard** caps stream width at 3840, **Sharp** streams the full 2× backing pixels) can be toggled from the controlled Mac's menu bar or settings panel.
 
-The resolution presets are shared by the controlled Mac's menu, the settings panel, and the host editor: the first two are this project's targets, 3008×1692 (Thunderbolt bridge / 32-inch display) and 1728×1117 (MacBook Pro panel), followed by 1920×1080, 2560×1440, 2880×1620, and 3840×2160. Custom sizes still accept any width and height within range.
+The controlled Mac's menu, the settings panel, and the host editor share one resolution catalog: the first two entries are this project's targets, 3008×1692 (Thunderbolt bridge / 32-inch display) and 1728×1117 (MacBook Pro panel), followed by 1920×1080, 2560×1440, 2880×1620, and 3840×2160. A custom size is added to this Mac's catalog and the controlled Mac's menu also lists the current custom size. Custom entries live in this Mac's preferences and are not synchronized to the other machine.
 
 ## Command-Line Interface (CLI)
 

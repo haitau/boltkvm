@@ -46,6 +46,23 @@ final class DisplayPresetTests: XCTestCase {
         XCTAssertNil(DisplaySize.parse("wide×tall"))
     }
 
+    /// Both roles build their popup/menu from this one catalog: presets keep
+    /// their order, and a custom size that duplicates a preset is not shown
+    /// twice.
+    func testDisplayCatalogKeepsPresetOrderAndDeduplicatesCustom() {
+        let merged = Prefs.mergedDisplayOptions(
+            presets: [("3008x1692", 3008, 1692), ("1728x1117", 1728, 1117)],
+            custom: [(1728, 1117), (2560, 1600), (3008, 1692)]
+        )
+        XCTAssertEqual(merged.map { "\($0.0)x\($0.1)" },
+                       ["3008x1692", "1728x1117", "2560x1600"])
+    }
+
+    func testDisplayTitlesUseMultiplicationSign() {
+        XCTAssertEqual(Prefs.displayTitle("3008x1692"), "3008×1692")
+        XCTAssertEqual(Prefs.displayTitle("1728x1117"), "1728×1117")
+    }
+
     /// 1728×1117 is odd at the logical level but its 2x backing (3456×2234) is
     /// even. A 1x stream would be 1117 tall, so the capture side rounds down.
     func testEvenVideoSizeRoundsOddDimensions() {
