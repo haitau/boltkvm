@@ -5,16 +5,16 @@
 ## 日常发布
 
 ```bash
-# Info.plist 中的版本号仅为默认值，CI 构建时会用 tag 覆盖
-git tag v0.11
-git push origin v0.11
+# Info.plist 中的版本号仅为默认值，CI 与本地构建都会盖章
+git tag v0.12
+git push origin v0.12
 ```
 
 `.github/workflows/release.yml` 执行步骤：
 
 1. 运行 `swift build -c release`；
 2. 运行 `boltkvm selftest` 与 `boltkvm cryptotest`（纯协议与加解密自测，无需系统 TCC 权限）；
-3. 将标签名写入 `Packaging/Info.plist` 的 `CFBundleShortVersionString`，将 `GITHUB_RUN_NUMBER` 写入 `CFBundleVersion`；
+3. 将 `BOLTKVM_VERSION`（标签去掉 `v`）与 `BOLTKVM_BUILD`（`GITHUB_RUN_NUMBER`）传给 `Packaging/build-app.sh`，由脚本写入 `Packaging/Info.plist` 的 `CFBundleShortVersionString` / `CFBundleVersion`；
 4. 调用 `Packaging/build-app.sh` 组装 `dist/BoltKVM.app`，使用 `ditto` 压缩为 zip 并生成 `.sha256` 校验文件；
 5. 若仓库配置了 `MACOS_CERT_P12` 密钥则使用 Developer ID 签名，否则使用 ad-hoc 签名；
 6. 通过 `softprops/action-gh-release` 创建 Release，上传 zip 与 `.sha256` 并自动生成变更说明。
@@ -24,10 +24,17 @@ git push origin v0.11
 发版前检查：
 
 - `main` 的 CI 全绿；
-- 本地构建的版本号已盖章——当前 `build-app.sh` 尚未实现，本地包会显示 `0.1.0`/`1`，下次发版需一并改掉（见 [未完成事项](plans/open-items.md) 的「本地构建版本号盖章」）；
+- 本地构建的版本号已盖章：`build-app.sh` 默认用 `git describe --tags --always --dirty` 与 `git rev-list --count HEAD` 写入 `CFBundleShortVersionString` / `CFBundleVersion`，也可用 `BOLTKVM_VERSION` / `BOLTKVM_BUILD` 覆盖；
 - 只给要发布的提交打 `v*` 标签，不要在普通提交上打标签。
 
 **只推送 `main` 不会发布**：`release.yml` 只监听 `v*` 标签，普通提交只触发 `ci.yml`。因此日常合并、文档修正都不需要担心误发版；要发版时先确认 `main` 的 CI 全绿，再打标签。
+
+## 版本号规则
+
+- Git 标签：`v0.12`（发布名显示为 `0.12`）；
+- `CFBundleShortVersionString`：`0.12`（标签去掉 `v`）；
+- `CFBundleVersion`：CI 使用 `GITHUB_RUN_NUMBER`，本地使用提交数 `git rev-list --count HEAD`；
+- 本地工作树有未提交改动时，`git describe --dirty` 会得到 `0.12-1-gabc1234-dirty` 这类版本串，便于区分已发布包。
 
 ## 持续集成（CI）
 

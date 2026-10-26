@@ -17,7 +17,7 @@
 最新发布包见 [Releases](https://github.com/haitau/boltkvm/releases)，每次发布附带 `BoltKVM-<版本>.zip` 与同名 `.sha256`：
 
 ```bash
-V=0.11   # 换成实际发布版本
+V=0.12   # 换成实际发布版本
 unzip BoltKVM-$V.zip -d BoltKVM-$V
 shasum -a 256 BoltKVM-$V.zip      # 与 .sha256 文件里的值逐字对比
 open BoltKVM-$V/BoltKVM.app
@@ -206,7 +206,7 @@ defaults write io.github.boltkvm server.audio -bool true
 推送 `v*` 标签即可触发 GitHub Actions 自动编译、自测、打包签名并创建 GitHub Release：
 
 ```bash
-git tag v0.11 && git push origin v0.11
+git tag v0.12 && git push origin v0.12
 ```
 
 只推送 `main` 不会触发发布——`release.yml` 仅在推送 `v*` 标签时运行；打标签前请确认 `main` 上的 CI 全绿。发布流程与签名说明见 [发布流程](docs/releasing.md)。

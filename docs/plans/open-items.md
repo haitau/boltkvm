@@ -1,6 +1,6 @@
 # 未完成事项与已知问题
 
-> 更新日期：2026-10-26（覆盖到 CI 工具链与音频设备兜底修复 `1c9f1b6` / `57ef2ab`）。本清单记录工程待办与需人工物理介入的测试项。需要人工在物理机器前操作（如合盖休眠、拔插线缆）或依赖外部硬件（如高速相机）的条目单列管理，不阻塞日常交付。
+> 更新日期：2026-10-26（覆盖到 v0.12 发布与音频路线/全屏工具栏修复 `4f41335`）。本清单记录工程待办与需人工物理介入的测试项。需要人工在物理机器前操作（如合盖休眠、拔插线缆）或依赖外部硬件（如高速相机）的条目单列管理，不阻塞日常交付。
 
 ## 1. 核心工程事项（均已完成）
 
@@ -14,6 +14,7 @@
 | P1-连接管理 | 被控端列表（R1）与按主机配置分辨率（R2） | **已完成**：启动展示主机列表，连接时通过 `config` 包动态调整服务端虚拟屏尺寸 | [连接管理设计](2026-10-22-connection-manager-design.md) |
 | P1-密码 | 8 位连接密码、256 位静态密钥与前向保密 | **已完成**：首次启动自动生成 8 位口令（PBKDF2 拉伸），支持切换 64 个十六进制字符（256 位）的静态密钥，每会话 X25519 密钥交换 | [ADR-0004](../adr/0004-psk-over-pairing-code.md) |
 | P1-发布 | GitHub Actions 自动构建与发布 | **已就绪**：`ci.yml`（构建 + 全部 XCTest 单元测试（当前 77 项；无音频输出设备的 runner 会跳过音频回归）+ selftest + cryptotest + 打包）与 `release.yml`（推送 `v*` 标签自动发布） | [发布流程](../releasing.md) |
+| 版本号 | 本地与发布构建版本盖章 | **已完成**：`build-app.sh` 默认用 `git describe`/`git rev-list` 写入 `CFBundleShortVersionString`/`CFBundleVersion`，CI 用 `BOLTKVM_VERSION`/`BOLTKVM_BUILD` 覆盖；v0.12 起生效 | [发布流程](../releasing.md) |
 | B5 | 解码与 GUI 呈现延迟 SLO 核定 | **已完成**：解码链路 P95 25.4–27.0 ms（< 33 ms）；GUI 采集→上屏 P95 33.2 ms（< 50 ms） | [B5 延迟报告](../reports/2026-10-23-b5-latency.md) |
 | B6 | 服务端慢客户端防堆积与超时保护 | **已完成**：发送队列限制 4 帧 / 8 MB 上限并配合 `SO_SNDTIMEO` 2 秒超时，防止慢客户端拖垮服务端内存 | — |
 | B7 | GUI 呈现排队消除 | **已完成**：`Renderer` 改为到帧即时泵送 `view.draw()`，消除 60Hz 显示链路平均 8 ms 等待 | [B5 延迟报告](../reports/2026-10-23-b5-latency.md) |
@@ -29,7 +30,6 @@
 | Glass-to-glass 高速相机延迟基准 | 待外部设备实测 | 需使用外部高速相机同时拍摄本地与远端显示器测量含面板响应的物理延迟 |
 | macOS 大版本升级后 TCC 回归 | 按需执行 | 待系统升级时使用 `boltkvm doctor` 验证 |
 | 蓝牙耳机物理断电/重连后音频恢复 | 修复后已用「默认输出来回切换」验证 | 需用户按原始步骤实际关闭耳机再连接复核；等价触发见 [B18 报告](../reports/2026-10-26-audio-route-and-fullscreen-chrome.md) |
-| 本地构建版本号盖章 | **下次发版一并解决** | `Packaging/build-app.sh` 只拷 `Info.plist`、不写版本，本地包恒显示 `0.1.0`/`1`；`release.yml` 仅在 `v*` 标签时用 tag 与 run number 覆盖。下次发版时在 `build-app.sh` 用 `git describe --tags --always --dirty` 写 `CFBundleShortVersionString`、用 `git rev-list --count HEAD` 写 `CFBundleVersion`，并同步 README/releasing。注意重建会改 cdhash，需重新授权一次 |
 
 ## 3. 历史问题与排查备忘
 

@@ -35,15 +35,16 @@ jobs:
       - name: Build, self-test, package
         env:
           BOLTKVM_HARDENED_RUNTIME: "0"
+          # build-app.sh stamps these into the bundle so "which build is this"
+          # is answerable from Finder -> Get Info. Passing them explicitly keeps
+          # workflow_dispatch releases independent of the checked-out tags.
+          BOLTKVM_VERSION: ${{ steps.ver.outputs.version }}
+          BOLTKVM_BUILD: ${{ github.run_number }}
         run: |
           set -euo pipefail
           swift build -c release
           .build/release/boltkvm selftest
           .build/release/boltkvm cryptotest
-          # Stamp the tag into the bundle so "which build is this" is answerable
-          # from Finder → Get Info.
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.ver.outputs.version }}" Packaging/Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" Packaging/Info.plist
           bash Packaging/build-app.sh
           mkdir -p out
           ditto -c -k --sequesterRsrc --keepParent dist/BoltKVM.app "out/BoltKVM-${{ steps.ver.outputs.version }}.zip"
@@ -54,6 +55,10 @@ jobs:
           CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          # Rebuilding for Developer ID must keep the tag/run number stamped by
+          # the previous step instead of falling back to git describe.
+          BOLTKVM_VERSION: ${{ steps.ver.outputs.version }}
+          BOLTKVM_BUILD: ${{ github.run_number }}
         run: |
           set -euo pipefail
           if [ -z "${CERT_P12:-}" ]; then

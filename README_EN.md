@@ -17,7 +17,7 @@ Low-latency screen control between two Macs. A single app bundle serves both rol
 Grab the latest `BoltKVM-<version>.zip` and its `.sha256` from [Releases](https://github.com/haitau/boltkvm/releases):
 
 ```bash
-V=0.11   # replace with the release version
+V=0.12   # replace with the release version
 unzip BoltKVM-$V.zip -d BoltKVM-$V
 shasum -a 256 BoltKVM-$V.zip      # compare against the value in the .sha256 file
 open BoltKVM-$V/BoltKVM.app
@@ -206,7 +206,7 @@ Soak and rescue helper scripts:
 Pushing a `v*` tag triggers GitHub Actions to build, run self-tests, package and sign the app bundle, and publish a GitHub Release:
 
 ```bash
-git tag v0.11 && git push origin v0.11
+git tag v0.12 && git push origin v0.12
 ```
 
 Pushing `main` alone never publishes a release—`release.yml` only runs for `v*` tags. Make sure CI is green on `main` before tagging. See [docs/releasing.md](docs/releasing.md) for code signing and notarization details.

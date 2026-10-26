@@ -17,6 +17,10 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # build-app.sh stamps CFBundleVersion from the commit count and the
+          # tag from git describe; a shallow checkout would show "1" / a hash.
+          fetch-depth: 0
 
       - name: Toolchain
         run: swift --version && sw_vers

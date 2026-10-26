@@ -22,6 +22,20 @@ cp .build/release/BoltKVMApp "$APP/Contents/MacOS/BoltKVM"
 # CGVirtualDisplay, a plain binary can (same reason vdscreen ships a helper).
 cp .build/release/boltkvm "$APP/Contents/MacOS/boltkvm-server"   # not "boltkvm": APFS is case-insensitive and would overwrite BoltKVM
 cp Packaging/Info.plist "$APP/Contents/Info.plist"
+
+# Stamp the bundle so Finder -> Get Info always answers "which build is this".
+# CI passes BOLTKVM_VERSION (tag) and BOLTKVM_BUILD (run number); a local build
+# falls back to git describe, which keeps the exact tag/commit and adds
+# "-dirty" when the working tree has uncommitted edits.
+DEFAULT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
+DEFAULT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Contents/Info.plist")
+VERSION="${BOLTKVM_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo "$DEFAULT_VERSION")}"
+VERSION="${VERSION#v}"
+BUILD="${BOLTKVM_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo "$DEFAULT_BUILD")}"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$APP/Contents/Info.plist"
+echo "==> version $VERSION ($BUILD)"
+
 if [ -f Packaging/AppIcon.icns ]; then
   cp Packaging/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
