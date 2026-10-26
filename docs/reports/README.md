@@ -30,3 +30,4 @@
 | 2026-10-26 | [input-event-mask](2026-10-26-input-event-mask.md) | CI 报 Swift 6.1.2 类型检查超时 | 已修：列表 + `reduce`，掩码 `0x0E401CFE` |
 | 2026-10-26 | [audio-no-output-device](2026-10-26-audio-no-output-device.md) | 无音频输出设备时 `--audio` 崩溃 | 已修：`@try/@catch` + 静音降级，CI 跳过音频回归 |
 | 2026-10-26 | [audio-route-and-fullscreen-chrome](2026-10-26-audio-route-and-fullscreen-chrome.md) | 蓝牙耳机重连后无声 / 全屏工具栏压变形 | 已修：输出图重建 + 全屏画面整体下移；物理蓝牙重连待复核 |
+| 2026-10-26 | [v0.12-release](2026-10-26-v0.12-release.md) | v0.12 发布与产物校验 | 已发布；zip 1,048,851 字节、SHA-256 校验通过；校验和路径前缀已修 |
