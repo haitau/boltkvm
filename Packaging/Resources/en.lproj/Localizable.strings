@@ -82,7 +82,7 @@
 "server.menu.quality.pixel" = "Sharp (sharpest, uses more)";
 "server.resolution.custom.title" = "Custom resolution";
 "server.resolution.custom.detail" = "Enter WIDTHxHEIGHT, for example 2560x1440. The virtual display uses it as logical size; the stream follows.";
-"server.resolution.custom.invalid" = "Format must be WIDTHxHEIGHT (width 640–7680, height 480–4320, even numbers).";
+"server.resolution.custom.invalid" = "Format must be WIDTHxHEIGHT (width 640–7680, height 480–4320).";
 "common.ok" = "OK";
 "common.cancel" = "Cancel";
 "menu.remote" = "Remote";

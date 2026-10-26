@@ -82,9 +82,11 @@ final class Server: NSObject, SCStreamOutput {
          audioEnabled: Bool = false, preferredDisplayID: CGDirectDisplayID? = nil,
          colorMode: ColorMode = .standard) {
         self.colorMode = colorMode
-        self.captureWidth = width
+        // A logical size can be odd (1728×1117); VideoToolbox wants even.
+        let even = evenVideoSize(width: width, height: height)
+        self.captureWidth = even.width
         self.audioEnabled = audioEnabled
-        self.captureHeight = height
+        self.captureHeight = even.height
         self.codec = codec
         self.connection = connection
         self.dumpPath = dumpPath

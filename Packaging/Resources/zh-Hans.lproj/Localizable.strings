@@ -83,7 +83,7 @@
 "server.menu.quality.pixel" = "清晰（最清楚，更占资源）";
 "server.resolution.custom.title" = "自定义分辨率";
 "server.resolution.custom.detail" = "输入 宽x高，例如 2560x1440。虚拟屏用它作为逻辑尺寸，码流跟着变。";
-"server.resolution.custom.invalid" = "格式不对，应为 宽x高（宽 640–7680，高 480–4320，偶数）。";
+"server.resolution.custom.invalid" = "格式不对，应为 宽x高（宽 640–7680，高 480–4320）。";
 "common.ok" = "好";
 "common.cancel" = "取消";
 "menu.remote" = "远程";

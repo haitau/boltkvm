@@ -156,9 +156,11 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
     /// from it instead of a meaningless "default".
     static let defaultSize = (3008, 1692)
 
-    private static let presetSizes: [(Int, Int)] = [
-        (1280, 720), (1920, 1080), (2560, 1440), (3008, 1692), (3840, 2160),
-    ]
+    /// Single source of truth shared with the controlled Mac's menu, so the
+    /// controller never offers a size the server side does not list.
+    private static var presetSizes: [(Int, Int)] {
+        Prefs.displayPresets.map { ($0.1, $0.2) }
+    }
 
     private static let customResolutionsKey = "hosts.customResolutions"
 
@@ -166,9 +168,9 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         var options = presetSizes
         let stored = UserDefaults.standard.array(forKey: customResolutionsKey) as? [String] ?? []
         for text in stored {
-            let parts = text.split(separator: "x").compactMap { Int($0) }
-            guard parts.count == 2, !options.contains(where: { $0.0 == parts[0] && $0.1 == parts[1] }) else { continue }
-            options.append((parts[0], parts[1]))
+            guard let size = DisplaySize.parse(text),
+                  !options.contains(where: { $0.0 == size.width && $0.1 == size.height }) else { continue }
+            options.append((size.width, size.height))
         }
         return options
     }
@@ -202,12 +204,10 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         }
         alert.accessoryView = form
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        guard let width = Int(widthField.stringValue), let height = Int(heightField.stringValue),
-              (640...7680).contains(width), (480...4320).contains(height),
-              width % 2 == 0, height % 2 == 0 else {
+        guard let size = DisplaySize.parse("\(widthField.stringValue)x\(heightField.stringValue)") else {
             return nil
         }
-        return (width, height)
+        return (size.width, size.height)
     }
 
     private func presentEditor(host: SavedHost?) {

@@ -290,17 +290,14 @@ final class ServerAppController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let text = field.stringValue.trimmingCharacters(in: .whitespaces)
-        let parts = text.lowercased().split(separator: "x")
-        guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]),
-              (640...7680).contains(w), (480...4320).contains(h),
-              w % 2 == 0, h % 2 == 0 else {
+        guard let size = DisplaySize.parse(text) else {
             let bad = NSAlert()
             bad.messageText = L.t("server.resolution.custom.invalid")
             bad.addButton(withTitle: L.t("common.ok"))
             bad.runModal()
             return
         }
-        Prefs.serverDisplaySize = "\(w)x\(h)"
+        Prefs.serverDisplaySize = "\(size.width)x\(size.height)"
         refreshMenus()
         restartHelper()
     }

@@ -277,8 +277,9 @@ final class ServerSettingsController: NSWindowController {
         alert.messageText = L.t("server.panel.custom")
         alert.addButton(withTitle: L.t("common.ok"))
         alert.addButton(withTitle: L.t("common.cancel"))
-        let widthField = NSTextField(string: "3008")
-        let heightField = NSTextField(string: "1692")
+        let current = DisplaySize.parse(Prefs.serverDisplaySize)
+        let widthField = NSTextField(string: String(current?.width ?? 3008))
+        let heightField = NSTextField(string: String(current?.height ?? 1692))
         let form = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 72))
         for (index, pair) in [(L.t("client.hosts.width"), widthField), (L.t("client.hosts.height"), heightField)].enumerated() {
             let label = NSTextField(labelWithString: pair.0)
@@ -290,10 +291,9 @@ final class ServerSettingsController: NSWindowController {
         }
         alert.accessoryView = form
         guard alert.runModal() == .alertFirstButtonReturn,
-              let width = Int(widthField.stringValue), let height = Int(heightField.stringValue),
-              (640...7680).contains(width), (480...4320).contains(height),
-              width % 2 == 0, height % 2 == 0 else { return }
-        Prefs.serverDisplaySize = "\(width)x\(height)"
+              let size = DisplaySize.parse("\(widthField.stringValue)x\(heightField.stringValue)")
+        else { return }
+        Prefs.serverDisplaySize = "\(size.width)x\(size.height)"
         reload()
         server?.restartForSettings()
     }

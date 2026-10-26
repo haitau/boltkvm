@@ -38,6 +38,14 @@ final class DisplaySleepAssertion {
     deinit { release() }
 }
 
+/// VideoToolbox encoders want even dimensions for 4:2:0/4:2:2. A logical display
+/// size may be odd — the MacBook Pro panel's looks-like size is 1728×1117 — so
+/// the 1x capture size rounds down by one row. The 2x backing is already even
+/// (3456×2234), which is why the preset itself is fine.
+func evenVideoSize(width: Int, height: Int) -> (width: Int, height: Int) {
+    (max(2, width & ~1), max(2, height & ~1))
+}
+
 /// When the app spawns us it hands over a stdin pipe and never writes to it, so
 /// EOF means the app is gone (quit, crash, SIGKILL). Without this the helper
 /// outlives the app, keeps the port bound and leaves the virtual display behind —

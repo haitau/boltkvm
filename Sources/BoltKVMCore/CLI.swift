@@ -170,6 +170,9 @@ public enum CLI {
                         captureH = req.quality == 0
                             ? max(2, captureW * req.height / req.width)
                             : req.height * 2
+                        let even = evenVideoSize(width: captureW, height: captureH)
+                        captureW = even.width
+                        captureH = even.height
                         log("virtual display recreated: logical \(req.width)x\(req.height), streaming \(captureW)x\(captureH)")
                         // Same reason as at startup: a fresh display without user
                         // activity is throttled to ~27 fps.
