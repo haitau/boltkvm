@@ -1,48 +1,6 @@
 import Foundation
 import AVFoundation
-import CoreAudio
-
-/// True when CoreAudio reports at least one device with an output stream.
-///
-/// `AVAudioEngine`'s format properties are not a substitute: on a machine with no
-/// output device (headless Mac, VM, GitHub's macOS runners) `outputNode
-/// .outputFormat(forBus: 0)` still answers with a plausible 48 kHz / 2 ch
-/// default, and the graph then raises an Objective-C exception (-10868
-/// FormatNotSupported) inside `connect` — which Swift cannot catch.
-private func hasAudioOutputDevice() -> Bool {
-    var address = AudioObjectPropertyAddress(
-        mSelector: kAudioHardwarePropertyDevices,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain)
-    var size: UInt32 = 0
-    guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject),
-                                         &address, 0, nil, &size) == noErr,
-          size >= MemoryLayout<AudioDeviceID>.size else { return false }
-    var devices = [AudioDeviceID](repeating: 0,
-                                  count: Int(size) / MemoryLayout<AudioDeviceID>.size)
-    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
-                                     &address, 0, nil, &size, &devices) == noErr else { return false }
-
-    return devices.contains { device in
-        var streamAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyStreamConfiguration,
-            mScope: kAudioDevicePropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain)
-        var streamSize: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(device, &streamAddress, 0, nil, &streamSize) == noErr,
-              streamSize >= MemoryLayout<AudioBufferList>.size else { return false }
-        // Multi-stream devices return a variable-length AudioBufferList; the
-        // property writes `streamSize` bytes, so allocate that much.
-        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(streamSize),
-                                                  alignment: MemoryLayout<AudioBufferList>.alignment)
-        defer { raw.deallocate() }
-        guard AudioObjectGetPropertyData(device, &streamAddress, 0, nil,
-                                         &streamSize, raw) == noErr else { return false }
-        let buffers = UnsafeMutableAudioBufferListPointer(
-            raw.assumingMemoryBound(to: AudioBufferList.self))
-        return buffers.contains { $0.mNumberChannels > 0 }
-    }
-}
+import CVirtualDisplay
 
 /// Client-side audio sink. Audio is opt-in: without `--audio` nothing is
 /// created and the transport carries no audio packets at all, which keeps the
@@ -105,45 +63,41 @@ final class AudioPlayer: @unchecked Sendable {
         if play {
             let engine = AVAudioEngine()
             let player = AVAudioPlayerNode()
-            // No output device (headless Mac, VM, GitHub's macOS runners): the
-            // graph would raise an Objective-C exception (-10868) inside
-            // `connect`, which Swift cannot catch. Bail out before touching it,
-            // so `--audio` on such a machine is silent instead of fatal.
-            guard hasAudioOutputDevice() else {
-                log("audio: no CoreAudio output device; playback disabled")
+            // AVAudioEngine reports an unusable graph as an Objective-C exception
+            // (-10868 FormatNotSupported and friends), not as a Swift error: on a
+            // machine with no output device (headless Mac, VM, GitHub's macOS
+            // runners) the host-app `connect` below raises and kills the process.
+            // Build the graph inside the ObjC catcher, so `--audio` there is
+            // silent instead of fatal.
+            var startError: Error?
+            let built = BKVTryCatching {
+                engine.attach(player)
+                engine.connect(player, to: engine.mainMixerNode, format: format)
+                do { try engine.start() } catch { startError = error }
+            }
+            guard built, startError == nil else {
+                log("audio: playback unavailable (\(startError.map { "\($0)" } ?? "no usable output device")); audio disabled")
                 return
             }
-            let output = engine.outputNode.outputFormat(forBus: 0)
-            guard output.sampleRate > 0, output.channelCount > 0 else {
-                log("audio: output device reports \(Int(output.sampleRate)) Hz / \(output.channelCount) ch; playback disabled")
-                return
-            }
-            engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: format)
-            do {
-                try engine.start()
-                player.play()
-                self.engine = engine
-                self.player = player
-                log("audio: playing to default output")
-                // Switching output device (headphones, display speakers, a
-                // session change) stops the engine; without this the rest of
-                // the session is silent.
-                NotificationCenter.default.addObserver(
-                    forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
-                ) { [weak self] _ in
-                    guard let self, let engine = self.engine, let player = self.player else { return }
-                    guard !engine.isRunning else { return }
-                    do {
-                        try engine.start()
-                        player.play()
-                        log("audio: restarted after an output configuration change")
-                    } catch {
-                        log("audio: restart failed: \(error)")
-                    }
+            player.play()
+            self.engine = engine
+            self.player = player
+            log("audio: playing to default output")
+            // Switching output device (headphones, display speakers, a session
+            // change) stops the engine; without this the rest of the session is
+            // silent.
+            NotificationCenter.default.addObserver(
+                forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+            ) { [weak self] _ in
+                guard let self, let engine = self.engine, let player = self.player else { return }
+                guard !engine.isRunning else { return }
+                do {
+                    try engine.start()
+                    player.play()
+                    log("audio: restarted after an output configuration change")
+                } catch {
+                    log("audio: restart failed: \(error)")
                 }
-            } catch {
-                log("audio: engine start failed: \(error)")
             }
         }
     }
