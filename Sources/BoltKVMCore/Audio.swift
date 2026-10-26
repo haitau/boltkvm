@@ -1,5 +1,48 @@
 import Foundation
 import AVFoundation
+import CoreAudio
+
+/// True when CoreAudio reports at least one device with an output stream.
+///
+/// `AVAudioEngine`'s format properties are not a substitute: on a machine with no
+/// output device (headless Mac, VM, GitHub's macOS runners) `outputNode
+/// .outputFormat(forBus: 0)` still answers with a plausible 48 kHz / 2 ch
+/// default, and the graph then raises an Objective-C exception (-10868
+/// FormatNotSupported) inside `connect` — which Swift cannot catch.
+private func hasAudioOutputDevice() -> Bool {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDevices,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject),
+                                         &address, 0, nil, &size) == noErr,
+          size >= MemoryLayout<AudioDeviceID>.size else { return false }
+    var devices = [AudioDeviceID](repeating: 0,
+                                  count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
+                                     &address, 0, nil, &size, &devices) == noErr else { return false }
+
+    return devices.contains { device in
+        var streamAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain)
+        var streamSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(device, &streamAddress, 0, nil, &streamSize) == noErr,
+              streamSize >= MemoryLayout<AudioBufferList>.size else { return false }
+        // Multi-stream devices return a variable-length AudioBufferList; the
+        // property writes `streamSize` bytes, so allocate that much.
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(streamSize),
+                                                  alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { raw.deallocate() }
+        guard AudioObjectGetPropertyData(device, &streamAddress, 0, nil,
+                                         &streamSize, raw) == noErr else { return false }
+        let buffers = UnsafeMutableAudioBufferListPointer(
+            raw.assumingMemoryBound(to: AudioBufferList.self))
+        return buffers.contains { $0.mNumberChannels > 0 }
+    }
+}
 
 /// Client-side audio sink. Audio is opt-in: without `--audio` nothing is
 /// created and the transport carries no audio packets at all, which keeps the
@@ -62,14 +105,17 @@ final class AudioPlayer: @unchecked Sendable {
         if play {
             let engine = AVAudioEngine()
             let player = AVAudioPlayerNode()
-            // No output device (headless Mac, GitHub's macOS runners, a VM) gives
-            // the mixer a 0 Hz / 0-channel hardware format; `connect` then raises
-            // an Objective-C exception (-10868 FormatNotSupported) that Swift
-            // cannot catch. Bail out before touching the graph, so `--audio` on
-            // such a machine is silent instead of fatal.
+            // No output device (headless Mac, VM, GitHub's macOS runners): the
+            // graph would raise an Objective-C exception (-10868) inside
+            // `connect`, which Swift cannot catch. Bail out before touching it,
+            // so `--audio` on such a machine is silent instead of fatal.
+            guard hasAudioOutputDevice() else {
+                log("audio: no CoreAudio output device; playback disabled")
+                return
+            }
             let output = engine.outputNode.outputFormat(forBus: 0)
             guard output.sampleRate > 0, output.channelCount > 0 else {
-                log("audio: no output device (\(Int(output.sampleRate)) Hz, \(output.channelCount) ch); playback disabled")
+                log("audio: output device reports \(Int(output.sampleRate)) Hz / \(output.channelCount) ch; playback disabled")
                 return
             }
             engine.attach(player)
