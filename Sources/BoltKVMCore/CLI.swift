@@ -4,6 +4,7 @@ import CoreVideo
 import Darwin
 import AppKit
 import ApplicationServices
+import Carbon
 
 /// The process owns the virtual display, and `exit()` does not run Swift
 /// deinits. A helper killed with SIGTERM therefore leaves its display in the
@@ -14,6 +15,18 @@ import ApplicationServices
 nonisolated(unsafe) private var displayToRelease: BuiltinVirtualDisplay?
 nonisolated(unsafe) private var terminationSources: [DispatchSourceSignal] = []
 nonisolated(unsafe) private var displayCleanupInstalled = false
+
+/// The helper is a child of the app and lives inside the app bundle, so
+/// LaunchServices otherwise treats it as a second foreground app with the same
+/// bundle id, showing a second Dock icon. It is a background service.
+private func becomeBackgroundApp() {
+    var psn = ProcessSerialNumber(highLongOfPSN: 0, lowLongOfPSN: UInt32(kCurrentProcess))
+    let status = TransformProcessType(
+        &psn,
+        ProcessApplicationTransformState(kProcessTransformToBackgroundApplication)
+    )
+    if status != noErr { log("process: could not switch to background app (status \(status))") }
+}
 
 private func installDisplayCleanup(_ display: BuiltinVirtualDisplay) {
     displayToRelease = display
@@ -43,6 +56,10 @@ private func installTerminationSignalHandling() {
 public enum CLI {
 
     public static func runServer(_ args: [String]) async {
+        // The helper lives inside BoltKVM.app/Contents/MacOS, so LaunchServices
+        // otherwise registers it with the app's bundle id as a second
+        // foreground app — a second Dock icon next to the real one.
+        becomeBackgroundApp()
         if let owner = SingleInstance.acquire(.server) {
             FileHandle.standardError.write(Data("boltkvm: another server is already running (pid \(owner))\n".utf8))
             exit(9)

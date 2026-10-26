@@ -55,7 +55,10 @@ public enum AppMain {
         let delegate = AppDelegate()
         delegateStore = delegate
         app.delegate = delegate
-        app.setActivationPolicy(.regular)
+        // The server role is a menu-bar service. Choosing the policy before
+        // finishLaunching keeps a Dock icon from registering at all; changing
+        // it later can leave a stale icon behind.
+        app.setActivationPolicy(Prefs.role == .server ? .accessory : .regular)
         app.run()
     }
 }
