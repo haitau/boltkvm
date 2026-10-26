@@ -62,6 +62,16 @@ final class AudioPlayer: @unchecked Sendable {
         if play {
             let engine = AVAudioEngine()
             let player = AVAudioPlayerNode()
+            // No output device (headless Mac, GitHub's macOS runners, a VM) gives
+            // the mixer a 0 Hz / 0-channel hardware format; `connect` then raises
+            // an Objective-C exception (-10868 FormatNotSupported) that Swift
+            // cannot catch. Bail out before touching the graph, so `--audio` on
+            // such a machine is silent instead of fatal.
+            let output = engine.outputNode.outputFormat(forBus: 0)
+            guard output.sampleRate > 0, output.channelCount > 0 else {
+                log("audio: no output device (\(Int(output.sampleRate)) Hz, \(output.channelCount) ch); playback disabled")
+                return
+            }
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: format)
             do {
@@ -90,6 +100,14 @@ final class AudioPlayer: @unchecked Sendable {
                 log("audio: engine start failed: \(error)")
             }
         }
+    }
+
+    /// Whether the output engine actually came up. False on a machine without an
+    /// audio device (or one that refuses our format), so callers can tell "the
+    /// user muted it" from "there is nothing to play to".
+    var isPlaybackActive: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return player != nil
     }
 
     /// Guards every field touched by both the receive thread and the main

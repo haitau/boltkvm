@@ -8,6 +8,12 @@ import XCTest
 final class AudioFinishTests: XCTestCase {
     func testFinishReturnsWithQueuedBuffers() throws {
         let player = AudioPlayer(play: true, recordPath: nil)
+        // GitHub's macOS runners have no audio output device, so the engine never
+        // starts and there is no completion queue to drain — the deadlock this
+        // guards cannot happen there. Skip instead of failing on missing hardware.
+        guard player.isPlaybackActive else {
+            throw XCTSkip("no usable audio output device; the drain path cannot be exercised")
+        }
         // 1024 frames of silence, 32 times: enough to keep completion handlers
         // in flight when finish() runs.
         let chunk = Data(repeating: 0, count: 4 * 1024)
