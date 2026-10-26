@@ -6,8 +6,8 @@
 
 ```bash
 # Info.plist 中的版本号仅为默认值，CI 与本地构建都会盖章
-git tag v0.12
-git push origin v0.12
+git tag v0.12.1
+git push origin v0.12.1
 ```
 
 `.github/workflows/release.yml` 执行步骤：
@@ -31,10 +31,10 @@ git push origin v0.12
 
 ## 版本号规则
 
-- Git 标签：`v0.12`（发布名显示为 `0.12`）；
-- `CFBundleShortVersionString`：`0.12`（标签去掉 `v`）；
+- Git 标签：`v0.12.1`（发布名显示为 `0.12.1`）；
+- `CFBundleShortVersionString`：`0.12.1`（标签去掉 `v`）；
 - `CFBundleVersion`：CI 使用 `GITHUB_RUN_NUMBER`，本地使用提交数 `git rev-list --count HEAD`；
-- 本地工作树有未提交改动时，`git describe --dirty` 会得到 `0.12-1-gabc1234-dirty` 这类版本串，便于区分已发布包。
+- 本地工作树有未提交改动时，`git describe --dirty` 会得到 `0.12.1-1-gabc1234-dirty` 这类版本串，便于区分已发布包。
 
 ## 持续集成（CI）
 
@@ -46,7 +46,7 @@ git push origin v0.12
 3. 运行 `selftest` 与 `cryptotest`；
 4. 执行 `Packaging/build-app.sh` 组装应用并上传为构建产物（Artifact）。
 
-当前 CI 跑全部 XCTest（当前 77 项，不写死数量）；没有音频输出设备的 runner 会跳过音频回归项（见 [音频设备报告](reports/2026-10-26-audio-no-output-device.md)）。
+当前 CI 跑全部 XCTest（当前 80 项，不写死数量）；没有音频输出设备的 runner 会跳过音频回归项（见 [音频设备报告](reports/2026-10-26-audio-no-output-device.md)）。
 
 ## 开发环境与工具链
 
