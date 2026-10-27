@@ -247,6 +247,9 @@ public enum CLI {
                     try await server.start()
                 } catch {
                     log("session start failed: \(error)")
+                    // start() may have created the clipboard timer or muted the
+                    // output before the capture failed; unwind both.
+                    await server.stop()
                     conn.close()
                     continue
                 }
