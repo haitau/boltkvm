@@ -67,6 +67,18 @@ final class ClipboardTests: XCTestCase {
                           ClipboardSync.hash(Data("abd".utf8)))
     }
 
+    func testSymlinkDetection() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let plain = dir.appendingPathComponent("plain.txt")
+        try Data("x".utf8).write(to: plain)
+        XCTAssertFalse(ClipboardSync.containsSymlink(dir))
+        let link = dir.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: URL(fileURLWithPath: "/etc"))
+        XCTAssertTrue(ClipboardSync.containsSymlink(dir))
+    }
+
     func testConcealedTypesAreListed() {
         XCTAssertTrue(ClipboardSync.concealedTypes.contains("org.nspasteboard.ConcealedType"))
         XCTAssertTrue(ClipboardSync.concealedTypes.contains("org.nspasteboard.TransientType"))

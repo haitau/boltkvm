@@ -287,6 +287,10 @@ final class ClipboardSync: @unchecked Sendable {
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { continue }
             if isDir.boolValue {
+                guard !Self.containsSymlink(url) else {
+                    log("clipboard: skipped folder \(url.lastPathComponent); symlinks are not supported")
+                    continue
+                }
                 let zip = FileManager.default.temporaryDirectory
                     .appendingPathComponent("boltkvm-\(UUID().uuidString).zip")
                 guard Self.zipDirectory(url, to: zip) else {
@@ -479,6 +483,21 @@ final class ClipboardSync: @unchecked Sendable {
     }
 
     /// Reject absolute paths and `..` before extracting a peer-supplied zip.
+    /// Symlinks are not supported: a peer-supplied archive must not be able to
+    /// create a link that points at a path outside the receive folder.
+    static func containsSymlink(_ url: URL) -> Bool {
+        let keys: [URLResourceKey] = [.isSymbolicLinkKey]
+        let root = try? url.resourceValues(forKeys: Set(keys))
+        if root?.isSymbolicLink == true { return true }
+        guard let e = FileManager.default.enumerator(at: url, includingPropertiesForKeys: keys) else {
+            return false
+        }
+        for case let child as URL in e {
+            if (try? child.resourceValues(forKeys: Set(keys)).isSymbolicLink) == true { return true }
+        }
+        return false
+    }
+
     static func zipEntriesAreSafe(_ zip: URL) -> Bool {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
@@ -668,6 +687,10 @@ private final class IncomingFiles {
                       let children = try? fm.contentsOfDirectory(at: extract, includingPropertiesForKeys: nil),
                       !children.isEmpty else {
                     log("clipboard: could not extract \(item.name)")
+                    return nil
+                }
+                guard !ClipboardSync.containsSymlink(extract) else {
+                    log("clipboard: refused \(item.name); archive contains a symlink")
                     return nil
                 }
                 // ditto without --keepParent puts the folder's contents at the
