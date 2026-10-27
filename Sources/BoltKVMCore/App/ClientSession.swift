@@ -189,7 +189,10 @@ final class ClientSession: @unchecked Sendable {
                         // decrypts too, not just server→client.
                         try? c.send(timeSyncRequest())
                         if shareClipboard {
-                            let sync = ClipboardSync(conn: c, enabled: true)
+                            let sync = ClipboardSync(
+                                conn: c, enabled: true,
+                                maxItemBytes: Prefs.clipboardMaxMB << 20,
+                                maxTransferBytes: Int64(Prefs.clipboardMaxGB) << 30)
                             sync.start()
                             self.clipboard = sync
                         }

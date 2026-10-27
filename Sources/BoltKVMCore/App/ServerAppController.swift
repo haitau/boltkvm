@@ -423,6 +423,12 @@ final class ServerAppController: NSObject {
         if Prefs.serverCodec == "hevc" { args += ["--codec", "hevc"] }
         if Prefs.serverAudio { args += ["--audio"] }
         if !Prefs.serverClipboard { args += ["--no-clipboard"] }
+        if Prefs.serverClipboardMaxMB != 512 {
+            args += ["--clipboard-max-mb", String(Prefs.serverClipboardMaxMB)]
+        }
+        if Prefs.serverClipboardMaxGB != 0 {
+            args += ["--clipboard-max-gb", String(Prefs.serverClipboardMaxGB)]
+        }
         return args
     }
 

@@ -45,6 +45,9 @@ final class ClipboardSync: @unchecked Sendable {
     private let conn: TCPConnection
     private let enabled: Bool
     private let maxItemBytes: Int
+    /// 0 means "as much as fits on disk minus the reserve"; a positive value is
+    /// an additional user-configured ceiling.
+    private let maxTransferBytes: Int64
     private let queue = DispatchQueue(label: "boltkvm.clipboard", qos: .utility)
     private var timer: DispatchSourceTimer?
     private var lastChangeCount = -1
@@ -59,10 +62,13 @@ final class ClipboardSync: @unchecked Sendable {
 
     var onSent: ((String) -> Void)?
 
-    init(conn: TCPConnection, enabled: Bool, maxItemBytes: Int = ClipboardSync.defaultMaxItemBytes) {
+    init(conn: TCPConnection, enabled: Bool,
+         maxItemBytes: Int = ClipboardSync.defaultMaxItemBytes,
+         maxTransferBytes: Int64 = 0) {
         self.conn = conn
         self.enabled = enabled
         self.maxItemBytes = max(1, maxItemBytes)
+        self.maxTransferBytes = max(0, maxTransferBytes)
     }
 
     func start() {
@@ -287,8 +293,10 @@ final class ClipboardSync: @unchecked Sendable {
         guard !manifest.items.isEmpty else { return }
 
         let total = manifest.items.reduce(Int64(0)) { $0 + $1.size }
-        guard total <= Self.freeDiskBytes() - Self.diskReserve else {
-            log("clipboard: refused \(total) B; less than 20 GB would remain on disk")
+        let diskLimit = Self.freeDiskBytes() - Self.diskReserve
+        let limit = maxTransferBytes > 0 ? min(maxTransferBytes, diskLimit) : diskLimit
+        guard total <= limit else {
+            log("clipboard: refused \(total) B; transfer limit is \(limit) B")
             return
         }
 
@@ -363,7 +371,8 @@ final class ClipboardSync: @unchecked Sendable {
             let length = Int(payload.readUInt32BE(payload.startIndex + 5))
             guard length > 0, payload.count >= 9 + length else { return }
             let json = payload.subdata(in: (payload.startIndex + 9)..<(payload.startIndex + 9 + length))
-            guard let manifest = FileManifest.decode(json), FileManifest.isSafe(manifest) else {
+            guard let manifest = FileManifest.decode(json),
+                  FileManifest.isSafe(manifest, maxTransferBytes: maxTransferBytes) else {
                 log("clipboard: rejected unsafe file manifest")
                 return
             }
@@ -547,7 +556,7 @@ struct FileManifest: Codable {
         try? JSONDecoder().decode(FileManifest.self, from: data)
     }
 
-    static func isSafe(_ manifest: FileManifest) -> Bool {
+    static func isSafe(_ manifest: FileManifest, maxTransferBytes: Int64 = 0) -> Bool {
         guard !manifest.items.isEmpty, manifest.items.count <= 64 else { return false }
         for item in manifest.items {
             if item.name.isEmpty || item.name == "." || item.name == ".." { return false }
@@ -555,7 +564,9 @@ struct FileManifest: Codable {
             if item.size < 0 || item.sha256.count != 64 { return false }
             if !item.sha256.allSatisfy({ $0.isHexDigit }) { return false }
         }
-        return manifest.totalBytes >= 0 && manifest.totalBytes <= ClipboardSync.freeDiskBytes() - ClipboardSync.diskReserve
+        let diskLimit = ClipboardSync.freeDiskBytes() - ClipboardSync.diskReserve
+        let limit = maxTransferBytes > 0 ? min(maxTransferBytes, diskLimit) : diskLimit
+        return manifest.totalBytes >= 0 && manifest.totalBytes <= limit
     }
 }
 

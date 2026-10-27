@@ -25,6 +25,8 @@ final class Server: NSObject, SCStreamOutput {
     let clipboardEnabled: Bool
     /// Mute the controlled Mac's local speakers while a client listens (A-1).
     let muteLocalOutput: Bool
+    private let clipboardMaxItemBytes: Int
+    private let clipboardMaxTransferBytes: Int64
     private var clipboard: ClipboardSync?
     private var localMute: AudioOutputMute?
     private var dumped = false
@@ -87,10 +89,13 @@ final class Server: NSObject, SCStreamOutput {
     init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?,
          audioEnabled: Bool = false, preferredDisplayID: CGDirectDisplayID? = nil,
          colorMode: ColorMode = .standard, clipboardEnabled: Bool = true,
-         muteLocalOutput: Bool = true) {
+         muteLocalOutput: Bool = true, clipboardMaxItemBytes: Int = ClipboardSync.defaultMaxItemBytes,
+         clipboardMaxTransferBytes: Int64 = 0) {
         self.colorMode = colorMode
         self.clipboardEnabled = clipboardEnabled
         self.muteLocalOutput = muteLocalOutput
+        self.clipboardMaxItemBytes = max(1, clipboardMaxItemBytes)
+        self.clipboardMaxTransferBytes = max(0, clipboardMaxTransferBytes)
         // A logical size can be odd (1728×1117); VideoToolbox wants even.
         let even = evenVideoSize(width: width, height: height)
         self.captureWidth = even.width
@@ -120,7 +125,9 @@ final class Server: NSObject, SCStreamOutput {
             log("warning: Accessibility/post-event permission missing; input injection will fail")
         }
         if clipboardEnabled {
-            let sync = ClipboardSync(conn: connection, enabled: true)
+            let sync = ClipboardSync(conn: connection, enabled: true,
+                                     maxItemBytes: clipboardMaxItemBytes,
+                                     maxTransferBytes: clipboardMaxTransferBytes)
             sync.start()
             clipboard = sync
         }

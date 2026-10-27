@@ -43,6 +43,15 @@ final class ClipboardTests: XCTestCase {
         XCTAssertFalse(FileManifest.isSafe(negative))
     }
 
+    func testManifestHonoursConfiguredTransferCeiling() {
+        let good = String(repeating: "c", count: 64)
+        let manifest = FileManifest(items: [
+            .init(name: "a.bin", isDirectory: false, size: 100, sha256: good),
+        ])
+        XCTAssertTrue(FileManifest.isSafe(manifest, maxTransferBytes: 100))
+        XCTAssertFalse(FileManifest.isSafe(manifest, maxTransferBytes: 99))
+    }
+
     func testManifestRejectsMoreThan64Items() {
         let good = String(repeating: "b", count: 64)
         let items = (0..<65).map {

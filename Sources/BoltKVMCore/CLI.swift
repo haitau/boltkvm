@@ -228,7 +228,9 @@ public enum CLI {
                                 : virtualDisplay?.displayID,
                             colorMode: desiredColor,
                             clipboardEnabled: !args.contains("--no-clipboard"),
-                            muteLocalOutput: !args.contains("--no-local-mute"))
+                            muteLocalOutput: !args.contains("--no-local-mute"),
+                            clipboardMaxItemBytes: max(1, argInt(args, "--clipboard-max-mb", 512)) << 20,
+                            clipboardMaxTransferBytes: Int64(max(0, argInt(args, "--clipboard-max-gb", 0))) << 30)
                 do {
                     try await server.start()
                 } catch {
@@ -548,7 +550,9 @@ public enum CLI {
                         log("auth ok")
                         installPauseOnRouteChange(audio, conn: c)
                         if clipboardEnabled {
-                            let sync = ClipboardSync(conn: c, enabled: true)
+                            let sync = ClipboardSync(conn: c, enabled: true,
+                                                     maxItemBytes: max(1, argInt(args, "--clipboard-max-mb", 512)) << 20,
+                                                     maxTransferBytes: Int64(max(0, argInt(args, "--clipboard-max-gb", 0))) << 30)
                             sync.start()
                             clipboardSync = sync
                         }
@@ -661,7 +665,9 @@ public enum CLI {
                 log("auth ok")
                 installPauseOnRouteChange(audio, conn: conn)
                 if !args.contains("--no-clipboard") {
-                    let sync = ClipboardSync(conn: conn, enabled: true)
+                    let sync = ClipboardSync(conn: conn, enabled: true,
+                                             maxItemBytes: max(1, argInt(args, "--clipboard-max-mb", 512)) << 20,
+                                             maxTransferBytes: Int64(max(0, argInt(args, "--clipboard-max-gb", 0))) << 30)
                     sync.start()
                     clipboardSync = sync
                 }
