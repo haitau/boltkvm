@@ -20,6 +20,8 @@ final class SessionPump {
     var onAuthOk: ((PacketHeader, Data) throws -> Void)?
     var onFormat: ((StreamFormat) -> Void)?
     var onAudio: ((Data) -> Void)?
+    var onClipboard: ((Data) -> Void)?
+    var onFileTransfer: ((Data) -> Void)?
     var onWindow: ((Window) -> Void)?
     /// Lifetime totals every 60 s; the CLI smoke test uses it to prove the loop
     /// is still alive on a quiet screen.
@@ -78,6 +80,10 @@ final class SessionPump {
                 decoder.decode(payload, ptsMicros: header.ptsMicros)
             case .audio:
                 onAudio?(payload)
+            case .clipboard:
+                onClipboard?(payload)
+            case .fileTransfer:
+                onFileTransfer?(payload)
             case .timeSync:
                 handleTimeSync(header, payload, decoder: decoder)
             }

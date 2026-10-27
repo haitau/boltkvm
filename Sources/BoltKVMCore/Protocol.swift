@@ -49,6 +49,13 @@ enum PacketType: UInt8 {
     /// authenticated channel. Both sides re-key from the shared secret, so the
     /// PSK alone cannot decrypt a recorded session (forward secrecy).
     case authExchange = 12
+    /// One chunk of a clipboard bundle (text/rich text/image). The payload is
+    /// transferID(4) totalLength(4) offset(4) + chunk; a bundle is reassembled
+    /// before it touches the pasteboard.
+    case clipboard = 13
+    /// One packet of a file/folder transfer: begin(manifest), chunk, end, abort.
+    /// Files stream to disk instead of the in-memory clipboard path.
+    case fileTransfer = 14
 }
 
 /// Colour pipeline. `.standard` is what every session used before this existed:

@@ -21,6 +21,9 @@ final class Server: NSObject, SCStreamOutput {
     /// guessing by area (the machine may also have a physical screen attached).
     let preferredDisplayID: CGDirectDisplayID?
     let audioEnabled: Bool
+    /// Clipboard sharing is on by default; `--no-clipboard` turns it off.
+    let clipboardEnabled: Bool
+    private var clipboard: ClipboardSync?
     private var dumped = false
 
     private let audioTarget = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000,
@@ -80,8 +83,9 @@ final class Server: NSObject, SCStreamOutput {
 
     init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?,
          audioEnabled: Bool = false, preferredDisplayID: CGDirectDisplayID? = nil,
-         colorMode: ColorMode = .standard) {
+         colorMode: ColorMode = .standard, clipboardEnabled: Bool = true) {
         self.colorMode = colorMode
+        self.clipboardEnabled = clipboardEnabled
         // A logical size can be odd (1728×1117); VideoToolbox wants even.
         let even = evenVideoSize(width: width, height: height)
         self.captureWidth = even.width
@@ -109,6 +113,11 @@ final class Server: NSObject, SCStreamOutput {
         }
         if !CGPreflightPostEventAccess() {
             log("warning: Accessibility/post-event permission missing; input injection will fail")
+        }
+        if clipboardEnabled {
+            let sync = ClipboardSync(conn: connection, enabled: true)
+            sync.start()
+            clipboard = sync
         }
         startClockResponder()
         startHeartbeat()
@@ -318,6 +327,10 @@ final class Server: NSObject, SCStreamOutput {
                         if let raw = payload.first, let action = RemoteAction(rawValue: raw) {
                             self.performRemote(action)
                         }
+                    } else if h.type == .clipboard {
+                        self.clipboard?.handleClipboard(payload)
+                    } else if h.type == .fileTransfer {
+                        self.clipboard?.handleFile(payload)
                     }
                 } catch {
                     // A connection closed by the write side (send timeout,
@@ -516,6 +529,8 @@ final class Server: NSObject, SCStreamOutput {
     }
 
     func stop() async {
+        clipboard?.stop()
+        clipboard = nil
         if let stream {
             try? await stream.stopCapture()
         }

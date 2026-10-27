@@ -42,6 +42,14 @@ enum Prefs {
         set { d.set(newValue, forKey: "client.audio") }
     }
 
+    /// Share the clipboard with the peer. On by default for a KVM, but
+    /// concealed/transient pasteboard content is never sent; users who do not
+    /// want passwords crossing the link can turn it off here.
+    static var clipboard: Bool {
+        get { d.object(forKey: "client.clipboard") as? Bool ?? true }
+        set { d.set(newValue, forKey: "client.clipboard") }
+    }
+
     static var serverPort: Int {
         get { d.object(forKey: "server.port") as? Int ?? 7474 }
         set { d.set(newValue, forKey: "server.port") }
@@ -129,6 +137,12 @@ enum Prefs {
     static var serverAudio: Bool {
         get { d.object(forKey: "server.audio") as? Bool ?? false }
         set { d.set(newValue, forKey: "server.audio") }
+    }
+
+    /// Server-side kill switch for clipboard sharing.
+    static var serverClipboard: Bool {
+        get { d.object(forKey: "server.clipboard") as? Bool ?? true }
+        set { d.set(newValue, forKey: "server.clipboard") }
     }
 
     static var serverCodec: String {

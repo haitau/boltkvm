@@ -38,6 +38,7 @@ final class ClientSession: @unchecked Sendable {
     /// with a local NSEvent monitor (no Input Monitoring permission needed).
     weak var inputView: NSView?
     private var audio: AudioPlayer?
+    private var clipboard: ClipboardSync?
     private var decoder: VideoDecoder?
     private(set) var state: State = .idle
     /// Bumped by every connect/disconnect. A detached task compares it after
@@ -72,7 +73,8 @@ final class ClientSession: @unchecked Sendable {
     /// Real stream size, reported once the server describes its format.
     var onFormat: ((Int, Int, ColorMode) -> Void)?
 
-    func connect(host: String, port: UInt16, key: Data?, forwardInput: Bool, playAudio: Bool) {
+    func connect(host: String, port: UInt16, key: Data?, forwardInput: Bool, playAudio: Bool,
+                 shareClipboard: Bool = true) {
         disconnect()
         let gen = bumpGeneration()
         // --key on the CLI, $BOLTKVM_KEY, then ~/.boltkvm-key; the app never exits
@@ -136,6 +138,8 @@ final class ClientSession: @unchecked Sendable {
                     var wantInput = forwardInput
                     var authResponseSentAt: Int64 = 0
                     let pump = SessionPump(conn: c, decoder: decoder)
+                    pump.onClipboard = { [weak self] payload in self?.clipboard?.handleClipboard(payload) }
+                    pump.onFileTransfer = { [weak self] payload in self?.clipboard?.handleFile(payload) }
                     pump.onChallenge = { payload in
                         challengeNonce = payload
                         authResponseSentAt = Int64(Date().timeIntervalSince1970 * 1_000_000)
@@ -170,6 +174,11 @@ final class ClientSession: @unchecked Sendable {
                         // Encrypted ping: proves the client→server direction
                         // decrypts too, not just server→client.
                         try? c.send(timeSyncRequest())
+                        if shareClipboard {
+                            let sync = ClipboardSync(conn: c, enabled: true)
+                            sync.start()
+                            self.clipboard = sync
+                        }
                     }
                     pump.onFormat = { format in
                         let size = (format.width, format.height)
@@ -215,6 +224,8 @@ final class ClientSession: @unchecked Sendable {
                 self.input = nil
                 self.windowInput?.stop()
                 self.windowInput = nil
+                self.clipboard?.stop()
+                self.clipboard = nil
                 self.audio?.finish()
                 self.audio = nil
                 if authRejected { break }
@@ -236,6 +247,8 @@ final class ClientSession: @unchecked Sendable {
             self.input = nil
             self.windowInput?.stop()
             self.windowInput = nil
+            self.clipboard?.stop()
+            self.clipboard = nil
             self.audio?.finish()
             self.audio = nil
             self.decoder = nil
@@ -303,6 +316,8 @@ final class ClientSession: @unchecked Sendable {
         input = nil
         windowInput?.stop()
         windowInput = nil
+        clipboard?.stop()
+        clipboard = nil
         audio?.finish()
         audio = nil
         decoder?.report()

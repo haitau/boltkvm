@@ -381,7 +381,8 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             session.requestedConfig = nil
         }
         session.connect(host: host.host, port: host.port, key: explicitKey,
-                        forwardInput: forwardInput, playAudio: playAudio)
+                        forwardInput: forwardInput, playAudio: playAudio,
+                        shareClipboard: Prefs.clipboard)
     }
 
     /// Match the window to the remote picture, at 1:1 when that fits.

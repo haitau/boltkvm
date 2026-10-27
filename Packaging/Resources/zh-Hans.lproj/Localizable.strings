@@ -32,6 +32,7 @@
 "client.placeholder.key" = "被控端面板里的 8 位连接密码（可点「复制」）";
 "client.check.input" = "转发键鼠";
 "client.check.audio" = "音频";
+"client.check.clipboard" = "剪切板（文本/图片/文件）";
 "client.hosts.color" = "色彩";
 "client.color.standard" = "标准（8-bit）";
 "client.color.wide" = "广色域（10-bit P3）";

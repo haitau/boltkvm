@@ -231,6 +231,10 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         inputCheck.state = (host?.forwardInput ?? Prefs.forwardInput) ? .on : .off
         let audioCheck = NSButton(checkboxWithTitle: L.t("client.check.audio"), target: nil, action: nil)
         audioCheck.state = (host?.audio ?? Prefs.audio) ? .on : .off
+        // Global rather than per host: it is the same two machines on the same
+        // link, and a clipboard is a property of the session, not of a display.
+        let clipboardCheck = NSButton(checkboxWithTitle: L.t("client.check.clipboard"), target: nil, action: nil)
+        clipboardCheck.state = Prefs.clipboard ? .on : .off
         // Colour is per host: it changes what the *server* captures, so it
         // cannot be a global preference shared with a standard-gamut machine.
         let colorPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -250,6 +254,7 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         ]
         rows.append(("", inputCheck))
         rows.append(("", audioCheck))
+        rows.append(("", clipboardCheck))
         let rowHeight = 32
         let form = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: CGFloat(rows.count * rowHeight + 10)))
         let formHeight = form.frame.height
@@ -292,6 +297,7 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         let keyAccount = hasKey ? account : nil
         let forwardsInput = inputCheck.state == .on
         let playsAudio = audioCheck.state == .on
+        Prefs.clipboard = clipboardCheck.state == .on
         let color = colorPopUp.indexOfSelectedItem == 1 ? ColorMode.wide.rawValue : ColorMode.standard.rawValue
         if var existing = host {
             existing.name = name

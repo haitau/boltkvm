@@ -208,7 +208,8 @@ public enum CLI {
                             preferredDisplayID: argInt(args, "--display-id", 0) != 0
                                 ? CGDirectDisplayID(argInt(args, "--display-id", 0))
                                 : virtualDisplay?.displayID,
-                            colorMode: desiredColor)
+                            colorMode: desiredColor,
+                            clipboardEnabled: !args.contains("--no-clipboard"))
                 do {
                     try await server.start()
                 } catch {
@@ -481,6 +482,7 @@ public enum CLI {
             ? AudioPlayer(play: args.contains("--audio"), recordPath: audioRecord.isEmpty ? nil : audioRecord)
             : nil
 
+        let clipboardEnabled = !args.contains("--no-clipboard")
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.delegate = RenderSession.shared
         RenderSession.shared.start(switchMode: switchMode)
@@ -509,7 +511,10 @@ public enum CLI {
                     decoder.renderer = RenderSession.shared.renderer
                     lastDecoder = decoder
                     var inputStarted = false
+                    var clipboardSync: ClipboardSync?
                     let pump = SessionPump(conn: c, decoder: decoder)
+                    pump.onClipboard = { clipboardSync?.handleClipboard($0) }
+                    pump.onFileTransfer = { clipboardSync?.handleFile($0) }
                     pump.onChallenge = { payload in
                         sawChallenge = true
                         challengeNonce = payload
@@ -522,6 +527,11 @@ public enum CLI {
                             conn: c, nonce: challengeNonce,
                             forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                         log("auth ok")
+                        if clipboardEnabled {
+                            let sync = ClipboardSync(conn: c, enabled: true)
+                            sync.start()
+                            clipboardSync = sync
+                        }
                         if header.payloadLength >= 9, payload.first == 1, authSentAt > 0 {
                             let t2 = payload.readInt64BE(payload.startIndex + 1)
                             let t3 = Int64(Date().timeIntervalSince1970 * 1_000_000)
@@ -562,6 +572,7 @@ public enum CLI {
                         }
                     }
                     try pump.run(deadline: DispatchTime(uptimeNanoseconds: deadline))
+                    clipboardSync?.stop()
                     c.close()
                     break
                 } catch {
@@ -613,6 +624,9 @@ public enum CLI {
             let decoder = VideoDecoder()
             let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
             let pump = SessionPump(conn: conn, decoder: decoder)
+            var clipboardSync: ClipboardSync?
+            pump.onClipboard = { clipboardSync?.handleClipboard($0) }
+            pump.onFileTransfer = { clipboardSync?.handleFile($0) }
             var challengeNonce: Data?
             var authSentAt: Int64 = 0
             pump.onChallenge = { payload in
@@ -625,6 +639,11 @@ public enum CLI {
                     conn: conn, nonce: challengeNonce,
                     forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                 log("auth ok")
+                if !args.contains("--no-clipboard") {
+                    let sync = ClipboardSync(conn: conn, enabled: true)
+                    sync.start()
+                    clipboardSync = sync
+                }
                 if header.payloadLength >= 9, payload.first == 1, authSentAt > 0 {
                     let t2 = payload.readInt64BE(payload.startIndex + 1)
                     let t3 = Int64(Date().timeIntervalSince1970 * 1_000_000)
@@ -646,6 +665,7 @@ public enum CLI {
             } catch {
                 log("client read error: \(error)")
             }
+            clipboardSync?.stop()
             audio?.finish()
             decoder.report()
             log("received frames=\(pump.frames) lastType=\(String(describing: pump.lastType))")

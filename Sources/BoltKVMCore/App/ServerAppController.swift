@@ -422,6 +422,7 @@ final class ServerAppController: NSObject {
                     "--virtual-display-size", Prefs.serverDisplaySize]
         if Prefs.serverCodec == "hevc" { args += ["--codec", "hevc"] }
         if Prefs.serverAudio { args += ["--audio"] }
+        if !Prefs.serverClipboard { args += ["--no-clipboard"] }
         return args
     }
 

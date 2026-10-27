@@ -32,6 +32,7 @@
 "client.placeholder.key" = "8-character password from the server panel (or Copy there)";
 "client.check.input" = "Forward input";
 "client.check.audio" = "Audio";
+"client.check.clipboard" = "Clipboard (text/images/files)";
 "client.hosts.color" = "Colour";
 "client.color.standard" = "Standard (8-bit)";
 "client.color.wide" = "Wide gamut (10-bit P3)";
