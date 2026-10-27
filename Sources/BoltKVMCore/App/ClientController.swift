@@ -257,6 +257,11 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     /// enough to call from the 5 Hz fullscreen poll.
     private func layoutVideo() {
         guard let window, let content = window.contentView else { return }
+        // AppKit can recreate the separator when the toolbar visibility
+        // changes; keep it off on every layout tick, not only on entry.
+        if window.titlebarSeparatorStyle != .none {
+            window.titlebarSeparatorStyle = .none
+        }
         let bounds = content.bounds
         let measured = max(0, bounds.height - window.contentLayoutRect.height)
         if measured > 0 { chromeHeight = measured }
