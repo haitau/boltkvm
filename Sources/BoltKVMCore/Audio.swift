@@ -389,7 +389,9 @@ final class AudioPlayer: @unchecked Sendable {
             guard let self else { return }
             self.lock.lock()
             self.routeNotifyQueued = false
-            let callback = self.onOutputRouteChange
+            // The debounce can outlive the session; do not send a pause for a
+            // connection that is already gone.
+            let callback = self.finished ? nil : self.onOutputRouteChange
             self.lock.unlock()
             callback?()
         }
