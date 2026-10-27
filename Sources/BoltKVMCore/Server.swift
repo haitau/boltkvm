@@ -23,7 +23,10 @@ final class Server: NSObject, SCStreamOutput {
     let audioEnabled: Bool
     /// Clipboard sharing is on by default; `--no-clipboard` turns it off.
     let clipboardEnabled: Bool
+    /// Mute the controlled Mac's local speakers while a client listens (A-1).
+    let muteLocalOutput: Bool
     private var clipboard: ClipboardSync?
+    private var localMute: AudioOutputMute?
     private var dumped = false
 
     private let audioTarget = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000,
@@ -83,9 +86,11 @@ final class Server: NSObject, SCStreamOutput {
 
     init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?,
          audioEnabled: Bool = false, preferredDisplayID: CGDirectDisplayID? = nil,
-         colorMode: ColorMode = .standard, clipboardEnabled: Bool = true) {
+         colorMode: ColorMode = .standard, clipboardEnabled: Bool = true,
+         muteLocalOutput: Bool = true) {
         self.colorMode = colorMode
         self.clipboardEnabled = clipboardEnabled
+        self.muteLocalOutput = muteLocalOutput
         // A logical size can be odd (1728×1117); VideoToolbox wants even.
         let even = evenVideoSize(width: width, height: height)
         self.captureWidth = even.width
@@ -247,6 +252,11 @@ final class Server: NSObject, SCStreamOutput {
         self.stream = stream
         startTime = DispatchTime.now().uptimeNanoseconds
         log("capture started; waiting for frames")
+        if audioEnabled && muteLocalOutput {
+            let mute = AudioOutputMute()
+            mute.start()
+            localMute = mute
+        }
     }
 
     private func dumpFrame(_ pb: CVPixelBuffer) {
@@ -529,6 +539,8 @@ final class Server: NSObject, SCStreamOutput {
     }
 
     func stop() async {
+        localMute?.stop()
+        localMute = nil
         clipboard?.stop()
         clipboard = nil
         if let stream {

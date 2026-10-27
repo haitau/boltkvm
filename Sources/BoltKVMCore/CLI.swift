@@ -56,6 +56,9 @@ private func installTerminationSignalHandling() {
 public enum CLI {
 
     public static func runServer(_ args: [String]) async {
+        // A previous helper may have been killed while it had muted the local
+        // output for a client. Restore it before doing anything else.
+        AudioOutputMute.restoreStaleState()
         // The helper lives inside BoltKVM.app/Contents/MacOS, so LaunchServices
         // otherwise registers it with the app's bundle id as a second
         // foreground app — a second Dock icon next to the real one.
@@ -209,7 +212,8 @@ public enum CLI {
                                 ? CGDirectDisplayID(argInt(args, "--display-id", 0))
                                 : virtualDisplay?.displayID,
                             colorMode: desiredColor,
-                            clipboardEnabled: !args.contains("--no-clipboard"))
+                            clipboardEnabled: !args.contains("--no-clipboard"),
+                            muteLocalOutput: !args.contains("--no-local-mute"))
                 do {
                     try await server.start()
                 } catch {
