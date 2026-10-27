@@ -53,6 +53,18 @@ private func installTerminationSignalHandling() {
     }
 }
 
+/// 4 GB is the protocol's hard ceiling for one non-file item; larger user
+/// values are clamped instead of overflowing the UInt32 length field.
+private func clipboardMaxItemBytes(_ args: [String]) -> Int {
+    min(max(1, argInt(args, "--clipboard-max-mb", 512)), 4095) << 20
+}
+
+/// 0 means "disk minus the reserve". Cap the user value so the GB→byte shift
+/// cannot overflow.
+private func clipboardMaxTransferBytes(_ args: [String]) -> Int64 {
+    Int64(min(max(0, argInt(args, "--clipboard-max-gb", 0)), 1_000_000)) << 30
+}
+
 /// A-2: the CLI client uses the same route-change pause hook as the GUI
 /// client, so a headless session behaves like the app when headphones move.
 private func installPauseOnRouteChange(_ audio: AudioPlayer?, conn: TCPConnection) {
@@ -229,8 +241,8 @@ public enum CLI {
                             colorMode: desiredColor,
                             clipboardEnabled: !args.contains("--no-clipboard"),
                             muteLocalOutput: !args.contains("--no-local-mute"),
-                            clipboardMaxItemBytes: max(1, argInt(args, "--clipboard-max-mb", 512)) << 20,
-                            clipboardMaxTransferBytes: Int64(max(0, argInt(args, "--clipboard-max-gb", 0))) << 30)
+                            clipboardMaxItemBytes: clipboardMaxItemBytes(args),
+                            clipboardMaxTransferBytes: clipboardMaxTransferBytes(args))
                 do {
                     try await server.start()
                 } catch {
@@ -551,8 +563,8 @@ public enum CLI {
                         installPauseOnRouteChange(audio, conn: c)
                         if clipboardEnabled {
                             let sync = ClipboardSync(conn: c, enabled: true,
-                                                     maxItemBytes: max(1, argInt(args, "--clipboard-max-mb", 512)) << 20,
-                                                     maxTransferBytes: Int64(max(0, argInt(args, "--clipboard-max-gb", 0))) << 30)
+                                                     maxItemBytes: clipboardMaxItemBytes(args),
+                                                     maxTransferBytes: clipboardMaxTransferBytes(args))
                             sync.start()
                             clipboardSync = sync
                         }
@@ -666,8 +678,8 @@ public enum CLI {
                 installPauseOnRouteChange(audio, conn: conn)
                 if !args.contains("--no-clipboard") {
                     let sync = ClipboardSync(conn: conn, enabled: true,
-                                             maxItemBytes: max(1, argInt(args, "--clipboard-max-mb", 512)) << 20,
-                                             maxTransferBytes: Int64(max(0, argInt(args, "--clipboard-max-gb", 0))) << 30)
+                                             maxItemBytes: clipboardMaxItemBytes(args),
+                                             maxTransferBytes: clipboardMaxTransferBytes(args))
                     sync.start()
                     clipboardSync = sync
                 }

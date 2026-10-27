@@ -53,13 +53,13 @@ enum Prefs {
     /// Clipboard non-file item ceiling, in MB. 512 MB is only the default; the
     /// user can raise it via `defaults write`.
     static var clipboardMaxMB: Int {
-        get { max(1, d.object(forKey: "client.clipboardMaxMB") as? Int ?? 512) }
+        get { min(max(1, d.object(forKey: "client.clipboardMaxMB") as? Int ?? 512), 4095) }
         set { d.set(max(1, newValue), forKey: "client.clipboardMaxMB") }
     }
 
     /// Additional file-transfer ceiling in GB; 0 means "disk minus 20 GB".
     static var clipboardMaxGB: Int {
-        get { max(0, d.object(forKey: "client.clipboardMaxGB") as? Int ?? 0) }
+        get { min(max(0, d.object(forKey: "client.clipboardMaxGB") as? Int ?? 0), 1_000_000) }
         set { d.set(max(0, newValue), forKey: "client.clipboardMaxGB") }
     }
 
@@ -159,12 +159,12 @@ enum Prefs {
     }
 
     static var serverClipboardMaxMB: Int {
-        get { max(1, d.object(forKey: "server.clipboardMaxMB") as? Int ?? 512) }
+        get { min(max(1, d.object(forKey: "server.clipboardMaxMB") as? Int ?? 512), 4095) }
         set { d.set(max(1, newValue), forKey: "server.clipboardMaxMB") }
     }
 
     static var serverClipboardMaxGB: Int {
-        get { max(0, d.object(forKey: "server.clipboardMaxGB") as? Int ?? 0) }
+        get { min(max(0, d.object(forKey: "server.clipboardMaxGB") as? Int ?? 0), 1_000_000) }
         set { d.set(max(0, newValue), forKey: "server.clipboardMaxGB") }
     }
 

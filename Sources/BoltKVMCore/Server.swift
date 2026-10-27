@@ -94,7 +94,7 @@ final class Server: NSObject, SCStreamOutput {
         self.colorMode = colorMode
         self.clipboardEnabled = clipboardEnabled
         self.muteLocalOutput = muteLocalOutput
-        self.clipboardMaxItemBytes = max(1, clipboardMaxItemBytes)
+        self.clipboardMaxItemBytes = min(max(1, clipboardMaxItemBytes), Int(UInt32.max) - 1024)
         self.clipboardMaxTransferBytes = max(0, clipboardMaxTransferBytes)
         // A logical size can be odd (1728×1117); VideoToolbox wants even.
         let even = evenVideoSize(width: width, height: height)
