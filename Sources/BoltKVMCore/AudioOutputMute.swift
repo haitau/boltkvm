@@ -19,6 +19,9 @@ final class AudioOutputMute: @unchecked Sendable {
         let usedMute: Bool
         let mute: UInt32
         let volume: Float32?
+        /// The server that owns this mute. A second helper starting while the
+        /// first is still alive must not restore the first one's mute.
+        let pid: Int32?
     }
 
     private static let marker: URL = {
@@ -49,6 +52,10 @@ final class AudioOutputMute: @unchecked Sendable {
     static func restoreStaleState() {
         guard let data = try? Data(contentsOf: marker),
               let state = try? JSONDecoder().decode(State.self, from: data) else { return }
+        if let pid = state.pid, pid > 0, kill(pid, 0) == 0 {
+            log("audio: mute marker is owned by live pid \(pid); leaving it alone")
+            return
+        }
         if let dev = device(forUID: state.uid) {
             if state.usedMute { _ = setUInt32(dev, muteAddress, state.mute) }
             if let volume = state.volume { _ = setVolume(dev, volume) }
@@ -89,7 +96,7 @@ final class AudioOutputMute: @unchecked Sendable {
         let mute = Self.readUInt32(dev, Self.muteAddress) ?? 0
         let volume = Self.readVolume(dev)
         let state = State(uid: uid, usedMute: canMute && Self.isSettable(dev, Self.muteAddress),
-                          mute: mute, volume: volume)
+                          mute: mute, volume: volume, pid: getpid())
         guard state.usedMute || volume != nil else {
             log("audio: output device \(Self.deviceName(dev) ?? uid) has no mute or volume control; not muting")
             return
@@ -113,7 +120,7 @@ final class AudioOutputMute: @unchecked Sendable {
             ok = Self.setVolume(dev, 0)
             if ok, let current = self.saved {
                 self.saved = State(uid: current.uid, usedMute: false,
-                                   mute: current.mute, volume: current.volume)
+                                   mute: current.mute, volume: current.volume, pid: current.pid)
             }
         }
         if ok {
