@@ -66,6 +66,14 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         )
         window.title = L.t("client.window.title")
         window.isReleasedWhenClosed = false
+        // Fullscreen puts the content under the titlebar. AppKit still draws a
+        // 1 pt separator at the very top while the toolbar is hidden, and its
+        // show/hide animation can leave that line flickering above the picture.
+        // The window is all video, so there is nothing for a separator to
+        // separate (A-4).
+        window.titlebarSeparatorStyle = .none
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = .black
         window.minSize = NSSize(width: 720, height: 480)
         super.init(window: window)
         window.delegate = self
@@ -298,6 +306,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         if appliedFullScreen != fullScreen {
             appliedFullScreen = fullScreen
             window.toolbar?.isVisible = !fullScreen
+            window.titlebarSeparatorStyle = .none
             topEdgeEnteredAt = nil
             layoutVideo()
             log("fs: chrome applied (fullscreen=\(fullScreen), fullSizeContent=true)")
