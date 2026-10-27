@@ -14,6 +14,12 @@
 | A-3 剪切板互通 | 核心完成 | 文本/HTML/RTF/PNG/文件/文件夹；分块、SHA-256、回环抑制、开关、可配置上限；本机回环通过。 |
 | A-4 全屏顶部白线 | 代码完成，待视觉复核 | 关闭标题栏分隔线；构建通过；锁屏无法截取应用窗口。 |
 
+## 证据分级
+
+- 【事实】A-1 的连接期间 `output muted:true`、断开恢复、静音期间录音仍有 −29 dBFS、`kill -9` 后重启恢复，均来自本机命令输出与日志；A-2 的 `command: pauseMedia` / `media: paused` 来自两端日志；A-3 的文本/富文本/图片/文件大小与 SHA-256 来自接收端文件；A-4 的构建结果来自 `swift build`。
+- 【推断】A-1 的静音发生在 SCK 采集之后（由录音仍有声推断）；A-2 的 MediaRemote 返回 true 表示系统接受命令，不表示具体播放器已暂停；A-3 的同机回环出现 `2` 副本由两端共享粘贴板解释。
+- 【未经核实】A-2 网易云音乐/Music 的实际暂停；A-3 跨雷雳对端、GUI 复选框、真实 `~/Downloads` 路径与超长跑；A-4 全屏顶部像素。
+
 ## A-1 被控端本地静音
 
 实现：
@@ -33,6 +39,7 @@
    - 日志依次 `muted ... 内置扬声器` → `restored ... 内置扬声器` → `muted ... BlackHole` → `restored ... BlackHole` → `muted ... 内置扬声器` → 断开 `restored ... 内置扬声器`。
 3. `kill -9` 服务端：
    - 静音保持，marker 存在；重启服务端（无客户端）立即打印 `restored a stale local-mute marker`，`output muted:false`，marker 删除。
+   - marker 里新增所属 pid；静音中的服务端 A 尚在运行时启动服务端 B，B 打印 `mute marker is owned by live pid ...; leaving it alone`，A 的静音保持。
 4. `--no-local-mute` 与不开 `--audio` 两种情况下，连接期间均 `output muted:false`。
 
 未验证：跨机、蓝牙耳机真实切换、多输出设备（聚合/多输出）上的静音语义。
@@ -43,7 +50,8 @@
 
 - `AudioPlayer` 监听 CoreAudio 默认输出变化，0.5 s 防抖；回调放在独立队列，不被可能卡住的 `AVAudioEngine` 重建阻塞。
 - 客户端新增 `RemoteAction.pauseMedia`（7），只在主控端播放转发音频时发送；录音-only 不发送。
-- 服务端用 MediaRemote `MRMediaRemoteSendCommand(1, nil)` 暂停当前 Now Playing 应用；不退出应用。
+- 服务端用 MediaRemote `MRMediaRemoteSendCommand(1, nil)` 暂停当前 Now Playing 应用；失败再发 stop(3)，不退出应用。
+- 0.5 s 防抖窗口内断线时，`finished` 会丢弃未发出的暂停请求。
 - GUI（`ClientSession`）与 CLI 客户端都接线。
 
 验证：
@@ -55,6 +63,14 @@
 3. `RemoteAction.pauseMedia == 7` 有单测，旧命令值不变。
 
 未验证：真实网易云音乐/Music 的暂停效果。锁屏状态下无法启动并播放媒体；MediaRemote 返回成功只能证明命令被系统接受，不能证明具体播放器响应。若明早验证发现网易云不响应系统 Now Playing，需要补 AppleScript/媒体键回退。
+
+## 10 分钟稳定性冒烟
+
+【事实】2026-10-27 19:32–19:42，服务端 `--audio`、客户端 `--audio-record /tmp/soak10.caf`，本机回环、无剪切板。服务端 `captured=18027 encoded=18027 sent=18018 dropped=9`，客户端 `decoded=18017 failed=0 elapsed=599.711s`；接收 p95 4.3 ms、解码 p95 6.7 ms、最大 54.6 ms；音频 30001 包。全程静音标记有效，客户端退出后服务端打印 `restored local output`，系统 `output muted:false`。
+
+录音 RMS：0–45 s 为静音（测试音循环尚未启动），46–599 s 持续约 −17 dBFS。说明 A-1 的硬件静音没有切断 SCK 采集；A-2 本次未切换设备，暂停回调未触发。
+
+【未经核实】本次是单机回环，不是雷雳双机；没有覆盖蓝牙重连、真实播放器暂停和 GUI。
 
 ## A-3 剪切板互通
 
@@ -76,6 +92,7 @@
 | 52,428,800 B 文件 | 1 MB 分块完整传输，接收端 SHA-256 与源文件一致 |
 | 1 MB 上限 + 17 MB PNG | 两端均记录 `exceeds the 1 MB item limit` 并跳过 |
 | 含 `/etc` 软链的文件夹 | 发送端记录 `symlinks are not supported` 并跳过，接收目录为空 |
+| 0 B 文件 + `中文 文件.txt` | 分别落盘，13 B 中文内容正确；同机回环出现带 `2` 的副本 |
 | 清单 size 溢出 | 单测拒绝两项 `Int64.max` 之和，不触发 trap |
 | 全量测试 | 91 项通过，1 skip（硬件音频测试默认跳过） |
 
@@ -107,6 +124,9 @@
 - `0016b95` fix(clipboard): 配置上限夹紧到协议与磁盘可表示范围
 - `e9a8ace` fix(media): pause 不可用时退回 MediaRemote stop
 - `4eb8cc1` fix(server): 启动失败时回收 clipboard 与本地静音
+- `ff38253` fix(client): 每次布局都保持标题栏分隔线关闭
+- `3e0cfe2` fix(audio): 活跃服务端的静音标记不被新进程抢恢复
+- `5ef0766` fix(audio): 会话结束后不再补发 pauseMedia
 
 构建：
 
