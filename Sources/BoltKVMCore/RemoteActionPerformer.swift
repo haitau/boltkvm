@@ -93,7 +93,10 @@ func performRemoteAction(_ action: RemoteAction) {
         postShortcut(.spaceRight)
     case .pauseMedia:
         guard let mediaRemotePause else { return }
-        let ok = mediaRemotePause(1, nil)
+        // Pause is command 1; some players expose Stop (3) but not Pause.
+        // Both satisfy "do not keep playing on a speaker nobody is using".
+        var ok = mediaRemotePause(1, nil)
+        if !ok { ok = mediaRemotePause(3, nil) }
         log(ok ? "media: paused the current Now Playing app" : "media: pause command was rejected")
     }
 }
