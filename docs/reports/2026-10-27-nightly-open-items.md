@@ -18,7 +18,7 @@
 
 - 【事实】A-1 的连接期间 `output muted:true`、断开恢复、静音期间录音仍有 −29 dBFS、`kill -9` 后重启恢复，均来自本机命令输出与日志；A-2 的 `command: pauseMedia` / `media: paused` 来自两端日志；A-3 的文本/富文本/图片/文件大小与 SHA-256 来自接收端文件；A-4 的构建结果来自 `swift build`。
 - 【推断】A-1 的静音发生在 SCK 采集之后（由录音仍有声推断）；A-2 的 MediaRemote 返回 true 表示系统接受命令，不表示具体播放器已暂停；A-3 的同机回环出现 `2` 副本由两端共享粘贴板解释。
-- 【未经核实】A-2 网易云音乐/Music 的实际暂停；A-3 跨雷雳对端、GUI 复选框、真实 `~/Downloads` 路径与超长跑；A-4 全屏顶部像素。
+- 【未经核实】A-2 网易云音乐/Music 的实际暂停（启动后 Now Playing 仍为 `no info`）；A-3 跨雷雳对端、GUI 复选框、真实 `~/Downloads` 路径与超长跑；A-4 全屏顶部像素。
 
 ## A-1 被控端本地静音
 
@@ -62,7 +62,7 @@
 2. `AudioRouteChangeTests` 真实切换输出设备通过，并断言 `onOutputRouteChange` 回调被触发；客户端音频图也完成重建（graph #1→#2→#3）。
 3. `RemoteAction.pauseMedia == 7` 有单测，旧命令值不变。
 
-未验证：真实网易云音乐/Music 的暂停效果。锁屏状态下无法启动并播放媒体；MediaRemote 返回成功只能证明命令被系统接受，不能证明具体播放器响应。若明早验证发现网易云不响应系统 Now Playing，需要补 AppleScript/媒体键回退。
+未验证：真实网易云音乐/Music 的暂停效果。曾用 `orpheus://song/186016` 启动网易云，进程能起来，但 `MRMediaRemoteGetNowPlayingInfo` 仍返回 `no info`（无法确认是否开始播放），不能据此判定暂停有效。MediaRemote 返回成功只能证明命令被系统接受，不能证明具体播放器响应。若明早网易云不响应系统 Now Playing，需要补 AppleScript/媒体键回退。
 
 ## 10 分钟稳定性冒烟
 
