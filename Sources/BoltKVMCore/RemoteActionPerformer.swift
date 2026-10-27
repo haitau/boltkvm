@@ -13,6 +13,7 @@ import Foundation
 /// from HIServices. It is a private symbol, so it is resolved with dlsym and its
 /// absence is tolerated (logged, then the key-injection fallback runs).
 private typealias CoreDockSendNotificationFn = @convention(c) (CFString, Int32) -> Int32
+private typealias MediaRemoteSendCommandFn = @convention(c) (Int32, CFDictionary?) -> Bool
 
 private let dockNotify: CoreDockSendNotificationFn? = {
     let path = "/System/Library/Frameworks/ApplicationServices.framework/Frameworks/HIServices.framework/HIServices"
@@ -21,6 +22,20 @@ private let dockNotify: CoreDockSendNotificationFn? = {
         return nil
     }
     return unsafeBitCast(symbol, to: CoreDockSendNotificationFn.self)
+}()
+
+/// MediaRemote's pause command (1) is app-agnostic: it reaches whatever app
+/// currently owns Now Playing, including third-party players that do not expose
+/// AppleScript. The framework is private, so resolve it at runtime and tolerate
+/// its absence.
+private let mediaRemotePause: MediaRemoteSendCommandFn? = {
+    let path = "/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote"
+    guard let handle = dlopen(path, RTLD_NOW),
+          let symbol = dlsym(handle, "MRMediaRemoteSendCommand") else {
+        log("media: MediaRemote unavailable; cannot pause the remote player")
+        return nil
+    }
+    return unsafeBitCast(symbol, to: MediaRemoteSendCommandFn.self)
 }()
 
 @discardableResult
@@ -76,6 +91,10 @@ func performRemoteAction(_ action: RemoteAction) {
         postShortcut(.spaceLeft)
     case .spaceRight:
         postShortcut(.spaceRight)
+    case .pauseMedia:
+        guard let mediaRemotePause else { return }
+        let ok = mediaRemotePause(1, nil)
+        log(ok ? "media: paused the current Now Playing app" : "media: pause command was rejected")
     }
 }
 

@@ -53,6 +53,21 @@ private func installTerminationSignalHandling() {
     }
 }
 
+/// A-2: the CLI client uses the same route-change pause hook as the GUI
+/// client, so a headless session behaves like the app when headphones move.
+private func installPauseOnRouteChange(_ audio: AudioPlayer?, conn: TCPConnection) {
+    audio?.onOutputRouteChange = { [weak conn] in
+        guard let conn else { return }
+        do {
+            try conn.send(packet(type: .command,
+                                 payload: Data([RemoteAction.pauseMedia.rawValue])))
+            log("audio: output route changed; asked server to pause media")
+        } catch {
+            log("audio: could not send pause request: \(error)")
+        }
+    }
+}
+
 public enum CLI {
 
     public static func runServer(_ args: [String]) async {
@@ -531,6 +546,7 @@ public enum CLI {
                             conn: c, nonce: challengeNonce,
                             forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                         log("auth ok")
+                        installPauseOnRouteChange(audio, conn: c)
                         if clipboardEnabled {
                             let sync = ClipboardSync(conn: c, enabled: true)
                             sync.start()
@@ -643,6 +659,7 @@ public enum CLI {
                     conn: conn, nonce: challengeNonce,
                     forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                 log("auth ok")
+                installPauseOnRouteChange(audio, conn: conn)
                 if !args.contains("--no-clipboard") {
                     let sync = ClipboardSync(conn: conn, enabled: true)
                     sync.start()

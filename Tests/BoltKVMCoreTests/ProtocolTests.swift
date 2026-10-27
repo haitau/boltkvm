@@ -99,6 +99,13 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(StreamFormat.decode(raw)?.color, .standard)
     }
 
+    func testPauseMediaActionKeepsExistingCommandValues() {
+        // New command at the end; old servers ignore it, old clients never send it.
+        XCTAssertEqual(RemoteAction.pauseMedia.rawValue, 7)
+        XCTAssertEqual(RemoteAction.hideDesktop.rawValue, 6)
+        XCTAssertEqual(RemoteAction.missionControl.rawValue, 1)
+    }
+
     func testSessionConfigRejectsImpossibleSizes() {
         // A malicious or buggy client must not be able to make the server build a
         // virtual display of 0×0 or 60000×60000.

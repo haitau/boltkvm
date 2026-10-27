@@ -29,12 +29,20 @@ final class AudioRouteChangeTests: XCTestCase {
         }
         defer { player.finish() }
 
+        // A-2: the same CoreAudio notification that rebuilds the graph must
+        // tell the client to ask the server to pause its media. Without this,
+        // music keeps playing on the remote after headphones move.
+        let pauseRequested = expectation(description: "route change reported to the client")
+        pauseRequested.assertForOverFulfill = false
+        player.onOutputRouteChange = { pauseRequested.fulfill() }
+
         feed(player, seconds: 0.8)
         let before = player.diagnostics
         XCTAssertEqual(before.starts, 1, "initial graph should start exactly once")
         XCTAssertTrue(before.active)
 
         XCTAssertTrue(Self.setDefaultOutput(other), "could not switch the default output")
+        wait(for: [pauseRequested], timeout: 3)
         feed(player, seconds: 2.5)
         let switched = player.diagnostics
         XCTAssertTrue(switched.active, "playback was left inactive after the route change")

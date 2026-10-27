@@ -35,6 +35,10 @@ final class AudioPlayer: @unchecked Sendable {
     /// `scheduleBuffer`, runs here. A lock alone was not enough: a rebuild must
     /// not race a scheduling call on the receive thread.
     private let controlQueue = DispatchQueue(label: "boltkvm.audio.output", qos: .userInteractive)
+    /// Route notifications must not wait behind a graph rebuild: a device switch
+    /// that makes AVAudioEngine slow to start is exactly when the server needs
+    /// the pause request most.
+    private let routeQueue = DispatchQueue(label: "boltkvm.audio.route", qos: .utility)
     /// Mutated only on `controlQueue`; `playbackActive` mirrors it for callers.
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
@@ -68,6 +72,10 @@ final class AudioPlayer: @unchecked Sendable {
     private var starts = 0
     private var lastCompletion = DispatchTime.now().uptimeNanoseconds
     private var rebuildQueued = false
+    /// Client-side hook for A-2: the output device moved while audio is being
+    /// played from the server, so the server should pause its player.
+    var onOutputRouteChange: (() -> Void)?
+    private var routeNotifyQueued = false
     /// More than ~2.5 s of queued audio means the output is not draining; older
     /// audio is worse than no audio (it drifts further behind every second).
     private let maxScheduled = 256
@@ -353,6 +361,7 @@ final class AudioPlayer: @unchecked Sendable {
         )
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             self?.requestRebuild(reason: "default output device changed")
+            self?.notifyOutputRouteChange()
         }
         let status = AudioObjectAddPropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject), &address, controlQueue, block
@@ -362,6 +371,28 @@ final class AudioPlayer: @unchecked Sendable {
             return
         }
         outputListener = block
+    }
+
+    /// Debounced so one Bluetooth switch (several CoreAudio notifications) sends
+    /// a single pause. The notification is deliberately tied to the default
+    /// output listener, not the watchdog: a stalled graph is not a device change
+    /// and must not stop the user's music.
+    private func notifyOutputRouteChange() {
+        lock.lock()
+        if routeNotifyQueued || finished {
+            lock.unlock()
+            return
+        }
+        routeNotifyQueued = true
+        lock.unlock()
+        routeQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.routeNotifyQueued = false
+            let callback = self.onOutputRouteChange
+            self.lock.unlock()
+            callback?()
+        }
     }
 
     /// Two failure modes are covered here: an engine that stopped without a

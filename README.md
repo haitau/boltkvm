@@ -143,6 +143,8 @@ defaults write io.github.boltkvm server.audio -bool true
 
 开启音频转发后，服务端会在采集启动成功后静音本机默认输出，避免被控端与主控端同时出声；客户端断开时恢复原来的静音/音量状态。ScreenCaptureKit 在设备音量/静音之前取音，所以远端仍能听到完整声音。若确实需要被控端本地也出声，可给服务端加 `--no-local-mute`。服务端被强杀时，下一次启动会先读取 `~/Library/Application Support/BoltKVM/mute-state.json` 恢复，不会把机器永久留在静音状态。
 
+主控端正在播放转发音频时，如果默认输出设备发生变化（蓝牙耳机开/关、有线耳机插拔），客户端会在 0.5 s 防抖后向服务端发送 `pauseMedia`，服务端用 MediaRemote 暂停当前 Now Playing 应用（网易云音乐、Music 等），只暂停播放、不退出应用；日志为 `audio: output route changed; asked server to pause media` 与 `media: paused the current Now Playing app`。该联动只在主控端开启音频播放时生效，录音-only 会话不会触发。
+
 ### 3. 配置主控端
 
 首次打开选择「作为主控端」，点击「添加被控端」填写名称、被控端雷雳网桥 IP、端口（默认 7474）及上述 8 位连接密码。
@@ -237,7 +239,7 @@ git tag v0.12.1 && git push origin v0.12.1
 - **安全输入与锁屏限制**：系统处于锁屏或密码输入框（Secure Input）状态时，会话级事件监听会被系统拦截；锁屏解锁请使用系统自带的屏幕共享（VNC）。
 - **不支持多显示器同传**：被控端仅创建并采集一块虚拟屏。
 - **没有可用音频输出设备时**：开启 `--audio` 但机器没有输出设备（例如 CI runner）时，音频链路会降级为静音并记录 `audio: playback unavailable (...)`，视频与输入不受影响，服务端不再崩溃；设备稍后出现会自动重试。
-- **音频输出切换/蓝牙耳机重连**：蓝牙耳机断开再连接、插拔带扬声器的显示器等导致系统默认输出变化时，客户端会自动重建音频输出图，日志出现 `audio: playing to default output (...; graph #n)`，无需重连会话；仍无声时可查 `audio: retrying output` 与 `audio: playback unavailable`。
+- **音频输出切换/蓝牙耳机重连**：蓝牙耳机断开再连接、插拔带扬声器的显示器等导致系统默认输出变化时，客户端会自动重建音频输出图，日志出现 `audio: playing to default output (...; graph #n)`，无需重连会话；仍无声时可查 `audio: retrying output` 与 `audio: playback unavailable`。同时会通知被控端暂停当前媒体，日志出现 `media: paused the current Now Playing app`；这是预期行为，不是被控端自己停了。若某播放器不响应系统 Now Playing，暂停可能无效。
 - **被控端本地静音**：开启音频转发后，日志出现 `audio: muted local output ...` 表示本机输出已静音，客户端断开后出现 `audio: restored local output ...`。若进程被 `SIGKILL`，下次服务端启动会先恢复上一次保存的状态再继续；没有该日志且本机无声时，检查 `~/Library/Application Support/BoltKVM/mute-state.json` 是否残留。
 - **虚拟屏创建失败**：连续重试仍拿不到虚拟屏时，服务端以退出码 3 退出并交给守护逻辑重启，不会回退去采集本地真实桌面（避免把操作者自己的桌面推给主控端）。
 

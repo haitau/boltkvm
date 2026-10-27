@@ -124,6 +124,10 @@ enum RemoteAction: UInt8 {
     /// this as an explicit state (`showdesktop.set 0`), so the client never has
     /// to guess what the remote is currently showing.
     case hideDesktop = 6
+    /// Audio output moved on the client (Bluetooth headset, wired headphones).
+    /// The controlled Mac pauses its current Now Playing app so the music does
+    /// not keep running on a speaker nobody is listening to (A-2).
+    case pauseMedia = 7
 }
 
 struct PacketHeader {

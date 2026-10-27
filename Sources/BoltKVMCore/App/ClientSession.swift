@@ -165,6 +165,20 @@ final class ClientSession: @unchecked Sendable {
                                 conn: c, nonce: challengeNonce, key: sessionKey,
                                 forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                         }
+                        // A-2: the client's output device moved while it is
+                        // playing the forwarded audio. Tell the server to pause
+                        // its current Now Playing app, so music does not keep
+                        // running on a speaker nobody is listening to.
+                        audio?.onOutputRouteChange = { [weak c] in
+                            guard let c else { return }
+                            do {
+                                try c.send(packet(type: .command,
+                                                  payload: Data([RemoteAction.pauseMedia.rawValue])))
+                                log("audio: output route changed; asked server to pause media")
+                            } catch {
+                                log("audio: could not send pause request: \(error)")
+                            }
+                        }
                         // Ask for the size the connection list chose *before*
                         // anything else: the server reads exactly one frame here.
                         if supportsConfig, let requested = self.requestedConfig {

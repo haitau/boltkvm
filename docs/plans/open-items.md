@@ -68,6 +68,7 @@
 ### 4.1 2026-10-27 夜间处理
 
 - **A-1 已实现**：服务端在 `--audio` 采集启动后静音默认输出，断开时恢复；优先使用 CoreAudio 的 `kAudioDevicePropertyMute`，不支持时退回音量 0；默认输出变化时把静音迁移到新设备。实测硬件静音不影响 ScreenCaptureKit 采集（静音期间客户端录音仍有 −29 dBFS 的测试音），客户端断开后 `output muted` 恢复为 false。崩溃恢复用 `~/Library/Application Support/BoltKVM/mute-state.json`，`kill -9` 后重启服务端会先恢复再继续。`--no-local-mute` 可关闭该行为。详见 [夜间报告](docs/reports/2026-10-27-nightly-open-items.md)。
+- **A-2 已实现**：客户端音频输出设备变化 → 0.5 s 防抖 → `pauseMedia` 命令 → 服务端 MediaRemote 暂停当前 Now Playing 应用；只在主控端播放转发音频时触发，录音-only 不触发。本机用切换默认输出设备（内置扬声器 ↔ BlackHole）实测命令到达服务端、MediaRemote 返回成功；真实播放器（网易云音乐）暂停效果因锁屏无法在夜间验证。
 - **A-3 已实现（核心）**：文本、HTML/RTF、PNG、文件/文件夹双向同步；协议、分块、SHA-256、回环抑制、Concealed 过滤与客户端开关已落地，单测与本机回环传输通过。跨机、GUI 实机与超大文件长跑仍待验证。
 - **A-4 已改代码、待实机确认**：窗口与进入全屏时关闭标题栏分隔线，release 构建通过；19:00 后本机锁屏，无法截图复核顶部像素，保留待确认。
 
