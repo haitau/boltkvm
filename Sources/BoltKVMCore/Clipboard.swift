@@ -67,7 +67,7 @@ final class ClipboardSync: @unchecked Sendable {
          maxTransferBytes: Int64 = 0) {
         self.conn = conn
         self.enabled = enabled
-        self.maxItemBytes = max(1, maxItemBytes)
+        self.maxItemBytes = min(max(1, maxItemBytes), Int(UInt32.max))
         self.maxTransferBytes = max(0, maxTransferBytes)
     }
 
@@ -81,12 +81,29 @@ final class ClipboardSync: @unchecked Sendable {
             // Seed the count: whatever is on the pasteboard when the session
             // starts is old news, not something the user just copied.
             self.lastChangeCount = NSPasteboard.general.changeCount
+            self.cleanStaleIncoming()
             let t = DispatchSource.makeTimerSource(queue: self.queue)
             t.schedule(deadline: .now() + 0.4, repeating: 0.5)
             t.setEventHandler { [weak self] in self?.poll() }
             t.resume()
             self.timer = t
             log("clipboard: started (max item \(self.maxItemBytes >> 20) MB)")
+        }
+    }
+
+    /// A crash can leave a `.incoming-*` directory behind. They are only useful
+    /// to a live transfer, so remove ones older than an hour when a session
+    /// starts; the normal disconnect path already removes the current one.
+    private func cleanStaleIncoming() {
+        let fm = FileManager.default
+        let inbox = Self.inboxURL()
+        guard let entries = try? fm.contentsOfDirectory(
+            at: inbox, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        let cutoff = Date().addingTimeInterval(-3600)
+        for url in entries where url.lastPathComponent.hasPrefix(".incoming-") {
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                .contentModificationDate) ?? .distantPast
+            if modified < cutoff { try? fm.removeItem(at: url) }
         }
     }
 
