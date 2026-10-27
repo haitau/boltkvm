@@ -99,6 +99,14 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(StreamFormat.decode(raw)?.color, .standard)
     }
 
+    func testClipboardPacketValuesAreAppendOnly() {
+        // Old peers must keep seeing the same numbers for existing packets.
+        XCTAssertEqual(PacketType.clipboard.rawValue, 13)
+        XCTAssertEqual(PacketType.fileTransfer.rawValue, 14)
+        XCTAssertEqual(PacketType.audio.rawValue, 9)
+        XCTAssertEqual(PacketType.authExchange.rawValue, 12)
+    }
+
     func testPauseMediaActionKeepsExistingCommandValues() {
         // New command at the end; old servers ignore it, old clients never send it.
         XCTAssertEqual(RemoteAction.pauseMedia.rawValue, 7)

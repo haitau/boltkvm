@@ -67,7 +67,7 @@ final class ClipboardSync: @unchecked Sendable {
          maxTransferBytes: Int64 = 0) {
         self.conn = conn
         self.enabled = enabled
-        self.maxItemBytes = min(max(1, maxItemBytes), Int(UInt32.max))
+        self.maxItemBytes = min(max(1, maxItemBytes), Int(UInt32.max) - 1024)
         self.maxTransferBytes = max(0, maxTransferBytes)
     }
 
@@ -186,7 +186,7 @@ final class ClipboardSync: @unchecked Sendable {
 
     private func sendBundle(_ bundle: ClipboardBundle, label: String) {
         let data = bundle.encode()
-        guard data.count <= maxItemBytes else {
+        guard data.count <= maxItemBytes, data.count <= Int(UInt32.max) else {
             log("clipboard: skipped \(label); \(data.count) B exceeds the \(maxItemBytes >> 20) MB item limit")
             return
         }
@@ -594,15 +594,19 @@ struct FileManifest: Codable {
 
     static func isSafe(_ manifest: FileManifest, maxTransferBytes: Int64 = 0) -> Bool {
         guard !manifest.items.isEmpty, manifest.items.count <= 64 else { return false }
+        var total: Int64 = 0
         for item in manifest.items {
             if item.name.isEmpty || item.name == "." || item.name == ".." { return false }
             if item.name.contains("/") || item.name.contains("\0") { return false }
             if item.size < 0 || item.sha256.count != 64 { return false }
             if !item.sha256.allSatisfy({ $0.isHexDigit }) { return false }
+            let (sum, overflow) = total.addingReportingOverflow(item.size)
+            if overflow { return false }
+            total = sum
         }
         let diskLimit = ClipboardSync.freeDiskBytes() - ClipboardSync.diskReserve
         let limit = maxTransferBytes > 0 ? min(maxTransferBytes, diskLimit) : diskLimit
-        return manifest.totalBytes >= 0 && manifest.totalBytes <= limit
+        return total <= limit
     }
 }
 

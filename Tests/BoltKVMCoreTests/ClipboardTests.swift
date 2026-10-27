@@ -67,6 +67,15 @@ final class ClipboardTests: XCTestCase {
                           ClipboardSync.hash(Data("abd".utf8)))
     }
 
+    func testManifestRejectsOverflowingTotal() {
+        let good = String(repeating: "d", count: 64)
+        let items = [
+            FileManifest.Item(name: "a", isDirectory: false, size: .max, sha256: good),
+            FileManifest.Item(name: "b", isDirectory: false, size: .max, sha256: good),
+        ]
+        XCTAssertFalse(FileManifest.isSafe(FileManifest(items: items)))
+    }
+
     func testSymlinkDetection() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
