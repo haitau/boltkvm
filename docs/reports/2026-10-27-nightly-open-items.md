@@ -72,9 +72,12 @@
 | 纯文本 48 B | 客户端 1 块发送，服务端应用，粘贴板内容正确 |
 | HTML/RTF 116 B | 2 个表示发送，应用后 `clipboard info` 仍有 HTML/UTF-8 |
 | 17,884,060 B PNG | 69 块发送，服务端应用 17,884,078 B |
-| 5,242,880 B 文件 + 1,396 B 文件夹 | 2 项、SHA-256 校验通过，文件与目录结构正确 |
+| 5,242,880 B 文件 + 1,396 B 文件夹（含嵌套目录） | 2 项、SHA-256 校验通过，文件与目录结构正确 |
+| 52,428,800 B 文件 | 1 MB 分块完整传输，接收端 SHA-256 与源文件一致 |
 | 1 MB 上限 + 17 MB PNG | 两端均记录 `exceeds the 1 MB item limit` 并跳过 |
-| 全量测试 | 88 项通过，1 skip（硬件音频测试默认跳过） |
+| 含 `/etc` 软链的文件夹 | 发送端记录 `symlinks are not supported` 并跳过，接收目录为空 |
+| 清单 size 溢出 | 单测拒绝两项 `Int64.max` 之和，不触发 trap |
+| 全量测试 | 91 项通过，1 skip（硬件音频测试默认跳过） |
 
 已知现象：同一台机器回环时两端共享粘贴板，A 发、B 也发，接收目录会出现 `big 2.bin`、`folder 2` 两份；跨机只有接收端落盘，不应出现该现象，但尚未跨机验证。
 
@@ -98,6 +101,12 @@
 - `4ef16ce` feat(audio): 主控端输出设备变化时暂停被控端媒体
 - `b5a5f66` feat(clipboard): 上限改为可配置，补使用说明
 - `22dbad2` fix(clipboard): 夹紧分块总量并清理崩溃残留
+- `d7fad2c` docs(report): 记录 2026-10-27 夜间 A-1..A-4 处理结果
+- `953aa9a` fix(clipboard): 文件夹传输拒绝符号链接
+- `b4877e5` fix(clipboard): 清单求和防溢出，分块长度留出头部余量
+- `0016b95` fix(clipboard): 配置上限夹紧到协议与磁盘可表示范围
+- `e9a8ace` fix(media): pause 不可用时退回 MediaRemote stop
+- `4eb8cc1` fix(server): 启动失败时回收 clipboard 与本地静音
 
 构建：
 
