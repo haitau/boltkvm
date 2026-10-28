@@ -140,7 +140,7 @@ BOLTKVM_AUDIO_ROUTE_TEST=1 \
   swift test --disable-sandbox --scratch-path .build --filter AudioRouteChangeTests
 ```
 
-2026-10-28 09:11 更新：已用 `./scripts/install-app.sh` 把最新构建安装到 `/Applications/BoltKVM.app`（0.12.2 / build 204），应用与内置 helper 均为本次版本；签名使用本机稳定的 `BoltKVM Local` 证书（非 ad-hoc），上一版保留在 `/Applications/BoltKVM.app.bak`，并已启动应用。稳定签名下，屏幕录制/辅助功能授权只需授予一次；若从旧的 ad-hoc 版本升级，首次切到被控端时仍需按提示重新授权。
+2026-10-28 09:13 更新：已用 `./scripts/install-app.sh` 把最新构建安装到 `/Applications/BoltKVM.app`（0.12.2 / build 207），应用与内置 helper 均为本次版本；签名使用本机稳定的 `BoltKVM Local` 证书（非 ad-hoc），上一版保留在 `/Applications/BoltKVM.app.bak`，并已启动应用。稳定签名下，屏幕录制/辅助功能授权只需授予一次；若从旧的 ad-hoc 版本升级，首次切到被控端时仍需按提示重新授权。
 
 ## 后续安装方式
 
@@ -153,7 +153,7 @@ BOLTKVM_AUDIO_ROUTE_TEST=1 \
 
 ## 远端 Mac mini
 
-2026-10-28 09:20 用 `./scripts/deploy-app.sh mini` 把 mini 也更新到 **0.12.2 (205)**，内置 helper 同步更新，签名同为 `BoltKVM Local`；旧版 0.12.1 保留在 mini 的 `/Applications/BoltKVM.app.bak`。
+2026-10-28 09:13 用 `./scripts/deploy-app.sh mini` 把 mini 也更新到 **0.12.2 (207)**，内置 helper 同步更新，签名同为 `BoltKVM Local`；上一版 0.12.2 (205) 保留在 mini 的 `/Applications/BoltKVM.app.bak`。
 
 但 mini 的应用日志是：
 
@@ -165,7 +165,7 @@ app: server role starting (screen recording: false, accessibility: false)
 
 ## 明早建议
 
-1. 直接使用已安装的 `/Applications/BoltKVM.app`（0.12.2）验证 A-4：全屏、等待工具栏隐藏超过一个轮询周期，录屏或截帧看顶部；同时确认 A-3 复选框与接收目录。若系统提示屏幕录制/辅助功能，按提示授权后重开应用。
+1. 直接使用已安装的 `/Applications/BoltKVM.app`（0.12.2 / 207）验证 A-4：全屏、等待工具栏隐藏超过一个轮询周期，录屏或截帧看顶部；同时确认 A-3 复选框与接收目录。若系统提示屏幕录制/辅助功能，按提示授权后重开应用。
 2. 用两台机器或雷雳对端验证 A-3：文本、富文本、PNG、单文件、文件夹、同名文件、断线中断；确认不会出现同机回环的两份。
 3. 播放网易云音乐，切蓝牙/有线，确认 A-2 真能暂停；若不响应，补 AppleScript 或媒体键回退。
 4. 听感确认 A-1：主控端有声、被控端无声；断开后被控端恢复原音量/静音状态。
