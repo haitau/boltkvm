@@ -140,7 +140,7 @@ BOLTKVM_AUDIO_ROUTE_TEST=1 \
   swift test --disable-sandbox --scratch-path .build --filter AudioRouteChangeTests
 ```
 
-2026-10-28 09:11 更新：已用 `./scripts/install-app.sh` 把最新构建安装到 `/Applications/BoltKVM.app`（0.12.2 / build 203），应用与内置 helper 均为本次版本；签名使用本机稳定的 `BoltKVM Local` 证书（非 ad-hoc），上一版保留在 `/Applications/BoltKVM.app.bak`，并已启动应用。稳定签名下，屏幕录制/辅助功能授权只需授予一次；若从旧的 ad-hoc 版本升级，首次切到被控端时仍需按提示重新授权。
+2026-10-28 09:11 更新：已用 `./scripts/install-app.sh` 把最新构建安装到 `/Applications/BoltKVM.app`（0.12.2 / build 204），应用与内置 helper 均为本次版本；签名使用本机稳定的 `BoltKVM Local` 证书（非 ad-hoc），上一版保留在 `/Applications/BoltKVM.app.bak`，并已启动应用。稳定签名下，屏幕录制/辅助功能授权只需授予一次；若从旧的 ad-hoc 版本升级，首次切到被控端时仍需按提示重新授权。
 
 ## 后续安装方式
 
