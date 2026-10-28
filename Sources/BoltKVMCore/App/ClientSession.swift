@@ -179,6 +179,12 @@ final class ClientSession: @unchecked Sendable {
                                 conn: c, nonce: challengeNonce, key: sessionKey,
                                 forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                         }
+                        // A rogue server can send authOk without a challenge.
+                        // Installing no cipher there would let the clipboard
+                        // and other plaintext callbacks run; refuse instead.
+                        guard c.hasSessionCipher else {
+                            throw POSIXError(.EPROTO)
+                        }
                         // Audio format is negotiated before the server starts
                         // capture: an old server sends no 24-bit flag and gets
                         // no config request, so both sides stay on int16.

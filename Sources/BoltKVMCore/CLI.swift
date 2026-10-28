@@ -578,6 +578,7 @@ public enum CLI {
                         try enableClientEncryption(
                             conn: c, nonce: challengeNonce,
                             forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
+                        guard c.hasSessionCipher else { throw POSIXError(.EPROTO) }
                         log("auth ok")
                         // Negotiate 24-bit before creating the sink. A server
                         // that does not advertise it (or no config support)
@@ -740,6 +741,7 @@ public enum CLI {
                 try enableClientEncryption(
                     conn: conn, nonce: challengeNonce,
                     forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
+                guard conn.hasSessionCipher else { throw POSIXError(.EPROTO) }
                 log("auth ok")
                 let supportsAudio24 = authOkFlags(payload) & FLAG_SUPPORTS_AUDIO_24 != 0
                 var use24 = false
