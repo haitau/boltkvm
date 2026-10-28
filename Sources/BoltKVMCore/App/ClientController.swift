@@ -72,7 +72,13 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         // The window is all video, so there is nothing for a separator to
         // separate (A-4).
         window.titlebarSeparatorStyle = .none
-        window.titlebarAppearsTransparent = true
+        // Do NOT make the titlebar transparent with a black window background:
+        // in light appearance the toolbar's label/icon color stays black, and a
+        // transparent titlebar over black makes the whole toolbar (Mission
+        // Control, Desktop, fullscreen) invisible. The separator is suppressed
+        // by titlebarSeparatorStyle alone; keep the native titlebar material so
+        // its controls remain legible.
+        window.titlebarAppearsTransparent = false
         window.backgroundColor = .black
         window.minSize = NSSize(width: 720, height: 480)
         super.init(window: window)
