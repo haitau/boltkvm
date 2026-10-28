@@ -259,6 +259,13 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         if measured > 0 { chromeHeight = measured }
         let toolbarVisible = window.toolbar?.isVisible ?? false
         let fullScreen = window.styleMask.contains(.fullScreen)
+        // In fullscreen the titlebar's extra strip otherwise sits over the
+        // remote menu bar; hide it there and restore the windowed title so the
+        // remote system bar stays visible below the toolbar.
+        let titleVisibility: NSWindow.TitleVisibility = fullScreen ? .hidden : .visible
+        if window.titleVisibility != titleVisibility {
+            window.titleVisibility = titleVisibility
+        }
         // The tick that reveals the toolbar runs before AppKit publishes the
         // new contentLayoutRect; use the last known band height for that frame
         // instead of showing one unshifted frame.

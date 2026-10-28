@@ -28,12 +28,13 @@
 - 动作按钮居中：使用 `centeredItemIdentifiers = [tbMission, tbDesktop]` 把两个标准项作为一组居中。标题仍显示 `BoltKVM — 主控端`，状态仍在工具栏最右侧；只改按钮水平位置，不隐藏标题、不改状态位置。
 - 画面位移使用 `contentLayoutRect` / 工具栏 host 给出的**可见工具栏高度**；本机实测为 52 pt（窗口模式也是 52 pt）。**不要用 `NSToolbarFullScreenWindow` 的完整高度 68 pt**：这个子窗口底部有 16 pt 透明区域，按 68 pt 下移会在工具栏和远端画面之间留下一条 16 pt 黑带。菜单栏在本机是覆盖层，不增加这个值；若旧版系统把菜单栏计入布局，代码会直接采用更大的实测值，不写死 98。
 - 窗口模式保留原生标题栏材质、交通灯、标题和分隔线策略；状态标签保持最右。
+- **全屏时隐藏窗口标题（`titleVisibility = .hidden`），退出全屏恢复 `.visible`。** 全屏标题栏会额外占一条带子，把远端菜单栏压在工具栏下方；隐藏标题后工具栏占满顶部可见带，远端系统菜单栏重新完整显示。窗口模式的 `BoltKVM — 主控端` 标题不变。
 
 ## 验证
 
 ```bash
 swift build -c release --disable-sandbox --scratch-path .build
-# 通过；app 版本 0.12.2 (221)
+# 通过；app 版本 0.12.2 (223)
 
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --disable-sandbox --scratch-path .build
 # Executed 93 tests, with 1 test skipped and 0 failures
@@ -49,6 +50,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --disable-sa
 3. **2026-10-28 追加修复黑条**：用户截图显示工具栏下方仍有一条黑带。几何日志为 `layout=(0,0,3008,1640) child=(0,1624,3008,68) host=(0,0,3008,52) video=(0,-68,3008,1692)`，即画面按 68 pt 下移、实际可见工具栏只有 52 pt，多出的 16 pt 正好是黑带。改为按 `contentLayoutRect` 的 52 pt 下移后，日志为 `video=(0,-52,3008,1692)`；截图行扫描中工具栏在 102 px（2×）结束，远端菜单栏从 104 px 开始，中间没有空白行。
 4. 退出全屏 `AXFullScreen=false`，窗口模式工具栏仍在。
 5. 远端画面在全屏工具栏显示时按可见工具栏高度下移，隐藏时铺满。
+6. **2026-10-28 第二次追加：远端系统栏不见了。** 只把画面按 52 pt 下移后，macOS 全屏窗口残留的标题带盖住了远端菜单栏。全屏设置 `titleVisibility = .hidden`（窗口模式恢复可见）后实测：工具栏灰色带占 0–102 px（2×），远端菜单栏从 104 px 开始、图标在 122–142 px，Finder 内容从 164 px 开始；顶部没有黑带，远端 Apple/文件/编辑/查看等系统菜单完整可见。窗口模式截图确认 `BoltKVM — 主控端` 标题仍在。
 
 ## 未验证 / 边界
 
