@@ -1,6 +1,6 @@
 # mini 本地被莫名静音：默认不再设备静音，改为暂停媒体（2026-10-28）
 
-> **后续修正（同日）：** 服务端不再在采集启动时暂停播放器。首次 `pauseMedia` 改由主控端在“该主机选择音频”且收到第一帧格式后发送；未选择音频的重新连接不会影响 mini。本文保留当时“停止设备静音”的修复记录，最终暂停时机见 [只有选择音频时才暂停](2026-10-28-audio-pause-only-when-selected.md)。
+> **后续修正（同日，最终语义）：** 服务端不再在采集启动时暂停播放器；主控端选中音频后收到第一个音频包，发送一次 `muteLocalOutput`，服务端静音默认输出但**不暂停 Now Playing**。`pauseMedia` 只用于关闭主控窗口或主控端换输出设备。本文保留当时“停止默认设备静音”的修复记录，最终语义见 [音频路由与本地静音](2026-10-28-audio-route-mute.md) 与 [v0.13 记录](2026-10-28-v0.13-release.md)。
 
 ## 现象
 
@@ -20,10 +20,10 @@
 
 - `Server.init` 的 `muteLocalOutput` 默认从 `true` 改为 `false`。
 - CLI 只有显式 `--local-mute` 才设备静音；`--no-local-mute` 仍接受但不再改变默认值。
-- 音频采集启动成功后调用 `performRemoteAction(.pauseMedia)`，用 MediaRemote 暂停当前 Now Playing 应用；日志为 `media: paused the current Now Playing app`。
+- ~~音频采集启动成功后调用 `performRemoteAction(.pauseMedia)`~~（已废弃：服务端采集启动不再暂停；选中音频只静音本地输出）。
 - 客户端断开后媒体保持暂停，不自动恢复；避免把用户后来手动播放的内容再切掉。
 - 旧版残留 marker 的恢复逻辑保持不变：新 helper 启动时若 marker 的 pid 已死，先恢复原静音/音量并删除 marker。
-- 文档同步：README / README_EN 的音频隔离、CLI 和排障说明改为“暂停媒体，不静音设备”。
+- 文档同步（最终版）：未选音频不影响播放；选中音频静音本地输出、不暂停源；关闭窗口/换输出设备才暂停。
 
 ## 验证
 

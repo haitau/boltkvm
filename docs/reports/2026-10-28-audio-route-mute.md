@@ -1,7 +1,7 @@
 # 音频会话：选中静音本地，换设备停两端
 
 日期：2026-10-28
-状态：代码已改，构建与无音频单测通过；**未做实际发声/耳机切换验收**（用户要求在办公时间不要出声）。0.13 已追加 24-bit/48 kHz 协商，并用 record-only 会话验证端到端格式。
+状态：代码已改，构建与无音频单测通过；**2026-10-28 用户已实机确认关窗后 mini 不再出声、Pro 蓝牙→有线耳机切换正常**（未做自动化的可听声音测试）。0.13 已追加 24-bit/48 kHz 协商，并用 record-only 会话验证端到端格式。
 
 ## 背景
 
@@ -14,7 +14,7 @@
 1. 客户端收到第一个音频包后发 `muteLocalOutput`；
 2. 服务端用 `AudioOutputMute` 静音被控端默认输出，但**不暂停 Now Playing**；
 3. ScreenCaptureKit 在设备静音之前取音，Pro 继续收到完整音频；
-4. 未选音频的会话不发任何音频命令，不受重连影响；服务端是否采集由 `--audio` 决定，但客户端不会播放，也不会影响被控端播放。
+4. 新客户端未选音频时在 config 第 7 字节声明 `unselected`，新服务端不采集/发送；旧客户端发 0，服务端仍按 `--audio` 采集发送，但客户端不播放、也不影响被控端播放。
 
 ### 主控端换输出设备
 
@@ -33,7 +33,7 @@
 
 ### 断开
 
-- 服务端 `stop()` 恢复 `AudioOutputMute` 保存的静音/音量状态；
+- 客户端先发 `pauseMedia`；服务端 `stop()` 兜底暂停并查询 Now Playing，确认停止后才恢复 `AudioOutputMute` 保存的静音/音量状态；
 - 客户端结束 route mute 并关闭播放器；
 - 不自动恢复被控端媒体。
 
@@ -50,9 +50,10 @@
 - `swift build -c release`：通过；
 - `swift test --filter ProtocolTests`：14 项通过；
 - `swift test --filter Audio24Tests`：3 项通过（含静音播放图和 float32 记录文件）；
-- `swift test`：99 项通过、1 项跳过（`AudioRouteChangeTests` 需要显式音频输出环境）；
+- 当次 `swift test`：99 项通过、1 项跳过（`AudioRouteChangeTests` 需要显式音频输出环境）；当前为 105 项通过、1 项跳过；
 - 0.13 record-only 端到端：客户端 `sent config 0x0 audio=int24`，服务端 `audio source ... target=int24`，统计 `audio=182 pkts/2.3Mbps`，客户端记录 178,560 帧 / 3.72 s（文件为 float32 诊断容器）；
-- **未验证**：真实耳机切换听感、Pro 系统其他 App 的 2.5 s 静音与恢复、mini 的 `AudioOutputMute` 恢复、蓝牙多通知、音量键的实际事件类型（本地/远端）、24-bit 的实际听感（只验证了格式、帧数、码率与无声播放图）。
+- **已由用户确认**：关窗后 mini 无输出；Pro 蓝牙耳机→有线耳机切换正常（2026-10-28）。
+- **仍未验证**：Pro 系统其他 App 的 2.5 s 静音与恢复、蓝牙多通知的逐条时序、音量键的实际事件类型（本地/远端）、24-bit 的实际听感（只验证了格式、帧数、码率与无声播放图）。
 
 ## 24-bit/48 kHz（0.13 追加）
 

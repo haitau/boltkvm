@@ -32,9 +32,10 @@
 | 2026-10-26 | [audio-route-and-fullscreen-chrome](2026-10-26-audio-route-and-fullscreen-chrome.md) | 蓝牙耳机重连后无声 / 全屏工具栏压变形与点击穿透 | 已修：输出图重建 + 全屏画面整体下移 + 三层输入防护（v0.12.1）；物理蓝牙重连待复核 |
 | 2026-10-26 | [v0.12-release](2026-10-26-v0.12-release.md) | v0.12 发布与产物校验 | 已发布；zip 1,048,851 字节、SHA-256 校验通过；校验和路径前缀已修 |
 | 2026-10-26 | [v0.12.1-release](2026-10-26-v0.12.1-release.md) | v0.12.1 发布与工具栏点击穿透回归修复 | 已发布；zip 1,049,649 字节、SHA-256 校验通过；三层输入防护 + 80 项测试 |
-| 2026-10-27 | [nightly-open-items](2026-10-27-nightly-open-items.md) | 夜间处理 A-1 音频隔离 / A-2 路由暂停 / A-3 剪切板 / A-4 全屏白线 | A-1/A-2/A-3 完成并通过 10 分钟冒烟；A-4 改代码，锁屏未截图复核 |
+| 2026-10-27 | [nightly-open-items](2026-10-27-nightly-open-items.md) | 夜间处理 A-1 音频隔离 / A-2 路由暂停 / A-3 剪切板 / A-4 全屏白线 | A-1/A-2/A-3 完成并通过 10 分钟冒烟；A-4 代码完成，2026-10-28 由用户实机确认；A-5 见 4.2 |
 | 2026-10-28 | [permissions-and-tcc](2026-10-28-permissions-and-tcc.md) | 双权限入口与 TCC 重授权 | 两个入口与重置项已落地；mini 辅助功能待授权 |
 | 2026-10-28 | [fullscreen-toolbar-first-reveal](2026-10-28-fullscreen-toolbar-first-reveal.md) | 全屏工具栏首次弹出无按钮 | 已修：改回原生标准工具栏项 + 首次显隐预热；放弃视觉不符的浮层 |
-| 2026-10-28 | [audio-local-mute](2026-10-28-audio-local-mute.md) | mini 本地被莫名静音 | 已修：默认不再设备静音，改为暂停当前媒体；mini 214 验证 |
+| 2026-10-28 | [audio-local-mute](2026-10-28-audio-local-mute.md) | mini 本地被莫名静音 | 历史记录；最终语义见 audio-route-mute：选中静音本地输出、不暂停源，关闭窗口/换设备才暂停 |
 | 2026-10-28 | [audio-route-mute](2026-10-28-audio-route-mute.md) | 音频选中静音、换设备停两端 | 代码/无音频单测通过，实机听感待验证 |
-| 2026-10-28 | [v0.13-release](2026-10-28-v0.13-release.md) | v0.13 候选：24-bit/48 kHz 协商、音频状态机、0.13 本地验收版 | 102 项测试通过（1 skip）；24-bit record-only 端到端通过；tag 已撤回，听感/授权/CI 待完成 |
+| 2026-10-28 | [code-audit-fixes](2026-10-28-code-audit-fixes.md) | 全量代码审计：认证前分配、明文降级、按键释放、44.1 kHz 转换、录制语义 | 10 项已修复；105 项测试通过（1 skip）；authOk flags/共享 marker/unmute 边界保留 |
+| 2026-10-28 | [v0.13-release](2026-10-28-v0.13-release.md) | v0.13 候选：24-bit/48 kHz 协商、音频状态机、0.13 本地验收版 | 当次 102 项测试通过（1 skip）；24-bit record-only 端到端通过；tag 已撤回，听感/授权/CI 待完成 |

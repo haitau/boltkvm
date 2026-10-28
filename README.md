@@ -8,16 +8,16 @@
 
 - **像素等价**：支持按被控端虚拟屏真实像素（2× backing）传输与渲染，文字清晰不发糊。
 - **低延迟交互**：解码链路（采集→解码）P95 < 33 ms；GUI 呈现（采集→上屏，不含输入反向上行）P95 < 50 ms。
-- **音频隔离**：主控端没为该主机选择音频时，服务端不发送、不暂停、不静音被控端的任何播放；选中音频后，服务端静音被控端的本地输出但**继续播放源**，声音只从主控端出来。主控端换耳机/拔插输出设备时，主控端整机输出立即静音、被控端 Now Playing 暂停，设备稳定后再恢复主控端系统声音；被控端媒体不自动恢复。
+- **音频隔离**：主控端没为该主机选择音频时，服务端不采集、不发送、不暂停、不静音被控端的任何播放；选中音频后，服务端静音被控端的本地输出但**继续播放源**，声音只从主控端出来。关闭主控窗口时，主控端先暂停被控端 Now Playing，服务端确认播放器真的停止后才恢复本地输出，避免关窗瞬间外放。主控端换耳机/拔插输出设备时，主控端整机输出立即静音、被控端 Now Playing 暂停，设备稳定后再恢复主控端系统声音；被控端媒体不自动恢复。
 - **单向控制**：主控端仅捕获输入与渲染画面，被控端仅采集屏幕与注入输入，从拓扑上避免双向互控回环。
 - **断线自动重连**：被控端重启采集子进程（改分辨率、升级）或链路短暂中断时，主控端窗口自动重连并显示重连次数，不再停在最后一帧；错误密码仍然直接报错，不会无限重试。
 
 ## 下载与安装
 
-最新发布包见 [Releases](https://github.com/haitau/boltkvm/releases)，每次发布附带 `BoltKVM-<版本>.zip` 与同名 `.sha256`：
+最新发布包见 [Releases](https://github.com/haitau/boltkvm/releases)，每次发布附带 `BoltKVM-<版本>.zip` 与同名 `.sha256`。当前最新发布为 **v0.12.1**；0.13 尚未打标签、未推送，只是本机验收构建：
 
 ```bash
-V=0.13     # 换成实际发布版本
+V=0.12.1   # 0.13 正式发布后改成实际版本
 unzip BoltKVM-$V.zip -d BoltKVM-$V
 shasum -a 256 -c BoltKVM-$V.zip.sha256
 open BoltKVM-$V/BoltKVM.app
@@ -34,7 +34,7 @@ open BoltKVM-$V/BoltKVM.app
 | 解码链路延迟 | P95 < 33 ms | P95 **25.4–27.0 ms** | 达标（三轮解码 P95 均 < 33 ms） |
 | GUI 采集→上屏延迟 | P95 < 50 ms | P50 **31.0 ms**、P95 **33.2 ms**、60.0 fps | 达标（详见 [B5 延迟报告](docs/reports/2026-10-23-b5-latency.md)） |
 | 稳定性 | 8 小时不断连 | 8h00m01s：0 断连、0 解码失败、0 看门狗重建 | 达标 |
-| 音频 | 默认零字节 | 默认不传；开启后 48 kHz 双声道，16-bit 1.54 Mbps（已测：−34 dBFS、12 分钟 RSS 134→135 MB）或 24-bit 2.30 Mbps（0.13 新增，端到端格式已验证） | 达标（16-bit 已测；24-bit 待听感验收） |
+| 音频 | 默认零字节 | 默认不传；只有主控端明确选择音频才采集发送。开启后 48 kHz 双声道，16-bit 1.54 Mbps（已测：−34 dBFS、12 分钟 RSS 134→135 MB）或 24-bit 2.30 Mbps（0.13 新增，端到端格式已验证） | 达标（16-bit 已测；24-bit 传输与关窗/路由行为已实测，24-bit 听感仍待确认） |
 | 输入连续性 | 8 小时不丢事件 | 8h 内 466 次转发、tap 失效 0（CLI 客户端；探针投递 458 次，差额未核对）；GUI 客户端 8h 输入长跑由用户确认完成（2026-10-28） | 达标 |
 
 解码链路与 GUI 呈现链路分开统计：解码链路 P95 在 27 ms 以内；GUI 渲染采用到帧即时触发 `MTKView.draw()` 的泵送模式，消除了等待显示刷新周期的排队开销，采集→上屏 P95 为 33.2 ms。详见 [B5 延迟报告](docs/reports/2026-10-23-b5-latency.md) 与 [音频与 GUI 稳定性报告](docs/reports/2026-10-23-audio-and-gui-stability.md)。
@@ -77,7 +77,7 @@ CGEvent 注入              ◄── 输入与音频 ──────── C
 - 连接后窗口按 **1:1** 适配（一个码流像素对一个物理像素）：屏幕放得下就直接 1:1，放不下则按可见区域等比缩小，工具栏尾部显示缩放百分比（仅缩放时显示）；全屏（⌃⌘F）在尺寸匹配的屏幕上就是 100%，文字最清晰；
 - 工具栏居中提供「调度中心」与「桌面」两个远端系统操作（后者按下后变成「还原窗口」，再按一次恢复原来的窗口）；最右侧实时显示 `fps · Mbps`；
 - 全屏下工具栏作为浮层自动隐藏，指针在屏幕顶边停留片刻后浮现；远端画面整体下移一个工具栏高度，尺寸和比例不变（底部超出屏幕），与 macOS「屏幕共享」的表现一致，不再因工具栏出现而被压扁重新缩放；
-- 关闭视频窗口即断开连接并返回主机列表；
+- 关闭视频窗口即断开连接并返回主机列表；若正在转发该主机音频，先发 `pauseMedia` 暂停被控端 Now Playing，服务端确认停止后才恢复被控端输出；
 - 仅当鼠标指针位于画面区域内时转发键鼠事件。指针移出画面、窗口失焦或连接断开时，已按下的按键与鼠标键会自动抬起；每次按键注入前也会按事件携带的修饰键掩码对齐远端状态，防止修饰键卡死。为该主机开启音频并播放时，键盘上的音量加/减/静音键保留在主控端，用来调整本地输出，不再发给被控端；未选音频时仍照常转发。
 
 ### 色彩模式
@@ -153,7 +153,7 @@ defaults write io.github.boltkvm server.audio -bool true
 
 然后在菜单栏停止再启动服务即可生效。
 
-**服务端仅以 `--audio` 启动、但主控端没有为该主机选择音频时，不会暂停任何播放器。** 选中音频后，客户端收到第一个音频包时发送 `muteLocalOutput`，服务端用 `AudioOutputMute` 静音本机默认输出，但**不暂停 Now Playing**：源继续播放，ScreenCaptureKit 在设备静音之前取音，所以主控端仍能听到完整声音。主控端断开时服务端恢复保存的静音/音量状态，不自动恢复媒体。
+**新主控端没有为该主机选择音频时，服务端不会采集/发送音频，也不会暂停任何播放器。** 主控端在 config 第 7 字节明确声明：1 = 选中播放、2 = 未选、3 = `--audio-record` 仅录制；旧客户端发 0，服务端保持旧的“服务端决定”行为（仍按 `--audio` 采集发送，旧客户端自己不播放）。选中音频后，客户端收到第一个音频包时发送 `muteLocalOutput`，服务端用 `AudioOutputMute` 静音本机默认输出，但**选中本身不暂停 Now Playing**：源继续播放，ScreenCaptureKit 在设备静音之前取音，所以主控端仍能听到完整声音。关闭主控窗口时客户端先发 `pauseMedia`；服务端在 session 结束时兜底暂停，确认 Now Playing 停止后才恢复保存的静音/音量状态。
 
 主控端正在播放转发音频时，如果默认输出设备发生变化（蓝牙耳机开关、有线耳机插拔），客户端会立即停止本地转发播放并静音**主控端整机默认输出**（不只是 BoltKVM 播放器），同时向服务端发一次 `pauseMedia`，服务端用 MediaRemote 暂停当前 Now Playing 应用。设备稳定后客户端重建一次音频图，2.5 s 后恢复主控端系统输出；被控端媒体保持暂停，不自动恢复。多个 CoreAudio 通知会合并，不会连续发暂停；日志为 `muted Pro system output during route change` 与 `output route changed; asked server to pause media`。
 
@@ -241,12 +241,10 @@ defaults write io.github.boltkvm server.audio -bool true
 推送 `v*` 标签即可触发 GitHub Actions 自动编译、自测、打包签名并创建 GitHub Release：
 
 ```bash
-git tag v0.13 && git push origin v0.13
+git tag v0.14.0 && git push origin v0.14.0   # 换成实际版本
 ```
 
-只推送 `main` 不会触发发布——`release.yml` 仅在推送 `v*` 标签时运行；打标签前请确认 `main` 上的 CI 全绿。发布流程与签名说明见 [发布流程](docs/releasing.md)。
-
-签名与公证机制说明见 [发布流程](docs/releasing.md)。
+只推送 `main` 不会触发发布——`release.yml` 仅在推送 `v*` 标签时运行；打标签前请确认 `main` 上的 CI 全绿。签名与公证机制说明见 [发布流程](docs/releasing.md)。
 
 ## 故障恢复（被控端重启后）
 
@@ -269,8 +267,8 @@ git tag v0.13 && git push origin v0.13
 - **安全输入与锁屏限制**：系统处于锁屏或密码输入框（Secure Input）状态时，会话级事件监听会被系统拦截；锁屏解锁请使用系统自带的屏幕共享（VNC）。
 - **不支持多显示器同传**：被控端仅创建并采集一块虚拟屏。
 - **没有可用音频输出设备时**：开启 `--audio` 但机器没有输出设备（例如 CI runner）时，音频链路会降级为静音并记录 `audio: playback unavailable (...)`，视频与输入不受影响，服务端不再崩溃；设备稍后出现会自动重试。
-- **音频输出切换/蓝牙耳机重连**：蓝牙耳机断开再连接、插拔带扬声器的显示器等导致系统默认输出变化时，客户端会立即停止本地转发播放、静音主控端整机默认输出，并通知被控端暂停当前媒体；设备稳定后只重建一次音频图（日志 `audio: playing to default output (...; graph #n)`），2.5 s 后恢复主控端系统声音。日志还会出现 `muted Pro system output during route change`、`media: paused the current Now Playing app`。被控端媒体不自动恢复；若某播放器不响应系统 Now Playing，暂停可能无效。
-- **被控端本地静音**：主控端为该主机选择音频后，服务端日志出现 `audio: client selected audio; muted controlled Mac output`，表示默认输出被静音、Now Playing 仍在播放；断开后出现 `audio: client audio ended; restored controlled Mac output`。主控端没选音频时不会发这条命令，重新连接也不会影响被控端播放。选音频时媒体不会自动暂停；只有换主控端输出设备时才会出现 `media: paused the current Now Playing app`。显式 `--local-mute` 仍可用同一套 `AudioOutputMute`；若旧版本曾被 `SIGKILL` 且留下 `~/Library/Application Support/BoltKVM/mute-state.json`，新服务端启动时会先恢复并删除该标记。
+- **音频输出切换/蓝牙耳机重连**：蓝牙耳机断开再连接、插拔带扬声器的显示器等导致系统默认输出变化时，客户端会立即停止本地转发播放、静音主控端整机默认输出，并通知被控端暂停当前媒体；设备稳定后只重建一次音频图（日志 `audio: playing to <默认输出设备> (...; graph #n)`），2.5 s 后恢复主控端系统声音。日志还会出现 `muted Pro system output during route change`、`media: paused the current Now Playing app`。被控端媒体不自动恢复；若某播放器不响应系统 Now Playing，暂停可能无效。
+- **被控端本地静音**：主控端为该主机选择音频后，服务端日志出现 `audio: client selected audio; local output is muted`，表示默认输出被静音、Now Playing 仍在播放；关闭窗口时客户端先发 `pauseMedia`，服务端再确认 Now Playing 停止，日志随后出现 `audio: Now Playing confirmed paused; restoring output` 与 `audio: restored local output ... aggregate members`，之后才恢复输出。主控端没选音频时不会发这条命令，也不会采集/发送音频。选音频时媒体不会因为“选中”而暂停；关窗或换主控端输出设备时才会暂停。显式 `--local-mute` 仍可用同一套 `AudioOutputMute`；若旧版本曾被 `SIGKILL` 且留下 `~/Library/Application Support/BoltKVM/mute-state.json`，新服务端启动时会先恢复并删除该标记。
 - **虚拟屏创建失败**：连续重试仍拿不到虚拟屏时，服务端以退出码 3 退出并交给守护逻辑重启，不会回退去采集本地真实桌面（避免把操作者自己的桌面推给主控端）。
 
 ## 里程碑

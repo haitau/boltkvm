@@ -45,8 +45,11 @@ struct SessionConfig (8 bytes, big-endian):
   u16 height     // 逻辑高度 (240...4320)
   u8  quality    // 0 = standard (最大编码宽度 3840), 1 = pixel (2x backing 原画, 宽度上限 8192)
   u8  color      // 0 = 标准 BT.709 8-bit, 1 = 广色域 10-bit P3（旧版服务端读作 0）
-  u16 reserved
+  u8  audio      // byte 6: 0 = int16, 1 = packed int24（旧服务端忽略）
+  u8  audioRequest // byte 7: 0 = 旧客户端/未声明, 1 = 选中播放, 2 = 未选, 3 = 仅录制
 ```
+
+尺寸为 `0x0` 的 config 是音频专用请求：只协商音频，保留当前采集尺寸，不重建虚拟屏。
 
 ### 2.2 服务端处理规则
 

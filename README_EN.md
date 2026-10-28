@@ -8,16 +8,16 @@ Low-latency screen control between two Macs. A single app bundle serves both rol
 
 - **Pixel Equivalence**: Streams and renders at the controlled Mac's native 2× HiDPI backing resolution so text stays crisp without secondary scaling blur.
 - **Low-Latency Interaction**: Capture-to-decode P95 < 33 ms; GUI capture-to-present P95 < 50 ms.
-- **Audio Isolation by Default**: No pause or mute on the controlled Mac unless the controller selects audio for that host. When selected, the controlled Mac pauses its current Now Playing app instead of muting its output device, so its volume/mute state is never changed.
+- **Audio Isolation by Default**: The controlled Mac captures and sends no audio, and does not pause, mute, or change its volume, unless the controller explicitly selects audio for that host. When selected, the controlled Mac mutes its local output but keeps the source playing, so the controller hears the full stream. Closing the controller sends a pause request first; the controlled Mac waits until its player reports stopped before restoring the output, so no audio leaks out during teardown.
 - **Unidirectional Control**: The controller only captures input and renders video, while the controlled Mac only captures the screen and injects input—eliminating feedback loops by topology.
 - **Automatic Reconnect**: If the controlled Mac restarts its capture helper (resolution change, update) or the link drops briefly, the controller reconnects and shows the attempt count instead of freezing on the last frame. A wrong key still fails immediately.
 
 ## Download & Install
 
-Grab the latest `BoltKVM-<version>.zip` and its `.sha256` from [Releases](https://github.com/haitau/boltkvm/releases):
+Grab the latest `BoltKVM-<version>.zip` and its `.sha256` from [Releases](https://github.com/haitau/boltkvm/releases). The latest published release is **v0.12.1**; 0.13 is an unreleased local acceptance build (no tag, not pushed):
 
 ```bash
-V=0.13     # replace with the release version
+V=0.12.1   # change after 0.13 is published
 unzip BoltKVM-$V.zip -d BoltKVM-$V
 shasum -a 256 -c BoltKVM-$V.zip.sha256
 open BoltKVM-$V/BoltKVM.app
@@ -34,8 +34,8 @@ Release builds are ad-hoc signed: allow the app in **System Settings → Privacy
 | Capture-to-decode latency | P95 < 33 ms | P95 **25.4–27.0 ms** | Pass (all three decode runs stayed under 33 ms) |
 | GUI capture-to-present latency | P95 < 50 ms | P50 **31.0 ms**, P95 **33.2 ms**, 60.0 fps | Pass ([B5 Latency Report](docs/reports/2026-10-23-b5-latency.md)) |
 | Stability | 8-hour soak | 8h00m01s: 0 disconnects, 0 decode errors, 0 watchdog rebuilds | Pass |
-| Audio | 0 bytes by default | Off by default; 48 kHz stereo, 16-bit at 1.54 Mbps (measured: −34 dBFS, RSS 134→135 MB over 12 min) or 24-bit at 2.30 Mbps (0.13, format verified end to end) | Pass (16-bit measured; 24-bit listening acceptance pending) |
-| Input continuity | 8 hours without dropped events | 466 forwarded batches over 8h, 0 tap failures (CLI client; the probe delivered 458 events, so the 8-event difference is unverified; 8h GUI soak pending) | Partial |
+| Audio | 0 bytes by default | No capture or transmission unless the controller explicitly selects audio. When enabled: 48 kHz stereo, 16-bit at 1.54 Mbps (measured: −34 dBFS, RSS 134→135 MB over 12 min) or 24-bit at 2.30 Mbps (0.13, format verified end to end) | Pass (16-bit measured; 24-bit transport and close/route behavior measured, 24-bit listening still pending) |
+| Input continuity | 8 hours without dropped events | 466 forwarded batches over 8h, 0 tap failures (CLI client; the probe delivered 458 events, so the 8-event difference is unverified; GUI client 8-hour run confirmed by the user on 2026-10-28) | Pass |
 
 Decode latency and GUI presentation latency are tracked separately: capture-to-decode P95 stays under 27 ms, while the GUI renderer triggers `MTKView.draw()` immediately upon frame arrival rather than waiting for the next display vsync tick, keeping capture-to-present P95 at 33.2 ms. See the [B5 Latency Report](docs/reports/2026-10-23-b5-latency.md) and [Audio & GUI Stability Report](docs/reports/2026-10-23-audio-and-gui-stability.md) for raw logs.
 
@@ -58,26 +58,27 @@ CGEvent injection         ◄── input & audio ────── CGEvent/NSE
 ## App Mode (Recommended)
 
 ```bash
-./Packaging/build-app.sh    # Build release binaries and assemble dist/BoltKVM.app
-open dist/BoltKVM.app       # Choose a role on first launch; switch anytime under the "Role" menu
+./scripts/install-app.sh    # Build, sign, install to /Applications, and launch
 ```
+
+Choose a role on first launch; switch anytime under the **Role** menu. To assemble `dist/BoltKVM.app` without installing it, run `./Packaging/build-app.sh`. The install script stages the previous bundle only for the duration of the swap, restores it on failure, and deletes it on success, so it never leaves a `.bak` in `/Applications`; signing prefers the stable local **BoltKVM Local** certificate.
 
 A single app bundle supports both roles:
 
 **Controlled Mac** (menu bar agent, no Dock icon or main window)
 
-- The settings panel displays resolution, picture quality, port, connection password with fingerprint, service status, TCC permission shortcuts, and log access;
+- The settings panel displays resolution, picture quality, port, connection password with fingerprint, version/build, service status, TCC permission shortcuts, and log access; the host list and controller window titles also show the version;
 - Screen capture and virtual display creation run inside the bundled `boltkvm-server` helper process, which automatically restarts 3 seconds after an unexpected exit;
 - Clicking **New password…** generates a fresh password and restarts the server, immediately invalidating the old password.
 
 **Controller** (single window)
 
-- Opens to the saved host list—double-click a host to connect, or click **Edit** to configure display name, IP address, port, resolution, password, color mode, and input/audio toggles per host;
+- Opens to the saved host list—double-click a host to connect, or click **Edit** to configure display name, IP address, port, resolution, password, color mode, and input/audio/clipboard toggles per host;
 - After connecting, the window maps one stream pixel to one physical pixel (**1:1**) when it fits; otherwise it scales down proportionally to the visible area and the toolbar shows the scale percentage (only when below 100%). Full screen (⌃⌘F) on a matching display is 100%, giving the crispest text;
-- The centered toolbar provides **Mission Control** and **Desktop** shortcuts for the remote Mac, with live `fps · Mbps` metrics on the right;
+- The centered toolbar provides **Mission Control** and **Desktop** shortcuts for the remote Mac; **Desktop** becomes **Restore Windows** when pressed again. Live `fps · Mbps` metrics sit on the right;
 - In full screen the toolbar is an overlay: it auto-hides and reveals after a short dwell at the top edge, and the remote picture moves down by exactly one toolbar height without being resized or re-scaled (the bottom goes off-screen). This matches macOS Screen Sharing instead of squeezing the drawable;
-- Closing the video window disconnects the session and returns to the host list;
-- Keyboard and mouse events are forwarded only while the pointer is inside the video view. Pressing keys or mouse buttons and then moving the pointer out, unfocusing the window, or disconnecting automatically synthesizes release events; modifier flags are also reconciled before each key event to prevent stuck modifiers.
+- Closing the video window disconnects the session and returns to the host list. If audio is being forwarded for this host, the client sends `pauseMedia` first and the server restores the controlled Mac's output only after Now Playing is confirmed stopped;
+- Keyboard and mouse events are forwarded only while the pointer is inside the video view. Pressing keys or mouse buttons and then moving the pointer out, unfocusing the window, or disconnecting automatically synthesizes release events; modifier flags are also reconciled before each key event to prevent stuck modifiers. When audio is selected and playing for this host, the hardware volume up/down/mute keys stay local; with audio unselected they are forwarded.
 
 ## Color Modes
 
@@ -104,7 +105,7 @@ The UI is localized in English and Simplified Chinese (`Packaging/Resources/{en,
 
 The controller app uses window-local `NSEvent` monitors for keyboard and mouse capture and does not require **Input Monitoring** permission (only the CLI `--input` full-screen mode uses `CGEventTap` and requires Input Monitoring).
 
-By default, `build-app.sh` uses ad-hoc code signing (`-`). Because every rebuild changes the binary `cdhash`, macOS TCC treats each build as a new application and re-prompts for permissions. For local development, create and trust a persistent self-signed certificate once:
+`build-app.sh` prefers the local, stable `BoltKVM Local` identity when it exists; only when that identity is absent does it fall back to ad-hoc signing (`-`). Because every rebuild changes the binary `cdhash` under ad-hoc signing, macOS TCC treats each build as a new application and re-prompts for permissions. Create and trust a persistent self-signed certificate once:
 
 ```bash
 ./scripts/make-signing-identity.sh                                  # Create and trust "BoltKVM Local"
@@ -158,6 +159,19 @@ Double-click the host or click **Connect**. Changing the resolution in the host 
 
 The controlled Mac's menu, the settings panel, and the host editor share one resolution catalog: the first two entries are this project's targets, 3008×1692 (Thunderbolt bridge / 32-inch display) and 1728×1117 (MacBook Pro panel), followed by 1920×1080, 2560×1440, 2880×1620, and 3840×2160. A custom size is added to this Mac's catalog and the controlled Mac's menu also lists the current custom size. Custom entries live in this Mac's preferences and are not synchronized to the other machine.
 
+## Audio and Clipboard Behavior
+
+Audio is opt-in per host. The controller writes an explicit selected/unselected/record-only value into byte 7 of the `config` packet; a new server then skips audio capture entirely for an unselected host. Older clients send 0 there, so a new server keeps the legacy "server decides" behavior for them. `--audio-record` sends 3 (capture only): the server still sends audio, but the client neither plays it nor asks the controlled Mac to mute. The wire format is negotiated after authentication: the server advertises 24-bit support in `authOk`, and the controller requests packed 24-bit PCM; old peers fall back to 48 kHz / 16-bit. Both formats are stereo; 96 kHz is not implemented. 24-bit samples are decoded to float32 for the mixer because an int32 player connection is rejected by the current macOS (`-10868`).
+
+When audio is selected:
+
+- The controlled Mac's default output is muted through `AudioOutputMute`; the source keeps playing, and ScreenCaptureKit taps it before the device mute, so the controller receives the complete stream. The original mute/volume state is saved and restored.
+- Selecting audio does **not** pause the controlled Mac's Now Playing app.
+- Closing the controller first sends `pauseMedia`. The server pauses the app again as a fallback, polls `MRMediaRemoteGetNowPlayingApplicationIsPlaying`, and only restores the output after the player reports stopped (plus a short settle window). If MediaRemote cannot confirm, the output stays muted a little longer rather than leaking a burst.
+- A controller output-route change (Bluetooth headphones, wired headphones, a display with speakers) immediately stops local playback and mutes the controller's **whole** default output, pauses the controlled Mac's Now Playing app, then rebuilds the audio graph once and restores the controller output after 2.5 s. The controlled Mac's media does not resume automatically.
+
+Clipboard sync is bidirectional and enabled by default. It carries plain text, HTML/RTF (with a plain-text fallback), PNG (TIFF is converted), and files/folders as content, not paths. Received files go to `~/Downloads/BoltKVM Clipboard/`; folders are packed/unpacked with `ditto` and verified file by file with SHA-256. Symlinks are not supported. The receiver skips `ConcealedType` / `TransientType` / `AutoGeneratedType`, never simulates ⌘V, and suppresses loops with `NSPasteboard.changeCount` plus a content hash. Limits are configurable (`client.clipboardMaxMB`, `client.clipboardMaxGB`; server `--clipboard-max-mb` / `--clipboard-max-gb`); non-file items default to 512 MB, and file transfers are bounded by free disk minus 20 GB rather than a fixed 2 GB cap. Interrupted transfers use a `.incoming-*` path and are cleaned up. Disable per host in the editor or with `defaults write io.github.boltkvm client.clipboard -bool false`; the server accepts `--no-clipboard`.
+
 ## Command-Line Interface (CLI)
 
 The `boltkvm` CLI shares `BoltKVMCore` with the GUI app and is used for scripted verification and long-running soak tests:
@@ -192,6 +206,9 @@ Common server flags:
 --audio                            # Enable system audio capture (48 kHz stereo; negotiated 16/24-bit, ~1.5/2.3 Mbps)
 --local-mute                       # Explicitly mute the controlled Mac's default output (off by default)
 --codec hevc                       # Use HEVC instead of the default ProRes 422 encoder
+--no-clipboard                     # Disable clipboard sync
+--clipboard-max-mb 512             # Non-file clipboard item cap
+--clipboard-max-gb 0               # Optional file-transfer cap (0 = disk minus 20 GB)
 ```
 
 Soak and rescue helper scripts:
@@ -207,14 +224,10 @@ Soak and rescue helper scripts:
 Pushing a `v*` tag triggers GitHub Actions to build, run self-tests, package and sign the app bundle, and publish a GitHub Release:
 
 ```bash
-git tag v0.13 && git push origin v0.13
+git tag v0.14.0 && git push origin v0.14.0   # replace with the actual version
 ```
 
-Pushing `main` alone never publishes a release—`release.yml` only runs for `v*` tags. Make sure CI is green on `main` before tagging. See [docs/releasing.md](docs/releasing.md) for code signing and notarization details.
-
-See [docs/releasing.md](docs/releasing.md) for code signing and notarization details.
-
-## Recovery After a Controlled Mac Reboot
+Pushing `main` alone never publishes a release—`release.yml` only runs for `v*` tags. Make sure CI is green on `main` before tagging. ## Recovery After a Controlled Mac Reboot
 
 ```text
 Reboot ──► SSH ready ──► Auto-login into Aqua desktop session
@@ -235,7 +248,8 @@ Reboot ──► SSH ready ──► Auto-login into Aqua desktop session
 - **Secure Input & Lock Screen**: macOS blocks session-level event capture and injection while the lock screen or a Secure Input password field is active; use built-in macOS Screen Sharing (VNC) to unlock a locked screen.
 - **Single-Monitor Streaming**: The server creates and captures a single virtual display per session.
 - **No Audio Output Device**: If `--audio` is enabled on a machine without a usable output device (e.g. a CI runner), the audio path degrades to silence and logs `audio: playback unavailable (...)`; video and input keep working, the server no longer crashes, and the client retries when a device appears.
-- **Output Route Changes / Bluetooth Reconnect**: When Bluetooth headphones disconnect and reconnect, or a display with speakers is plugged in, the default output changes. The client rebuilds its audio output graph automatically (log: `audio: playing to default output (...; graph #n)`), so the session does not need to be reconnected. If audio is still silent, look for `audio: retrying output` / `audio: playback unavailable`. When the controller has audio selected, the controlled Mac also pauses its current Now Playing app (`media: paused the current Now Playing app`) instead of muting the device; this is expected, not a local failure. With audio unselected, reconnecting sends no pause command at all.
+- **Output Route Changes / Bluetooth Reconnect**: When Bluetooth headphones disconnect and reconnect, or a display with speakers is plugged in, the default output changes. The controller immediately stops forwarded playback and mutes its whole default output, asks the controlled Mac to pause Now Playing, rebuilds the audio graph once after the route settles (log: `audio: playing to <default device> (...; graph #n)`), and restores the controller output after 2.5 s. If audio is still silent, look for `audio: retrying output` / `audio: playback unavailable`. Selecting audio alone does not pause the controlled Mac; it mutes its output. Closing the controller does pause it, after which the server confirms the player stopped before restoring output. With audio unselected, the controller sends no mute/pause command and the server captures no audio.
+- **Controlled Mac Output Mute**: After the controller selects audio, the server logs `audio: client selected audio; local output is muted`; Now Playing keeps playing. On a deliberate close, the controller sends `pauseMedia`, the server confirms the player stopped (`audio: Now Playing confirmed paused; restoring output`) and then restores the saved mute/volume (`audio: restored local output ... aggregate members`). If a player ignores MediaRemote pause, the server logs `pause not confirmed` and holds the output mute a little longer.
 - **Virtual Display Failure**: If the virtual display still cannot be created after retries, the server exits with status 3 and lets the supervisor restart it; it never falls back to streaming the operator's local desktop.
 
 ## Milestones
