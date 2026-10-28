@@ -35,6 +35,10 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 - 0.13 (243) record-only 短跑（不播放、不发声）：`sent config 0x0 audio=int24 request=recordOnly`，服务端 `audio source ... target=int24` 并发送音频，客户端录制 960 帧；服务端日志没有 `muteLocalOutput` 或暂停命令；
 - 0.13 (243) 本机 → mini 跨机短跑：认证/X25519 完成，收到 206 帧、0 解码失败；mini 与 Pro 均已安装 243，`/Applications` 无 `.bak` 残留；最终跨机短跑收到 119 帧、0 解码失败。
 
+## 后续回归
+
+审计把 44.1 kHz 转换改成 block API 时误用了 `.endOfStream`，导致 0.13 (243) 每个会话只产生第一个音频包、Pro 完全无声；0.13 (245) 已改为 `.noDataNow` 并加同一 converter 连续 5 个 buffer 的测试。详见 [音频转换器复用回归](2026-10-28-audio-converter-reuse.md)。
+
 ## 仍保留的边界
 
 1. **authOk 的 flags 未做 HMAC**：中间人可清掉 `FLAG_SUPPORTS_KEY_EXCHANGE`，使会话退回仅 PSK 派生密钥。当前攻击者没有 PSK 仍无法解密或伪造加密帧；只有日后 PSK 泄露时才会失去前向保密。彻底修复需要给 authOk 增加覆盖 flags 的 MAC，涉及协议兼容，未在本轮改动。
