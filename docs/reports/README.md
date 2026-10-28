@@ -37,4 +37,4 @@
 | 2026-10-28 | [fullscreen-toolbar-first-reveal](2026-10-28-fullscreen-toolbar-first-reveal.md) | 全屏工具栏首次弹出无按钮 | 已修：改回原生标准工具栏项 + 首次显隐预热；放弃视觉不符的浮层 |
 | 2026-10-28 | [audio-local-mute](2026-10-28-audio-local-mute.md) | mini 本地被莫名静音 | 已修：默认不再设备静音，改为暂停当前媒体；mini 214 验证 |
 | 2026-10-28 | [audio-route-mute](2026-10-28-audio-route-mute.md) | 音频选中静音、换设备停两端 | 代码/无音频单测通过，实机听感待验证 |
-| 2026-10-28 | [v0.13-release](2026-10-28-v0.13-release.md) | v0.13：24-bit/48 kHz 协商、音频状态机、0.13 本地部署 | 99 项测试通过（1 skip）；24-bit record-only 端到端通过；mini 授权与听感待用户完成 |
+| 2026-10-28 | [v0.13-release](2026-10-28-v0.13-release.md) | v0.13 候选：24-bit/48 kHz 协商、音频状态机、0.13 本地验收版 | 99 项测试通过（1 skip）；24-bit record-only 端到端通过；tag 已撤回，听感/授权/CI 待完成 |
