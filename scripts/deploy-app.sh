@@ -24,9 +24,25 @@ scp -q /tmp/BoltKVM.app.tgz "$HOST:/tmp/BoltKVM.app.tgz"
 
 ssh "$HOST" 'bash -s' <<'REMOTE'
 set -euo pipefail
-rm -rf /Applications/BoltKVM.app
-tar -xzf /tmp/BoltKVM.app.tgz -C /Applications
-codesign --verify --deep --strict /Applications/BoltKVM.app
+BACKUP=/Applications/BoltKVM.app.bak
+if [ -e /Applications/BoltKVM.app ]; then
+  rm -rf "$BACKUP"
+  mv /Applications/BoltKVM.app "$BACKUP"
+fi
+if ! tar -xzf /tmp/BoltKVM.app.tgz -C /Applications; then
+  if [ -e "$BACKUP" ]; then
+    rm -rf /Applications/BoltKVM.app
+    mv "$BACKUP" /Applications/BoltKVM.app
+  fi
+  echo "解包失败，已恢复旧版本。" >&2
+  exit 1
+fi
+if ! codesign --verify --deep --strict /Applications/BoltKVM.app; then
+  rm -rf /Applications/BoltKVM.app
+  if [ -e "$BACKUP" ]; then mv "$BACKUP" /Applications/BoltKVM.app; fi
+  echo "签名校验失败，已恢复旧版本。" >&2
+  exit 1
+fi
 defaults write io.github.boltkvm role -string server
 
 # Hand over from the CLI loop. Bracket patterns keep these from matching the
