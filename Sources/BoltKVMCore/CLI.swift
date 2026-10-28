@@ -240,7 +240,8 @@ public enum CLI {
                                 : virtualDisplay?.displayID,
                             colorMode: desiredColor,
                             clipboardEnabled: !args.contains("--no-clipboard"),
-                            muteLocalOutput: !args.contains("--no-local-mute"),
+                            muteLocalOutput: args.contains("--local-mute")
+                                && !args.contains("--no-local-mute"),
                             clipboardMaxItemBytes: clipboardMaxItemBytes(args),
                             clipboardMaxTransferBytes: clipboardMaxTransferBytes(args))
                 do {

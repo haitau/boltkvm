@@ -8,7 +8,7 @@ Low-latency screen control between two Macs. A single app bundle serves both rol
 
 - **Pixel Equivalence**: Streams and renders at the controlled Mac's native 2× HiDPI backing resolution so text stays crisp without secondary scaling blur.
 - **Low-Latency Interaction**: Capture-to-decode P95 < 33 ms; GUI capture-to-present P95 < 50 ms.
-- **Audio Isolation by Default**: Zero audio capture or transmission unless explicitly enabled, leaving the controller's audio output untouched.
+- **Audio Isolation by Default**: Zero audio capture or transmission unless explicitly enabled; when enabled, the controlled Mac pauses its current Now Playing app instead of muting its output device, so its volume/mute state is never changed.
 - **Unidirectional Control**: The controller only captures input and renders video, while the controlled Mac only captures the screen and injects input—eliminating feedback loops by topology.
 - **Automatic Reconnect**: If the controlled Mac restarts its capture helper (resolution change, update) or the link drops briefly, the controller reconnects and shows the attempt count instead of freezing on the last frame. A wrong key still fails immediately.
 
@@ -74,7 +74,7 @@ A single app bundle supports both roles:
 
 - Opens to the saved host list—double-click a host to connect, or click **Edit** to configure display name, IP address, port, resolution, password, color mode, and input/audio toggles per host;
 - After connecting, the window maps one stream pixel to one physical pixel (**1:1**) when it fits; otherwise it scales down proportionally to the visible area and the toolbar shows the scale percentage (only when below 100%). Full screen (⌃⌘F) on a matching display is 100%, giving the crispest text;
-- The centered toolbar provides **Mission Control** and **Desktop** shortcuts for the remote Mac, with live `fps · Mbps` metrics on the right; the full-screen overlay also has an **Exit Full Screen** button;
+- The centered toolbar provides **Mission Control** and **Desktop** shortcuts for the remote Mac, with live `fps · Mbps` metrics on the right;
 - In full screen the toolbar is an overlay: it auto-hides and reveals after a short dwell at the top edge, and the remote picture moves down by exactly one toolbar height without being resized or re-scaled (the bottom goes off-screen). This matches macOS Screen Sharing instead of squeezing the drawable;
 - Closing the video window disconnects the session and returns to the host list;
 - Keyboard and mouse events are forwarded only while the pointer is inside the video view. Pressing keys or mouse buttons and then moving the pointer out, unfocusing the window, or disconnecting automatically synthesizes release events; modifier flags are also reconciled before each key event to prevent stuck modifiers.
@@ -190,6 +190,7 @@ Common server flags:
 --virtual-display-size 3008x1692   # Logical resolution of the virtual display
 --bind auto                        # Bind only bridge* interfaces by default; pass 127.0.0.1 for loopback tests
 --audio                            # Enable system audio capture (48 kHz stereo signed 16-bit PCM, ~1.5 Mbps)
+--local-mute                       # Explicitly mute the controlled Mac's default output (off by default)
 --codec hevc                       # Use HEVC instead of the default ProRes 422 encoder
 ```
 
@@ -234,7 +235,7 @@ Reboot ──► SSH ready ──► Auto-login into Aqua desktop session
 - **Secure Input & Lock Screen**: macOS blocks session-level event capture and injection while the lock screen or a Secure Input password field is active; use built-in macOS Screen Sharing (VNC) to unlock a locked screen.
 - **Single-Monitor Streaming**: The server creates and captures a single virtual display per session.
 - **No Audio Output Device**: If `--audio` is enabled on a machine without a usable output device (e.g. a CI runner), the audio path degrades to silence and logs `audio: playback unavailable (...)`; video and input keep working, the server no longer crashes, and the client retries when a device appears.
-- **Output Route Changes / Bluetooth Reconnect**: When Bluetooth headphones disconnect and reconnect, or a display with speakers is plugged in, the default output changes. The client rebuilds its audio output graph automatically (log: `audio: playing to default output (...; graph #n)`), so the session does not need to be reconnected. If audio is still silent, look for `audio: retrying output` / `audio: playback unavailable`.
+- **Output Route Changes / Bluetooth Reconnect**: When Bluetooth headphones disconnect and reconnect, or a display with speakers is plugged in, the default output changes. The client rebuilds its audio output graph automatically (log: `audio: playing to default output (...; graph #n)`), so the session does not need to be reconnected. If audio is still silent, look for `audio: retrying output` / `audio: playback unavailable`. The controlled Mac also pauses its current Now Playing app (`media: paused the current Now Playing app`) instead of muting the device; this is expected, not a local failure.
 - **Virtual Display Failure**: If the virtual display still cannot be created after retries, the server exits with status 3 and lets the supervisor restart it; it never falls back to streaming the operator's local desktop.
 
 ## Milestones

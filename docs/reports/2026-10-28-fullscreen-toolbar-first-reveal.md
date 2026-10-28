@@ -1,51 +1,60 @@
-# 全屏工具栏首次弹出无按钮修复（2026-10-28）
+# 全屏工具栏首次弹出无按钮：从自定义浮层回到原生工具栏（2026-10-28）
 
 ## 现象
 
-新启动应用后进入全屏，第一次把指针移到屏幕顶边，工具栏浮层出现但没有「调度中心」「桌面」按钮；把指针移开、再移到顶边，第二次弹出的工具栏才有按钮。窗口模式一直正常。
+新启动应用后进入全屏，第一次把指针移到屏幕顶边，工具栏出现但没有「调度中心」「桌面」按钮；把指针移开、再移到顶边，第二次弹出的工具栏才有按钮。窗口模式一直正常。
+
+为绕开这个问题，曾把全屏工具栏改成内容视图里的 `NSVisualEffectView` 浮层。用户实测后反馈浮层“不如原生工具栏”，截图里菜单栏下方出现一条黑色带，按钮文字被压在浅色带底边、裁掉一半；它没有复现 macOS 屏幕共享的观感，因此该方案被放弃。
 
 ## 根因
 
-【事实】全屏工具栏由 AppKit 的 `NSToolbarFullScreenWindow` 承载。该窗口在第一次 `toolbar.isVisible = true` 时才创建，基于 `NSToolbarItem.view` 的按钮视图在首次显示时没有完成布局；第二次显隐复用了已经布局好的窗口，所以按钮出现。
+【事实】全屏工具栏由 AppKit 的 `NSToolbarFullScreenWindow` 承载。该窗口在第一次 `toolbar.isVisible = true` 时才创建，基于 `NSToolbarItem.view` 的自定义按钮视图在首次显示时没有完成布局；第二次显隐复用了已经布局好的窗口，所以按钮出现。
 
-【事实】`toolbar.isVisible = false` 之后，这个全屏工具栏子窗口仍留在屏幕上并覆盖内容视图顶部；它本身没有画出按钮，因此表现为一条空白/透明的顶部带，第一次的点击也落不到按钮上。
+【事实】自定义浮层放在 `contentView` 的 `bounds.height - chromeHeight` 位置，按内容坐标从顶部 0 pt 开始；全屏时系统菜单栏占屏幕顶部 30 pt，原生工具栏实际在 y=30、高 68 pt。浮层顶部被菜单栏压住，剩下的高度只够露出文字下半截，正是用户截图中的黑带 + 裁字。
 
-【推断】这是 macOS 27.0.1 上 `NSToolbarFullScreenWindow` 的首次布局时序问题，和 A-4 的标题栏透明/白线修复不是同一处。
+【事实】`toolbar.isVisible = false` 之后，全屏工具栏子窗口仍留在屏幕上；它本身没有画出按钮时，就表现为一条空白/透明带。
 
-## 改动
+【推断】这是 macOS 27.0.1 上 `NSToolbarFullScreenWindow` 对 view-based item 的首次布局时序问题，和 A-4 的标题栏白线不是同一处。
 
-- 全屏不再依赖 AppKit 的原生工具栏浮层，改用内容视图内的 `NSVisualEffectView` 浮层：
-  - 浮层在窗口创建时就建好并完成按钮布局，第一次顶边停留即可显示；
-  - 浮层包含与窗口模式一致的「调度中心」「桌面」，并新增「退出全屏」；
-  - 右侧沿用 `fps · Mbps · 缩放/P3` 状态文字，颜色随连接状态变化。
-- 全屏时隐藏原生 `NSToolbar`，并在每次布局时把 `NSToolbarFullScreenWindow` 子窗口 `orderOut`，避免它覆盖浮层。
-- 窗口模式完全保留原生 `NSToolbar`：标题栏、两个按钮和状态标签的行为不变。
-- `ChromeLayout.videoFrame` 的位移逻辑未改；浮层显示时仍把远端画面整体下移 52 pt，隐藏时铺满全屏。
+## 最终改动
+
+- 删除自定义浮层与 `orderOut` 子窗口的路径，恢复真正的原生 `NSToolbar`。
+- 「调度中心」「桌面」改为标准 `NSToolbarItem`：`label`、`image`（SF Symbols）、`toolTip` 和 `target/action` 都由 AppKit 绘制，不再塞自定义 `NSStackView`。
+- 状态文字仍用原生工具栏项里的 `NSTextField`，保持在最右侧。
+- 第一次顶边显隐做一次“显示 → 隐藏 → 显示”的预热：
+  - 第一次 `isVisible = true` 让 AppKit 创建 `NSToolbarFullScreenWindow`；
+  - 下一个 runloop 隐藏，再在 200 ms 后显示；进入全屏 0.7 s 后还会在指针不在顶边时做一次隐藏预热；
+  - 之后同一全屏会话直接显示，不再重复预热。
+- 居中：`centeredItemIdentifier = tbMission`，任务控制作为中心锚点，桌面紧挨其右。
+- 画面位移使用全屏工具栏窗口的实际下沿：菜单栏显示时是 30 + 68 = 98 pt，菜单栏自动隐藏时是 68 pt（窗口模式仍是 52 pt）。之前只按固定 52/68 下移，远端画面会顶到菜单栏/工具栏下沿，或留下黑带。
+- 窗口模式的工具栏、标题栏和状态标签保持不变。
 
 ## 验证
 
-构建与测试：
-
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --disable-sandbox --scratch-path .build
-# Executed 91 tests, with 1 test skipped and 0 failures
+swift build -c release --disable-sandbox --scratch-path .build
+# 通过；app 版本 0.12.2 (214)
 
-BOLTKVM_SWIFT_BUILD_FLAGS="--disable-sandbox --scratch-path .build" ./Packaging/build-app.sh
-# ==> dist/BoltKVM.app
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --disable-sandbox --scratch-path .build
+# Executed 92 tests, with 1 test skipped and 0 failures
 ```
 
-本机 macOS 27.0.1、3008×1692 逻辑分辨率，实测：
+本机 macOS 27.0.1、3008×1692 逻辑分辨率：
 
-1. 重新安装并启动应用，连接被控端，进入全屏；**第一次**把指针移到顶边，截图已能看到「调度中心」「桌面」「退出全屏」三个按钮和右侧状态文字，不需要第二次上移。
-2. 点击浮层「退出全屏」，`AXFullScreen` 从 `true` 变为 `false`，回到窗口模式；窗口模式的原生工具栏仍显示「调度中心」「桌面」和状态。
-3. 指针移开顶边超过隐藏阈值后，浮层消失；截取顶部 260 px，没有空白工具栏带，也没有白线残留。
-4. 浮层显示时远端画面整体下移，浮层隐藏时铺满全屏；未改变 `ClientChromeLayoutTests` 的几何。
+1. 窗口模式截取主窗口顶部：原生工具栏显示 `调度中心` / `桌面` 两个标准项（图标 + 文字）与右侧 `已连接 · 60 fps · ... · P3` 状态，没有自定义浮层的黑带/裁字。
+2. 进入全屏后第一次移动指针到顶边，日志：
+   - `fs: toolbar shown at the top edge (content shifted down by 68/98 pt)`（本次实测菜单栏自动隐藏时为 68 pt）；
+   - `CGWindowList` 中 `NSToolbarFullScreenWindow` 为 3008×68、位于 y=30；
+   - 首次预热后同一会话后续显隐正常。
+3. 退出全屏 `AXFullScreen=false`，窗口模式工具栏仍在。
+4. 远端画面在全屏工具栏显示时按工具栏窗口下沿下移，隐藏时铺满。
 
 ## 未验证 / 边界
 
-- 只在本机 macOS 27.0.1 上做了视觉验证；未在旧版 macOS、多显示器、深色/浅色外观逐一切换验证。
-- 浮层是内容视图内的本地视图，不参与远端输入转发；按钮点击已实测「退出全屏」，`调度中心`/`桌面` 的点击路径与窗口模式共用同一组 selector。
-- A-4 的长周期白线闪烁仍未做长时间录屏确认；本次只确认隐藏状态截帧无白线、无空白工具栏带。
+- ScreenCaptureKit 和系统 `screencapture` 都不采集 `NSToolbarFullScreenWindow` 子窗口；本机无法用一张静态截图直接展示全屏按钮像素，只能由窗口模式截图、子窗口尺寸、显隐日志和首次预热路径推断。用户实机观感仍需确认。
+- 只在本机 macOS 27.0.1 上验证；未在旧版 macOS、多显示器、深色/浅色外观逐一切换验证。
+- 首次预热会有一次极短的 toolbar 显隐；进入全屏 0.7 s 后若指针不在顶边会先做一次隐藏预热，用户在顶边首次触发时还会做一次 200 ms 的兜底显隐。
+- A-4 的长周期白线闪烁仍未做长时间录屏确认。
 
 ## 相关文件
 

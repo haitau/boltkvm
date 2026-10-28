@@ -1,8 +1,11 @@
 import Foundation
 import CoreAudio
 
-/// Silences the controlled Mac's local speakers while a client is listening to
-/// the forwarded audio stream (A-1).
+/// Opt-in device mute for the controlled Mac while a client listens to the
+/// forwarded audio stream (`--local-mute`; off by default since 2026-10-28).
+///
+/// The default A-1 behaviour is to pause the current Now Playing app instead.
+/// This class remains for users who explicitly want device-level silence.
 ///
 /// ScreenCaptureKit taps app audio before it reaches the output device, so
 /// muting the device does not silence what the client receives. We prefer the

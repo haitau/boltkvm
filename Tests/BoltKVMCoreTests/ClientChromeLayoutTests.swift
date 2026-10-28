@@ -34,6 +34,15 @@ final class ClientChromeLayoutTests: XCTestCase {
                        "the drawable must not be resized: that is what distorted the picture")
     }
 
+    func testFullscreenMenuBarAndToolbarBandMovePictureByFullChrome() {
+        // 30 pt menu bar + 68 pt toolbar; a fixed 52/68 shift left the remote
+        // picture under the bottom half of the toolbar.
+        let frame = ClientController.ChromeLayout.videoFrame(
+            content: content, chrome: 98, fullScreen: true, toolbarVisible: true
+        )
+        XCTAssertEqual(frame, CGRect(x: 0, y: -98, width: 3008, height: 1692))
+    }
+
     func testMissingChromeMeasuredBeforeLayoutDoesNotMovePicture() {
         let frame = ClientController.ChromeLayout.videoFrame(
             content: content, chrome: 0, fullScreen: true, toolbarVisible: true

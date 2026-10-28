@@ -23,7 +23,9 @@ final class Server: NSObject, SCStreamOutput {
     let audioEnabled: Bool
     /// Clipboard sharing is on by default; `--no-clipboard` turns it off.
     let clipboardEnabled: Bool
-    /// Mute the controlled Mac's local speakers while a client listens (A-1).
+    /// Mute the controlled Mac's output while a client listens. Off by default:
+    /// the default A-1 path pauses the current Now Playing app instead, leaving
+    /// the device's mute/volume state untouched.
     let muteLocalOutput: Bool
     private let clipboardMaxItemBytes: Int
     private let clipboardMaxTransferBytes: Int64
@@ -89,7 +91,7 @@ final class Server: NSObject, SCStreamOutput {
     init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?,
          audioEnabled: Bool = false, preferredDisplayID: CGDirectDisplayID? = nil,
          colorMode: ColorMode = .standard, clipboardEnabled: Bool = true,
-         muteLocalOutput: Bool = true, clipboardMaxItemBytes: Int = ClipboardSync.defaultMaxItemBytes,
+         muteLocalOutput: Bool = false, clipboardMaxItemBytes: Int = ClipboardSync.defaultMaxItemBytes,
          clipboardMaxTransferBytes: Int64 = 0) {
         self.colorMode = colorMode
         self.clipboardEnabled = clipboardEnabled
@@ -259,6 +261,13 @@ final class Server: NSObject, SCStreamOutput {
         self.stream = stream
         startTime = DispatchTime.now().uptimeNanoseconds
         log("capture started; waiting for frames")
+        if audioEnabled {
+            // The controlled Mac should not keep playing a track that is now
+            // routed to the client. Pause the current Now Playing app instead
+            // of muting the output device: the user can see why the music
+            // stopped, and the Mac's own volume/mute state is never touched.
+            performRemoteAction(.pauseMedia)
+        }
         if audioEnabled && muteLocalOutput {
             let mute = AudioOutputMute()
             mute.start()

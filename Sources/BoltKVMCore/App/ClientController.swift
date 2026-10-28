@@ -30,26 +30,23 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     /// Full screen reuses it for the one tick between "toolbar shown" and the
     /// window reporting the new content layout rect.
     private var chromeHeight: CGFloat = 52
+    /// The first fullscreen reveal of the native toolbar can lay out its items
+    /// blank on this macOS; one hidden visible pass fixes it. Keep the extra
+    /// pass out of later reveals so they stay instant.
+    private var fullScreenToolbarPrimed = false
     /// When the pointer first reached the top edge; the toolbar only appears
     /// after a short dwell so brushing the edge mid-click does not move the
     /// picture.
     private var topEdgeEnteredAt: Date?
 
-    private static let tbRemote = NSToolbarItem.Identifier("boltkvm.remote")
+    private static let tbMission = NSToolbarItem.Identifier("boltkvm.missionControl")
+    private static let tbDesktop = NSToolbarItem.Identifier("boltkvm.desktop")
     private static let tbStatus = NSToolbarItem.Identifier("boltkvm.status")
     /// Live `fps · bitrate` label hosted in the toolbar's trailing edge.
     private let toolbarStatusLabel = NSTextField(labelWithString: "")
-    /// Fullscreen replacement for the native toolbar. AppKit's
-    /// `NSToolbarFullScreenWindow` does not lay out view-based items on its first
-    /// reveal on this macOS; a normal view inside the content view is
-    /// deterministic and can be shown on the very first top-edge dwell.
-    private var chromeOverlay: NSVisualEffectView?
-    private var chromeOverlayStack: NSStackView?
-    private var chromeOverlayStatusLabel: NSTextField?
-    private var chromeOverlayVisible = false
     /// "桌面" becomes "还原窗口" after the remote moved its windows aside, so the
     /// second press does what the title says instead of toggling the remote back.
-    private var desktopButtons: [NSButton] = []
+    private var desktopToolbarItem: NSToolbarItem?
     private var desktopHidden = false
 
     /// Set when the list window opens this controller: prefills the fields and
@@ -138,9 +135,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         session?.onState = { [weak self] state in
             guard let self else { return }
             self.stateText = state.text
-            let color: NSColor = state == .streaming ? .systemGreen : .secondaryLabelColor
-            self.toolbarStatusLabel.textColor = color
-            self.chromeOverlayStatusLabel?.textColor = color
+            self.toolbarStatusLabel.textColor = state == .streaming ? .systemGreen : .secondaryLabelColor
             self.refreshToolbarStatus()
             // Closing the window is the disconnect (R4); there is no button.
             if state == .streaming, self.reportTimer == nil {
@@ -173,7 +168,6 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         toolbarStatusLabel.textColor = .secondaryLabelColor
         toolbarStatusLabel.alignment = .right
         installToolbar()
-        installFullScreenOverlay(in: content)
         setupFullScreenChrome()
         layoutVideo()
     }
@@ -197,120 +191,31 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         toolbar.displayMode = .iconAndLabel
         toolbar.allowsUserCustomization = false
         toolbar.autosavesConfiguration = false
-        // 屏幕共享的三个按钮是居中的；middle item 置中后两侧自然分开。
-        // One view-based item, centred as a whole: with individual items only the
-        // named one is centred and the rest pile up at the leading edge.
-        toolbar.centeredItemIdentifier = Self.tbRemote
+        // 屏幕共享的三个按钮是居中的；把第一个动作项设为居中锚点，
+        // 第二个紧挨其右，状态留在最右。
+        toolbar.centeredItemIdentifier = Self.tbMission
         window?.toolbar = toolbar
         window?.toolbarStyle = .unified
     }
 
-    /// The remote actions as one horizontally centred group. Screen Sharing puts
-    /// them in the middle of the title bar; individual NSToolbarItems cannot be
-    /// centred as a group, so they live in one view-based item. The fullscreen
-    /// overlay adds an Exit Full Screen button.
-    private func remoteActionsView(includeFullScreen: Bool = false) -> NSStackView {
-        let stack = NSStackView()
-        stack.orientation = .horizontal
-        stack.spacing = 26
-        stack.alignment = .centerY
-        // App Exposé is missing on purpose: macOS 26 offers no permission-free
-        // way to trigger it. The Dock notification that still drives Mission
-        // Control and Show Desktop (com.apple.expose.front.awake) is accepted and
-        // then does nothing here; the keyboard route needs Accessibility, the
-        // AppleScript route needs Automation, and this app gets neither.
-        var entries: [(String, String, String, Selector)] = [
-            (L.t("client.toolbar.missionControl"), "square.grid.2x2",
-             L.t("client.toolbar.missionControl.tip"), #selector(showMissionControl)),
-            (L.t("client.toolbar.desktop"), "display",
-             L.t("client.toolbar.desktop.tip"), #selector(showDesktop)),
-        ]
-        if includeFullScreen {
-            entries.append((L.t("client.toolbar.exitFullScreen"),
-                            "arrow.down.right.and.arrow.up.left",
-                            L.t("client.toolbar.exitFullScreen.tip"),
-                            #selector(toggleFullScreenAction)))
-        }
-        for (title, symbol, tip, action) in entries {
-            let button = NSButton(title: title, target: self, action: action)
-            button.image = toolbarImage(symbol)
-            button.imagePosition = .imageAbove
-            button.bezelStyle = .inline
-            button.isBordered = false
-            button.font = .systemFont(ofSize: 11)
-            button.toolTip = tip
-            stack.addArrangedSubview(button)
-            if action == #selector(showDesktop) { desktopButtons.append(button) }
-        }
-        stack.setFrameSize(stack.fittingSize)
-        return stack
+    /// A standard toolbar item, so AppKit draws the icon, label and pressed
+    /// state itself. The old view-based stack was what stayed blank on the first
+    /// fullscreen reveal.
+    private func actionToolbarItem(_ identifier: NSToolbarItem.Identifier,
+                                   title: String, symbol: String,
+                                   tip: String, action: Selector) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = title
+        item.paletteLabel = title
+        item.image = toolbarImage(symbol)
+        item.toolTip = tip
+        item.target = self
+        item.action = action
+        return item
     }
 
     private func toolbarImage(_ name: String) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)
-    }
-
-    /// The fullscreen chrome is a normal subview of the content view, above the
-    /// video. Unlike `NSToolbarFullScreenWindow` it exists (and has laid-out
-    /// buttons) before the first reveal, so the first top-edge dwell already
-    /// shows the controls.
-    private func installFullScreenOverlay(in content: NSView) {
-        let overlay = NSVisualEffectView()
-        overlay.material = .titlebar
-        overlay.blendingMode = .withinWindow
-        overlay.state = .active
-        overlay.wantsLayer = true
-        overlay.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96).cgColor
-        overlay.isHidden = true
-        let stack = remoteActionsView(includeFullScreen: true)
-        overlay.addSubview(stack)
-        let status = NSTextField(labelWithString: "")
-        status.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        status.textColor = .secondaryLabelColor
-        status.alignment = .right
-        overlay.addSubview(status)
-        content.addSubview(overlay)
-        chromeOverlay = overlay
-        chromeOverlayStack = stack
-        chromeOverlayStatusLabel = status
-    }
-
-    private func layoutFullScreenOverlay(in bounds: NSRect) {
-        guard let overlay = chromeOverlay else { return }
-        let height = min(max(0, chromeHeight), bounds.height)
-        overlay.frame = NSRect(x: 0, y: bounds.height - height,
-                               width: bounds.width, height: height)
-        overlay.autoresizingMask = [.width, .minYMargin]
-        if let stack = chromeOverlayStack {
-            stack.setFrameSize(stack.fittingSize)
-            let size = stack.frame.size
-            stack.frame = NSRect(x: (bounds.width - size.width) / 2,
-                                 y: (height - size.height) / 2,
-                                 width: size.width, height: size.height)
-        }
-        if let status = chromeOverlayStatusLabel {
-            let width = min(240, max(120, bounds.width - 24))
-            status.frame = NSRect(x: bounds.width - width - 12,
-                                  y: (height - 18) / 2,
-                                  width: width, height: 18)
-        }
-    }
-
-    private func setChromeOverlayVisible(_ visible: Bool) {
-        chromeOverlayVisible = visible
-        chromeOverlay?.isHidden = !visible
-    }
-
-    private func showChromeOverlay() {
-        setChromeOverlayVisible(true)
-        layoutVideo()
-        log("fs: toolbar shown at the top edge (content shifted down by \(Int(chromeHeight)) pt)")
-    }
-
-    private func hideChromeOverlay() {
-        setChromeOverlayVisible(false)
-        layoutVideo()
-        log("fs: toolbar hidden")
     }
 
     // MARK: - Fullscreen chrome
@@ -324,8 +229,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     /// height. The top of the remote screen starts just below the toolbar and
     /// the bottom goes off-screen, exactly like Screen Sharing; the drawable is
     /// never resized, so the picture cannot change aspect ratio. `chrome` is
-    /// the band height (52 pt on this macOS), passed in so the geometry is unit
-    /// testable without a window.
+    /// the band height (52 pt windowed; menu bar + toolbar = 98 pt in
+    /// fullscreen on this macOS), passed in so the geometry is unit testable
+    /// without a window.
     enum ChromeLayout {
         static func videoFrame(content: CGSize, chrome: CGFloat,
                                fullScreen: Bool, toolbarVisible: Bool) -> CGRect {
@@ -352,34 +258,51 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         let bounds = content.bounds
         let measured = max(0, bounds.height - window.contentLayoutRect.height)
         if measured > 0 { chromeHeight = measured }
+        let toolbarVisible = window.toolbar?.isVisible ?? false
         let fullScreen = window.styleMask.contains(.fullScreen)
-        let toolbarVisible = fullScreen ? chromeOverlayVisible : (window.toolbar?.isVisible ?? false)
-        // The tick that reveals the chrome runs before AppKit publishes the
+        // The tick that reveals the toolbar runs before AppKit publishes the
         // new contentLayoutRect; use the last known band height for that frame
         // instead of showing one unshifted frame.
-        let chrome = measured > 0 ? measured : (toolbarVisible ? chromeHeight : 0)
+        var chrome = measured > 0 ? measured : (toolbarVisible ? chromeHeight : 0)
+        // In fullscreen the menu bar (30 pt) + AppKit toolbar (68 pt) cover the
+        // top 98 pt, while the windowed band is 52 pt. Shift by the real chrome
+        // so no remote pixel is hidden under the menu bar or toolbar.
+        if fullScreen, toolbarVisible {
+            chrome = max(chrome, fullScreenChromeHeight)
+        }
         let frame = ChromeLayout.videoFrame(
             content: bounds.size,
             chrome: chrome,
             fullScreen: fullScreen,
             toolbarVisible: toolbarVisible
         )
-        layoutFullScreenOverlay(in: bounds)
-        if fullScreen {
-            chromeOverlay?.isHidden = !chromeOverlayVisible
-            // AppKit keeps its own empty NSToolbarFullScreenWindow above the
-            // content even after `toolbar.isVisible = false`; it covers this
-            // overlay's top band. Remove it from the screen while fullscreen.
-            for child in window.childWindows ?? []
-            where String(describing: type(of: child)).contains("ToolbarFullScreen") {
-                child.orderOut(nil)
-            }
-        } else {
-            chromeOverlay?.isHidden = true
-        }
         if videoView.frame != frame {
             videoView.frame = frame
         }
+    }
+
+    /// Distance from the content top to the bottom of AppKit's fullscreen
+    /// toolbar. Do not derive this from the child window frame: during the
+    /// fullscreen reveal animation its height/position are intermediate (44–84
+    /// pt measured), which is why the remote picture kept sliding under the
+    /// toolbar. Use the stable screen menu-bar height + the fullscreen toolbar
+    /// height (68 pt; the windowed band is 52 pt).
+    private var fullScreenToolbarWindow: NSWindow? {
+        window?.childWindows?.first {
+            String(describing: type(of: $0)).contains("ToolbarFullScreen")
+        }
+    }
+
+    private var fullScreenChromeHeight: CGFloat {
+        guard let window, let child = fullScreenToolbarWindow,
+              child.frame.height > 0 else { return 98 }
+        let screenTop = window.screen?.frame.maxY ?? window.frame.maxY
+        let fromTop = screenTop - child.frame.minY
+        // During the reveal animation the child moves through intermediate
+        // positions; clamp to the plausible chrome band and fall back to the
+        // child height so one bad animation frame cannot leave a gap.
+        if fromTop >= 40, fromTop <= 140 { return fromTop }
+        return max(68, child.frame.height)
     }
 
     /// Neither the `windowWillEnterFullScreen` delegate callbacks nor the
@@ -397,6 +320,37 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         chromeTimer = timer
     }
 
+    /// Reveal the native toolbar. On the first reveal of a fullscreen session,
+    /// give AppKit one extra visible pass: the first pass creates the
+    /// `NSToolbarFullScreenWindow`, the second lays out its standard items.
+    /// Without this the first top-edge dwell can show an empty band.
+    private func revealFullScreenToolbar() {
+        guard let window, let toolbar = window.toolbar else { return }
+        if fullScreenToolbarPrimed {
+            toolbar.isVisible = true
+            layoutVideo()
+            log("fs: toolbar shown at the top edge (content shifted down by \(Int(fullScreenChromeHeight)) pt)")
+            return
+        }
+        fullScreenToolbarPrimed = true
+        toolbar.isVisible = true
+        layoutVideo()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window,
+                  window.styleMask.contains(.fullScreen) else { return }
+            window.toolbar?.isVisible = false
+            self.layoutVideo()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                guard let self, let window = self.window,
+                      window.styleMask.contains(.fullScreen) else { return }
+                window.toolbar?.validateVisibleItems()
+                window.toolbar?.isVisible = true
+                self.layoutVideo()
+                log("fs: toolbar shown at the top edge (content shifted down by \(Int(self.fullScreenChromeHeight)) pt)")
+            }
+        }
+    }
+
     private func tickChrome() {
         guard let window else { return }
         // B2 instrumentation: the window has vanished before while the session was
@@ -411,19 +365,38 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         let fullScreen = window.styleMask.contains(.fullScreen)
         if appliedFullScreen != fullScreen {
             appliedFullScreen = fullScreen
-            if fullScreen {
-                // The native fullscreen toolbar overlay is not used; the
-                // in-content overlay is already built and laid out.
-                window.toolbar?.isVisible = false
-                setChromeOverlayVisible(false)
-            } else {
-                setChromeOverlayVisible(false)
-                window.toolbar?.isVisible = true
-            }
+            window.toolbar?.isVisible = !fullScreen
+            fullScreenToolbarPrimed = false
             window.titlebarSeparatorStyle = .none
             topEdgeEnteredAt = nil
             layoutVideo()
             log("fs: chrome applied (fullscreen=\(fullScreen), fullSizeContent=true)")
+            if fullScreen {
+                // Give AppKit a hidden visible pass before the user reaches the
+                // top edge. The fullscreen toolbar window is created lazily and
+                // its first pass can be empty; warming it here keeps the first
+                // real reveal instant. Skip if the pointer is already at the
+                // top, since the reveal path has its own fallback.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+                    guard let self, let window = self.window,
+                          window.styleMask.contains(.fullScreen),
+                          window.toolbar?.isVisible != true,
+                          NSEvent.mouseLocation.y < (window.screen?.frame.maxY ?? 0) - 110
+                    else { return }
+                    // Lay out the fullscreen toolbar invisibly: the first real
+                    // user reveal then reuses a populated NSToolbarFullScreenWindow.
+                    self.fullScreenToolbarWindow?.alphaValue = 0
+                    window.toolbar?.isVisible = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                        guard let self, let window = self.window,
+                              window.styleMask.contains(.fullScreen) else { return }
+                        window.toolbar?.isVisible = false
+                        self.fullScreenToolbarWindow?.alphaValue = 1
+                        self.layoutVideo()
+                        self.fullScreenToolbarPrimed = true
+                    }
+                }
+            }
         }
         guard fullScreen, let screen = window.screen else {
             layoutVideo()
@@ -431,7 +404,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         }
         let y = NSEvent.mouseLocation.y
         let top = screen.frame.maxY
-        let visible = chromeOverlayVisible
+        let visible = window.toolbar?.isVisible ?? false
         // A short dwell at the edge avoids popping the chrome (and moving the
         // picture) when the pointer merely crosses the top on its way to a
         // remote menu item.
@@ -442,7 +415,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
                 if topEdgeEnteredAt == nil { topEdgeEnteredAt = Date() }
                 if let entered = topEdgeEnteredAt, Date().timeIntervalSince(entered) >= 0.2 {
                     topEdgeEnteredAt = nil
-                    showChromeOverlay()
+                    revealFullScreenToolbar()
                 }
             }
         } else {
@@ -451,7 +424,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             // toolbar height; the hide threshold has to clear that band or the
             // two states fight (the old 110 pt hysteresis).
             if y < top - 110, visible {
-                hideChromeOverlay()
+                window.toolbar?.isVisible = false
+                layoutVideo()
+                log("fs: toolbar hidden")
             }
         }
         // Covers the window/content relayout that follows a toolbar change.
@@ -574,9 +549,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         if session?.isActive == true, streamColor == .wide {
             parts.append("P3")
         }
-        let text = parts.joined(separator: " · ")
-        toolbarStatusLabel.stringValue = text
-        chromeOverlayStatusLabel?.stringValue = text
+        toolbarStatusLabel.stringValue = parts.joined(separator: " · ")
     }
 
     // MARK: - Remote system shortcuts
@@ -603,13 +576,13 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     }
 
     private func updateDesktopButton() {
-        for button in desktopButtons {
-            button.title = desktopHidden ? L.t("client.toolbar.desktop.restore")
-                                         : L.t("client.toolbar.desktop")
-            button.toolTip = desktopHidden ? L.t("client.toolbar.desktop.restore.tip")
-                                           : L.t("client.toolbar.desktop.tip")
-            button.image = toolbarImage(desktopHidden ? "macwindow.on.rectangle" : "display")
-        }
+        guard let item = desktopToolbarItem else { return }
+        item.label = desktopHidden ? L.t("client.toolbar.desktop.restore")
+                                   : L.t("client.toolbar.desktop")
+        item.paletteLabel = item.label
+        item.toolTip = desktopHidden ? L.t("client.toolbar.desktop.restore.tip")
+                                     : L.t("client.toolbar.desktop.tip")
+        item.image = toolbarImage(desktopHidden ? "macwindow.on.rectangle" : "display")
     }
 
     @objc func toggleFullScreenAction(_ sender: Any?) {
@@ -652,11 +625,11 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
 extension ClientController: NSToolbarDelegate {
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.tbRemote, .flexibleSpace, Self.tbStatus]
+        [.flexibleSpace, Self.tbMission, Self.tbDesktop, .flexibleSpace, Self.tbStatus]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarDefaultItemIdentifiers(toolbar) + [.space, .flexibleSpace]
+        toolbarDefaultItemIdentifiers(toolbar) + [.space]
     }
 
     func toolbar(_ toolbar: NSToolbar,
@@ -665,10 +638,20 @@ extension ClientController: NSToolbarDelegate {
         let item = NSToolbarItem(itemIdentifier: identifier)
         item.target = self
         switch identifier {
-        case Self.tbRemote:
-            item.label = ""
-            item.paletteLabel = L.t("client.toolbar.app")
-            item.view = remoteActionsView()
+        case Self.tbMission:
+            return actionToolbarItem(Self.tbMission,
+                                     title: L.t("client.toolbar.missionControl"),
+                                     symbol: "square.grid.2x2",
+                                     tip: L.t("client.toolbar.missionControl.tip"),
+                                     action: #selector(showMissionControl))
+        case Self.tbDesktop:
+            let desktop = actionToolbarItem(Self.tbDesktop,
+                                            title: L.t("client.toolbar.desktop"),
+                                            symbol: "display",
+                                            tip: L.t("client.toolbar.desktop.tip"),
+                                            action: #selector(showDesktop))
+            desktopToolbarItem = desktop
+            return desktop
         case Self.tbStatus:
             toolbarStatusLabel.setFrameSize(NSSize(width: 150, height: 18))
             toolbarStatusLabel.alignment = .right

@@ -79,6 +79,7 @@ func usage() -> Never {
                      [--virtual-display builtin|external] [--virtual-display-size WxH]
                      [--bind auto|<ipv4>] [--codec prores|hevc] [--key <psk>|--insecure]
                      [--audio]   # 默认不传音频；加 --audio 才采集并转发
+                     [--local-mute]  # 显式静音被控端输出（默认只暂停媒体）
 
     client:
       boltkvm client [--host <mini>] [--port 7474] [--seconds 20] [--render] [--switch-mode]
