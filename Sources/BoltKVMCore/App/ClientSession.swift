@@ -102,6 +102,7 @@ final class ClientSession: @unchecked Sendable {
                 let audio = playAudio ? AudioPlayer(play: true, recordPath: nil) : nil
                 self.audio = audio
                 var gotAuthOk = false
+                var askedInitialPause = false
                 var sentAuthResponse = false
                 var authRejected = false
                 var endedNormally = false
@@ -198,6 +199,22 @@ final class ClientSession: @unchecked Sendable {
                         }
                     }
                     pump.onFormat = { format in
+                        // The first format means the server's command pump is
+                        // fully started. Send the one-time pause here, not
+                        // during the auth handshake: a command sent before the
+                        // pump starts can be lost. A controller with audio
+                        // disabled never reaches this block, so reconnecting
+                        // must not touch the remote's Now Playing app.
+                        if audio != nil, !askedInitialPause {
+                            askedInitialPause = true
+                            do {
+                                try c.send(packet(type: .command,
+                                                  payload: Data([RemoteAction.pauseMedia.rawValue])))
+                                log("audio: asked server to pause media (client audio enabled)")
+                            } catch {
+                                log("audio: could not send initial pause request: \(error)")
+                            }
+                        }
                         let size = (format.width, format.height)
                         DispatchQueue.main.async {
                             self.renderer.setColorMode(format.color)

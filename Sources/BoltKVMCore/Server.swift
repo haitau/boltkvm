@@ -261,13 +261,12 @@ final class Server: NSObject, SCStreamOutput {
         self.stream = stream
         startTime = DispatchTime.now().uptimeNanoseconds
         log("capture started; waiting for frames")
-        if audioEnabled {
-            // The controlled Mac should not keep playing a track that is now
-            // routed to the client. Pause the current Now Playing app instead
-            // of muting the output device: the user can see why the music
-            // stopped, and the Mac's own volume/mute state is never touched.
-            performRemoteAction(.pauseMedia)
-        }
+        // Do not pause the controlled Mac's Now Playing app here. The server
+        // may be started with --audio while the controller has not selected
+        // audio for this host; pausing on capture start would then stop the
+        // remote user's music for a stream nobody is listening to. The client
+        // sends an explicit pauseMedia command only after it has enabled its
+        // audio player for this session.
         if audioEnabled && muteLocalOutput {
             let mute = AudioOutputMute()
             mute.start()

@@ -8,7 +8,7 @@
 
 - **像素等价**：支持按被控端虚拟屏真实像素（2× backing）传输与渲染，文字清晰不发糊。
 - **低延迟交互**：解码链路（采集→解码）P95 < 33 ms；GUI 呈现（采集→上屏，不含输入反向上行）P95 < 50 ms。
-- **音频隔离**：默认不采集、不传输音频，也不改动两端输出设备；按需开启转发后，被控端会暂停当前正在播放的媒体（不静音设备），同一路声音只从主控端继续播放；设备音量/静音状态始终不变。
+- **音频隔离**：主控端没为该主机选择音频时，服务端不暂停、不静音被控端的任何播放；只有主控端选择音频后，才会暂停被控端当前正在播放的媒体（不静音设备），同一路声音只从主控端继续播放；设备音量/静音状态始终不变。
 - **单向控制**：主控端仅捕获输入与渲染画面，被控端仅采集屏幕与注入输入，从拓扑上避免双向互控回环。
 - **断线自动重连**：被控端重启采集子进程（改分辨率、升级）或链路短暂中断时，主控端窗口自动重连并显示重连次数，不再停在最后一帧；错误密码仍然直接报错，不会无限重试。
 
@@ -153,11 +153,11 @@ defaults write io.github.boltkvm server.audio -bool true
 
 然后在菜单栏停止再启动服务即可生效。
 
-开启音频转发后，服务端不会再改动本机默认输出的静音或音量。采集启动成功时，它会用 MediaRemote 暂停当前 Now Playing 应用（网易云音乐、Music 等），所以本机扬声器不会继续播放同一路声音；暂停的是播放器，不是设备，应用仍在运行。主控端断开后媒体保持暂停，不自动恢复，避免把用户后来手动播放的内容又切掉。ScreenCaptureKit 在设备音量/静音之前取音，远端仍能听到完整声音。
+开启音频转发后，服务端不会再改动本机默认输出的静音或音量。**服务端仅以 `--audio` 启动、但主控端没有为该主机选择音频时，不会暂停任何播放器**；只有主控端选择音频、连接后收到第一帧格式时，客户端才发送一次 `pauseMedia`，服务端随即用 MediaRemote 暂停当前 Now Playing 应用（网易云音乐、Music 等），所以本机扬声器不会继续播放同一路声音。暂停的是播放器，不是设备，应用仍在运行。主控端断开后媒体保持暂停，不自动恢复，避免把用户后来手动播放的内容又切掉。ScreenCaptureKit 在设备音量/静音之前取音，远端仍能听到完整声音。
 
 `--local-mute` 是显式 opt-in：只有加了这个参数才会把默认输出静音；`--no-local-mute` 仍作为兼容别名接受，效果同样是关闭设备静音。默认不再静音。若旧进程被强杀，下一次启动仍会读取 `~/Library/Application Support/BoltKVM/mute-state.json`，把显式静音过的设备恢复到原状态。
 
-音频采集启动时就会暂停一次当前 Now Playing 应用，避免被控端和主控端同时出声。主控端正在播放转发音频时，如果默认输出设备再发生变化（蓝牙耳机开/关、有线耳机插拔），客户端会在 0.5 s 防抖后向服务端发送 `pauseMedia`，服务端用 MediaRemote 再次暂停当前 Now Playing 应用（网易云音乐、Music 等），只暂停播放、不退出应用；日志为 `audio: output route changed; asked server to pause media` 与 `media: paused the current Now Playing app`。该联动只在主控端开启音频播放时生效，录音-only 会话不会触发启动暂停之外的行为。
+主控端为该主机开启音频并连接成功后，会在收到第一帧格式时发送一次 `pauseMedia`，避免被控端和主控端同时出声；**没有选择音频的会话不会发送这条命令，重新连接也不会暂停 mini 的 Now Playing**。主控端正在播放转发音频时，如果默认输出设备再发生变化（蓝牙耳机开/关、有线耳机插拔），客户端会在 0.5 s 防抖后再次发送 `pauseMedia`，服务端用 MediaRemote 暂停当前 Now Playing 应用（网易云音乐、Music 等），只暂停播放、不退出应用；日志为 `audio: output route changed; asked server to pause media` 与 `media: paused the current Now Playing app`。该联动只在主控端开启音频播放时生效，录音-only 会话不触发。
 
 ### 剪切板同步
 
@@ -270,7 +270,7 @@ git tag v0.12.1 && git push origin v0.12.1
 - **不支持多显示器同传**：被控端仅创建并采集一块虚拟屏。
 - **没有可用音频输出设备时**：开启 `--audio` 但机器没有输出设备（例如 CI runner）时，音频链路会降级为静音并记录 `audio: playback unavailable (...)`，视频与输入不受影响，服务端不再崩溃；设备稍后出现会自动重试。
 - **音频输出切换/蓝牙耳机重连**：蓝牙耳机断开再连接、插拔带扬声器的显示器等导致系统默认输出变化时，客户端会自动重建音频输出图，日志出现 `audio: playing to default output (...; graph #n)`，无需重连会话；仍无声时可查 `audio: retrying output` 与 `audio: playback unavailable`。同时会通知被控端暂停当前媒体，日志出现 `media: paused the current Now Playing app`；这是预期行为，不是被控端自己停了。若某播放器不响应系统 Now Playing，暂停可能无效。
-- **被控端媒体暂停**：开启音频转发后，日志出现 `media: paused the current Now Playing app` 表示当前播放器已暂停，不是设备被静音；默认不会改动系统静音/音量。只有显式加 `--local-mute` 才会出现 `audio: muted local output ...`，断开后出现 `audio: restored local output ...`。若旧版本曾被 `SIGKILL` 且留下 `~/Library/Application Support/BoltKVM/mute-state.json`，新服务端启动时会先恢复并删除该标记。
+- **被控端媒体暂停**：主控端为该主机选择音频后，日志出现 `media: paused the current Now Playing app` 表示当前播放器已暂停，不是设备被静音；主控端没选音频时不应出现这条日志，重新连接也不会暂停。默认不会改动系统静音/音量。只有显式加 `--local-mute` 才会出现 `audio: muted local output ...`，断开后出现 `audio: restored local output ...`。若旧版本曾被 `SIGKILL` 且留下 `~/Library/Application Support/BoltKVM/mute-state.json`，新服务端启动时会先恢复并删除该标记。
 - **虚拟屏创建失败**：连续重试仍拿不到虚拟屏时，服务端以退出码 3 退出并交给守护逻辑重启，不会回退去采集本地真实桌面（避免把操作者自己的桌面推给主控端）。
 
 ## 里程碑
@@ -291,6 +291,7 @@ git tag v0.12.1 && git push origin v0.12.1
 - [连接管理器设计](docs/plans/2026-10-22-connection-manager-design.md)
 - [B5 帧率与延迟报告](docs/reports/2026-10-23-b5-latency.md)
 - [音频与 GUI 稳定性报告](docs/reports/2026-10-23-audio-and-gui-stability.md)
+- [未选择音频时不再暂停被控端播放器](docs/reports/2026-10-28-audio-pause-only-when-selected.md)
 - [传输加密报告](docs/reports/2026-10-22-transport-encryption.md)
 - [全部验证报告索引](docs/reports/README.md)
 - [架构决策记录（ADR）索引](docs/adr/README.md)、[实施计划](docs/plans/)

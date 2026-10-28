@@ -68,16 +68,17 @@ private func clipboardMaxTransferBytes(_ args: [String]) -> Int64 {
 /// A-2: the CLI client uses the same route-change pause hook as the GUI
 /// client, so a headless session behaves like the app when headphones move.
 private func installPauseOnRouteChange(_ audio: AudioPlayer?, conn: TCPConnection) {
-    audio?.onOutputRouteChange = { [weak conn] in
-        guard let conn else { return }
+    guard audio != nil else { return }
+    func sendPause(_ reason: String) {
         do {
             try conn.send(packet(type: .command,
                                  payload: Data([RemoteAction.pauseMedia.rawValue])))
-            log("audio: output route changed; asked server to pause media")
+            log("audio: \(reason); asked server to pause media")
         } catch {
             log("audio: could not send pause request: \(error)")
         }
     }
+    audio?.onOutputRouteChange = { sendPause("output route changed") }
 }
 
 public enum CLI {
@@ -548,6 +549,7 @@ public enum CLI {
                     decoder.renderer = RenderSession.shared.renderer
                     lastDecoder = decoder
                     var inputStarted = false
+                    var askedInitialPause = false
                     var clipboardSync: ClipboardSync?
                     let pump = SessionPump(conn: c, decoder: decoder)
                     pump.onClipboard = { clipboardSync?.handleClipboard($0) }
@@ -585,6 +587,20 @@ public enum CLI {
                         try? c.send(timeSyncRequest())
                     }
                     pump.onFormat = { _ in
+                        // The server's command pump is ready once the format
+                        // arrives. Send the one-time pause now; sending it in
+                        // onAuthOk raced the pump and was sometimes lost. Only
+                        // a client that actually plays audio gets here.
+                        if audio != nil, !askedInitialPause {
+                            askedInitialPause = true
+                            do {
+                                try c.send(packet(type: .command,
+                                                  payload: Data([RemoteAction.pauseMedia.rawValue])))
+                                log("audio: asked server to pause media (client audio enabled)")
+                            } catch {
+                                log("audio: could not send initial pause request: \(error)")
+                            }
+                        }
                         if wantsInput && !inputStarted {
                             inputStarted = true
                             DispatchQueue.main.async {
