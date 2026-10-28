@@ -151,6 +151,18 @@ BOLTKVM_AUDIO_ROUTE_TEST=1 \
 
 `Packaging/build-app.sh` 仍只组装 `dist/BoltKVM.app`（CI/远端部署用）；它现在默认优先使用 `BoltKVM Local` 稳定证书，本地版本用 `Info.plist` 的数值版本，避免把 `0.12.1-29-g...` 写进 `CFBundleShortVersionString`。
 
+## 远端 Mac mini
+
+2026-10-28 09:20 用 `./scripts/deploy-app.sh mini` 把 mini 也更新到 **0.12.2 (205)**，内置 helper 同步更新，签名同为 `BoltKVM Local`；旧版 0.12.1 保留在 mini 的 `/Applications/BoltKVM.app.bak`。
+
+但 mini 的应用日志是：
+
+```text
+app: server role starting (screen recording: false, accessibility: false)
+```
+
+即新签名尚未获得屏幕录制与辅助功能授权，当前无法采集/注入。已通过 SSH 打开 mini 的「系统设置 → 隐私与安全性 → 屏幕录制」页面；需要在 mini 本机（或屏幕共享）勾选 BoltKVM，再到「辅助功能」勾选，然后退出重开应用。授权后 A-3 的跨机验证才能进行。
+
 ## 明早建议
 
 1. 直接使用已安装的 `/Applications/BoltKVM.app`（0.12.2）验证 A-4：全屏、等待工具栏隐藏超过一个轮询周期，录屏或截帧看顶部；同时确认 A-3 复选框与接收目录。若系统提示屏幕录制/辅助功能，按提示授权后重开应用。
