@@ -272,6 +272,8 @@ Background and target metrics are documented in the [Project Charter](docs/desig
 - [Connection Manager Design](docs/plans/2026-10-22-connection-manager-design.md)
 - [B5 Frame Rate & Latency Report](docs/reports/2026-10-23-b5-latency.md)
 - [Audio & GUI Stability Report](docs/reports/2026-10-23-audio-and-gui-stability.md)
+- [Audio Route and Local Mute](docs/reports/2026-10-28-audio-route-mute.md)
+- [Code Audit and Fixes (2026-10-28)](docs/reports/2026-10-28-code-audit-fixes.md)
 - [Transport Encryption Report](docs/reports/2026-10-22-transport-encryption.md)
 - [Verification Report Index](docs/reports/README.md)
 - [Architecture Decision Records (ADR) Index](docs/adr/README.md), [Plans](docs/plans/)
