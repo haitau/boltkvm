@@ -38,8 +38,11 @@ final class Server: NSObject, SCStreamOutput {
     private var clientAudioMuteLock = NSLock()
     private var dumped = false
 
-    private let audioTarget = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000,
-                                            channels: 2, interleaved: true)!
+    private let audioFormat: AudioWireFormat
+    private var audioTarget: AVAudioFormat {
+        AVAudioFormat(commonFormat: audioFormat == .int16 ? .pcmFormatInt16 : .pcmFormatInt32,
+                      sampleRate: 48_000, channels: 2, interleaved: true)!
+    }
     private var audioConverter: AVAudioConverter?
     private var audioSourceFormat: AVAudioFormat?
     private var audioPackets = 0
@@ -94,7 +97,8 @@ final class Server: NSObject, SCStreamOutput {
     let colorMode: ColorMode
 
     init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?,
-         audioEnabled: Bool = false, preferredDisplayID: CGDirectDisplayID? = nil,
+         audioEnabled: Bool = false, audioFormat: AudioWireFormat = .int16,
+         preferredDisplayID: CGDirectDisplayID? = nil,
          colorMode: ColorMode = .standard, clipboardEnabled: Bool = true,
          muteLocalOutput: Bool = false, clipboardMaxItemBytes: Int = ClipboardSync.defaultMaxItemBytes,
          clipboardMaxTransferBytes: Int64 = 0) {
@@ -107,6 +111,7 @@ final class Server: NSObject, SCStreamOutput {
         let even = evenVideoSize(width: width, height: height)
         self.captureWidth = even.width
         self.audioEnabled = audioEnabled
+        self.audioFormat = audioFormat
         self.captureHeight = even.height
         self.codec = codec
         self.connection = connection
@@ -684,7 +689,8 @@ final class Server: NSObject, SCStreamOutput {
             audioLoggedSource = true
             lock.unlock()
             if firstTime {
-                log("audio source: \(Int(src.sampleRate)) Hz \(src.channelCount) ch interleaved=\(src.isInterleaved) float=\(src.commonFormat == .pcmFormatFloat32)")
+                let target = audioFormat == .int16 ? "int16" : "int24"
+                log("audio source: \(Int(src.sampleRate)) Hz \(src.channelCount) ch interleaved=\(src.isInterleaved) float=\(src.commonFormat == .pcmFormatFloat32) target=\(target)")
             }
         }
         guard audioConverter != nil,
@@ -699,8 +705,15 @@ final class Server: NSObject, SCStreamOutput {
         do { try audioConverter?.convert(to: outBuf, from: inBuf) } catch { return }
 
         let n = Int(outBuf.frameLength)
-        guard n > 0, let ch = outBuf.int16ChannelData else { return }
-        let data = Data(bytes: ch[0], count: n * 4)
+        guard n > 0 else { return }
+        let data: Data
+        if audioFormat == .int16 {
+            guard let ch = outBuf.int16ChannelData else { return }
+            data = Data(bytes: ch[0], count: n * 4)
+        } else {
+            guard let ch = outBuf.int32ChannelData else { return }
+            data = AudioPCM24.pack(UnsafeBufferPointer(start: ch[0], count: n * 2))
+        }
         lock.lock()
         audioPackets += 1
         audioBytes += data.count

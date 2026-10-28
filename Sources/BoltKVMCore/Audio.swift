@@ -3,13 +3,50 @@ import AVFoundation
 import CoreAudio
 import CVirtualDisplay
 
+/// Packed signed 24-bit PCM helpers shared by the server (Int32 capture buffer
+/// to wire) and the client (wire to an AVAudioPCMBuffer). Samples are the
+/// **top 24 bits** of the Int32 value, so a client can left-shift by 8 and get
+/// an exact 32-bit container without losing the sign. Little-endian, like the
+/// existing int16 format.
+enum AudioPCM24 {
+    static func pack(_ samples: UnsafeBufferPointer<Int32>) -> Data {
+        var data = Data(count: samples.count * 3)
+        data.withUnsafeMutableBytes { raw in
+            let p = raw.bindMemory(to: UInt8.self)
+            var o = 0
+            for s in samples {
+                let u = UInt32(bitPattern: s) >> 8
+                p[o] = UInt8(u & 0xFF)
+                p[o + 1] = UInt8((u >> 8) & 0xFF)
+                p[o + 2] = UInt8((u >> 16) & 0xFF)
+                o += 3
+            }
+        }
+        return data
+    }
+
+    static func unpack(_ data: Data, into out: UnsafeMutablePointer<Int32>, count: Int) {
+        guard data.count >= count * 3 else { return }
+        data.withUnsafeBytes { raw in
+            let p = raw.bindMemory(to: UInt8.self)
+            var o = 0
+            for i in 0..<count {
+                let u = UInt32(p[o]) | (UInt32(p[o + 1]) << 8) | (UInt32(p[o + 2]) << 16)
+                out[i] = Int32(bitPattern: u << 8)
+                o += 3
+            }
+        }
+    }
+}
+
 /// Client-side audio sink. Audio is opt-in: without `--audio` nothing is
 /// created and the transport carries no audio packets at all, which keeps the
 /// default "isolated" guarantee structural rather than a promise.
 ///
-/// Wire format is fixed: 48 kHz, 2 channels, signed 16-bit, interleaved.
-/// The server converts to this before sending, so the player can schedule
-/// buffers with no further work.
+/// The wire format is negotiated: 48 kHz, 2 channels, either signed 16-bit
+/// interleaved (the original) or packed signed 24-bit interleaved. The server
+/// converts to the requested format before sending; a 24-bit stream is decoded
+/// into float32 for the mixer, not into an int32 player connection.
 ///
 /// Output-route changes (Bluetooth headphones leaving and coming back, a
 /// display with speakers being plugged in, a sample-rate change) stop an
@@ -22,12 +59,12 @@ import CVirtualDisplay
 final class AudioPlayer: @unchecked Sendable {
     static let sampleRate: Double = 48_000
     static let channels: AVAudioChannelCount = 2
-    static let bytesPerFrame = 4  // int16 * 2ch
+    static let int16BytesPerFrame = 4
+    static let int24BytesPerFrame = 6
 
-    private let format = AVAudioFormat(commonFormat: .pcmFormatInt16,
-                                       sampleRate: AudioPlayer.sampleRate,
-                                       channels: AudioPlayer.channels,
-                                       interleaved: true)!
+    let wireFormat: AudioWireFormat
+    let bytesPerFrame: Int
+    private let format: AVAudioFormat
     private let play: Bool
     private let recordPath: String?
 
@@ -87,27 +124,47 @@ final class AudioPlayer: @unchecked Sendable {
     /// audio is worse than no audio (it drifts further behind every second).
     private let maxScheduled = 256
 
-    init(play: Bool, recordPath: String?) {
+    init(play: Bool, recordPath: String?, wireFormat: AudioWireFormat = .int16) {
         self.play = play
         self.recordPath = recordPath
+        self.wireFormat = wireFormat
+        self.bytesPerFrame = wireFormat.bytesPerFrame
+        // The mixer accepts float32 (and the old int16 graph); an int32
+        // interleaved player connection fails with -10868 FormatNotSupported on
+        // this macOS. Decode 24-bit wire samples into float32 for playback,
+        // retaining the full 24-bit mantissa.
+        self.format = wireFormat == .int16
+            ? AVAudioFormat(commonFormat: .pcmFormatInt16,
+                            sampleRate: AudioPlayer.sampleRate,
+                            channels: AudioPlayer.channels,
+                            interleaved: true)!
+            : AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                            sampleRate: AudioPlayer.sampleRate,
+                            channels: AudioPlayer.channels,
+                            interleaved: false)!
 
         if let path = recordPath {
             let url = URL(fileURLWithPath: path)
+            // The 24-bit path plays through a float32 buffer, so record that
+            // same format. Float32 carries the full 24-bit mantissa; the file
+            // is diagnostic, not a second conversion step.
             let settings: [String: Any] = [
                 AVFormatIDKey: kAudioFormatLinearPCM,
                 AVSampleRateKey: AudioPlayer.sampleRate,
                 AVNumberOfChannelsKey: AudioPlayer.channels,
-                AVLinearPCMBitDepthKey: 16,
-                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMBitDepthKey: wireFormat == .int16 ? 16 : 32,
+                AVLinearPCMIsFloatKey: wireFormat == .int24,
                 AVLinearPCMIsBigEndianKey: false,
                 AVLinearPCMIsNonInterleaved: false,
             ]
             do {
                 // processingFormat must match the buffers we hand to write(),
                 // otherwise every write throws and the file stays header-only.
-                file = try AVAudioFile(forWriting: url, settings: settings,
-                                       commonFormat: .pcmFormatInt16, interleaved: true)
-                log("audio: recording to \(path)")
+                file = try AVAudioFile(
+                    forWriting: url, settings: settings,
+                    commonFormat: wireFormat == .int16 ? .pcmFormatInt16 : .pcmFormatFloat32,
+                    interleaved: wireFormat == .int16)
+                log("audio: recording to \(path) (\(wireFormat == .int16 ? 16 : 24)-bit source)")
             } catch {
                 log("audio: cannot open \(path) for writing: \(error)")
             }
@@ -156,7 +213,7 @@ final class AudioPlayer: @unchecked Sendable {
     /// our completion handler takes this lock — holding it across stop() is a
     /// guaranteed deadlock (it hung the app on window close).
     func enqueue(_ data: Data) {
-        let count = data.count / AudioPlayer.bytesPerFrame
+        let count = data.count / bytesPerFrame
         guard count > 0 else { return }
         lock.lock()
         guard !finished else { lock.unlock(); return }
@@ -201,14 +258,28 @@ final class AudioPlayer: @unchecked Sendable {
             }
         }
 
-        // Track energy on the int16 samples so a silent capture is visible in
-        // the log without anyone having to listen.
+        // Track energy in the same 16-bit-equivalent scale for both formats,
+        // so a silent capture is visible in the log without anyone listening.
         var acc = 0.0
-        data.withUnsafeBytes { raw in
-            let samples = raw.bindMemory(to: Int16.self)
-            for s in samples {
-                let v = Double(s)
-                acc += v * v
+        if wireFormat == .int16 {
+            data.withUnsafeBytes { raw in
+                let samples = raw.bindMemory(to: Int16.self)
+                for s in samples {
+                    let v = Double(s)
+                    acc += v * v
+                }
+            }
+        } else {
+            data.withUnsafeBytes { raw in
+                let p = raw.bindMemory(to: UInt8.self)
+                let samples = data.count / 3
+                var o = 0
+                for _ in 0..<samples {
+                    let u = UInt32(p[o]) | (UInt32(p[o + 1]) << 8) | (UInt32(p[o + 2]) << 16)
+                    let v = Double(Int32(bitPattern: u << 8)) / 65536.0
+                    acc += v * v
+                    o += 3
+                }
             }
         }
         let now = DispatchTime.now().uptimeNanoseconds
@@ -242,9 +313,23 @@ final class AudioPlayer: @unchecked Sendable {
     private func makeBuffer(_ data: Data, frames: Int) -> AVAudioPCMBuffer? {
         guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else { return nil }
         buf.frameLength = AVAudioFrameCount(frames)
-        guard let dst = buf.int16ChannelData?[0] else { return nil }
-        data.copyBytes(to: UnsafeMutableRawPointer(dst).assumingMemoryBound(to: UInt8.self),
-                       count: frames * AudioPlayer.bytesPerFrame)
+        if wireFormat == .int16 {
+            guard let dst = buf.int16ChannelData?[0] else { return nil }
+            data.copyBytes(to: UnsafeMutableRawPointer(dst).assumingMemoryBound(to: UInt8.self),
+                           count: frames * bytesPerFrame)
+        } else {
+            guard let dst = buf.floatChannelData else { return nil }
+            data.withUnsafeBytes { raw in
+                let p = raw.bindMemory(to: UInt8.self)
+                var o = 0
+                for i in 0..<(frames * 2) {
+                    let u = UInt32(p[o]) | (UInt32(p[o + 1]) << 8) | (UInt32(p[o + 2]) << 16)
+                    let sample = Int32(bitPattern: u << 8)
+                    dst[i & 1][i >> 1] = Float(Double(sample) / 2_147_483_648.0)
+                    o += 3
+                }
+            }
+        }
         return buf
     }
 
@@ -560,7 +645,8 @@ final class AudioPlayer: @unchecked Sendable {
         lock.unlock()
         let dbfs = rms > 0 ? 20 * log10(rms / 32768.0) : -120
         let secs = Double(frames) / AudioPlayer.sampleRate
-        log(String(format: "audio done frames=%d (%.1fs) rms=%.1f dBFS kb=%.0f graphs=%d",
-                   frames, secs, dbfs, Double(bytes) / 1024, starts))
+        log(String(format: "audio done frames=%d (%.1fs) rms=%.1f dBFS kb=%.0f graphs=%d format=%@",
+                   frames, secs, dbfs, Double(bytes) / 1024, starts,
+                   wireFormat == .int16 ? "int16" : "int24"))
     }
 }

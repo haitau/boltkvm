@@ -109,8 +109,7 @@ final class ClientSession: @unchecked Sendable {
                     guard !Task.isCancelled, self.isCurrent(gen) else { return }
                 }
                 attempt += 1
-                let audio = playAudio ? AudioPlayer(play: true, recordPath: nil) : nil
-                self.audio = audio
+                var audio: AudioPlayer?
                 var gotAuthOk = false
                 var askedInitialMute = false
                 var sentAuthResponse = false
@@ -176,18 +175,35 @@ final class ClientSession: @unchecked Sendable {
                                 conn: c, nonce: challengeNonce, key: sessionKey,
                                 forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                         }
-                        // A-2: the client's output device moved while it is
-                        // playing the forwarded audio. Tell the server to pause
-                        // its current Now Playing app, so music does not keep
-                        // running on a speaker nobody is listening to.
-                        if let audio {
-                            self.installAudioRouteCallbacks(audio, connection: c)
+                        // Audio format is negotiated before the server starts
+                        // capture: an old server sends no 24-bit flag and gets
+                        // no config request, so both sides stay on int16.
+                        let supportsAudio24 = authOkFlags(payload) & FLAG_SUPPORTS_AUDIO_24 != 0
+                        var use24 = false
+                        if supportsConfig {
+                            var config = self.requestedConfig
+                                ?? SessionConfig(width: 0, height: 0, quality: 0, color: .standard)
+                            if playAudio, supportsAudio24 {
+                                config.audio = .int24
+                            }
+                            if playAudio || self.requestedConfig != nil {
+                                do {
+                                    try c.send(packet(type: .config, payload: config.encode()))
+                                    use24 = playAudio && supportsAudio24 && config.audio == .int24
+                                    log("sending config \(config.width)x\(config.height) quality=\(config.quality) colour=\(config.color) audio=\(use24 ? "int24" : "int16")")
+                                } catch {
+                                    log("audio: could not send config: \(error)")
+                                }
+                            }
                         }
-                        // Ask for the size the connection list chose *before*
-                        // anything else: the server reads exactly one frame here.
-                        if supportsConfig, let requested = self.requestedConfig {
-                            log("sending config \(requested.width)x\(requested.height) quality=\(requested.quality) colour=\(requested.color)")
-                            try? c.send(packet(type: .config, payload: requested.encode()))
+                        if playAudio {
+                            let player = AudioPlayer(
+                                play: true, recordPath: nil,
+                                wireFormat: use24 ? .int24 : .int16)
+                            audio = player
+                            self.audio = player
+                            self.installAudioRouteCallbacks(player, connection: c)
+                            log("audio: wire format \(use24 ? "int24" : "int16") at 48 kHz")
                         }
                         // Encrypted ping: proves the client→server direction
                         // decrypts too, not just server→client.
@@ -213,7 +229,7 @@ final class ClientSession: @unchecked Sendable {
                             DispatchQueue.main.async { self.startInput(conn: c) }
                         }
                     }
-                    pump.onAudio = { [audio, weak c] payload in
+                    pump.onAudio = { [weak c] payload in
                         // Do not mute on the first video frame: the server may
                         // have been launched without --audio, in which case
                         // there is no audio stream and muting would silence the

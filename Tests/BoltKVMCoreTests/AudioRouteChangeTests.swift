@@ -67,7 +67,7 @@ final class AudioRouteChangeTests: XCTestCase {
     /// that half of the fix and make the debounce look instantaneous.
     private func feed(_ player: AudioPlayer, seconds: TimeInterval) {
         let end = Date().addingTimeInterval(seconds)
-        let chunk = Data(repeating: 0, count: chunkFrames * AudioPlayer.bytesPerFrame)
+        let chunk = Data(repeating: 0, count: chunkFrames * AudioPlayer.int16BytesPerFrame)
         let feeder = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .userInitiated).async {
             while Date() < end {

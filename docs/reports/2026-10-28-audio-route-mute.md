@@ -1,7 +1,7 @@
 # 音频会话：选中静音本地，换设备停两端
 
 日期：2026-10-28
-状态：代码已改，构建与无音频单测通过；**未做实际发声/耳机切换验收**（用户要求在办公时间不要出声）。
+状态：代码已改，构建与无音频单测通过；**未做实际发声/耳机切换验收**（用户要求在办公时间不要出声）。0.13 已追加 24-bit/48 kHz 协商，并用 record-only 会话验证端到端格式。
 
 ## 背景
 
@@ -48,13 +48,21 @@
 ## 验证
 
 - `swift build -c release`：通过；
-- `swift test --filter ProtocolTests`：11 项通过；
-- `swift test --skip Audio`：90 项通过，未运行会出声的音频回归；
-- **未验证**：真实耳机切换听感、Pro 系统其他 App 的 2.5 s 静音与恢复、mini 的 `AudioOutputMute` 恢复、蓝牙多通知、音量键的实际事件类型（本地/远端）、24-bit 格式。
+- `swift test --filter ProtocolTests`：14 项通过；
+- `swift test --filter Audio24Tests`：3 项通过（含静音播放图和 float32 记录文件）；
+- `swift test`：99 项通过、1 项跳过（`AudioRouteChangeTests` 需要显式音频输出环境）；
+- 0.13 record-only 端到端：客户端 `sent config 0x0 audio=int24`，服务端 `audio source ... target=int24`，统计 `audio=182 pkts/2.3Mbps`，客户端记录 178,560 帧 / 3.72 s（文件为 float32 诊断容器）；
+- **未验证**：真实耳机切换听感、Pro 系统其他 App 的 2.5 s 静音与恢复、mini 的 `AudioOutputMute` 恢复、蓝牙多通知、音量键的实际事件类型（本地/远端）、24-bit 的实际听感（只验证了格式、帧数、码率与无声播放图）。
+
+## 24-bit/48 kHz（0.13 追加）
+
+认证时服务端在 `authOk` 追加能力位 `FLAG_SUPPORTS_AUDIO_24`；客户端看到后把 `SessionConfig` 的保留字节 6 设为 `AudioWireFormat.int24`。服务端在开始采集前读取该 config，用 `AVAudioConverter` 转到 int32，再取高 24 位按 3 字节小端打包；客户端按 3 字节解包并左移 8 位，再归一化到 float32 交给混音器。旧客户端不读能力位、旧服务端不读字节 6，双方自动保持 int16；`0x0` 尺寸的 config 只用于音频协商，服务端会保留当前显示尺寸，不会重建虚拟屏。
+
+24-bit 线格式为 48 kHz / 2 ch / 3 bytes/sample = 6 bytes/frame，约 2.30 Mbps。客户端没有把 int32 直接接到 `AVAudioEngine`：实测该连接在当前 macOS 返回 `-10868 FormatNotSupported`，因此播放和 `--audio-record` 都使用 float32 缓冲；float32 的尾数足以无损容纳 24-bit 样本，记录文件本身是 32-bit float 诊断容器，不是 packed 24-bit 文件。
 
 ## 边界
 
-- 48 kHz / 16-bit / 双声道仍为当前线格式，约 1.54 Mbps；48 kHz 本身是 CD 级，升级优先做 24-bit，96 kHz 仅作可选；需要协议格式协商，本次未做。
+- 当前线格式为 48 kHz / 双声道，协商 int16（约 1.54 Mbps）或 packed int24（约 2.30 Mbps）；96 kHz 未实现。
 - Pro 系统静音是**路由过渡期** 2.5 s，不是永久静音；若要求永久停到手动恢复，需要显式恢复入口。
-- mini 226 及更早版本没有 `muteLocalOutput` 处理；客户端 229 连接旧 mini 时静音命令会被忽略，需要同步升级 mini 后才能验收。
+- 0.12.1 及更早版本没有 `muteLocalOutput` 处理；连接旧 mini 时静音命令会被忽略，需要两端同步升级后才能验收。本次 Pro/mini 都已部署 0.13。
 - 首次选中音频时若服务端静音失败，会记录 `audio: could not mute local output`，此时仍可能有双端声音；需要后续加能力确认/降级策略。

@@ -22,6 +22,9 @@ let HEADER_SIZE = 20
 /// before this existed still read the clock at the right offset.
 /// 1 = the server can upgrade the session to X25519 forward secrecy.
 let FLAG_SUPPORTS_KEY_EXCHANGE: UInt8 = 1
+/// 2 = the server understands the packed 24-bit PCM audio wire format.
+/// Clients that do not see this bit must ask for 16-bit (or send no config).
+let FLAG_SUPPORTS_AUDIO_24: UInt8 = 2
 
 enum PacketType: UInt8 {
     /// Not a real type: `decode` maps anything it does not know here so a newer
@@ -36,8 +39,10 @@ enum PacketType: UInt8 {
     case authChallenge = 6
     case authResponse = 7
     case authOk = 8
-    /// Opt-in only (server `--audio`): raw PCM, 48 kHz, 2 ch, int16 LE,
-    /// interleaved. Without the flag no such packet is ever produced.
+    /// Opt-in only (server `--audio`): raw PCM, 48 kHz, 2 ch, interleaved.
+    /// The sample format is negotiated through `SessionConfig.audio`: signed
+    /// 16-bit LE, or packed signed 24-bit LE (top 24 bits of an Int32).
+    /// Without `--audio` no such packet is ever produced.
     case audio = 9
     /// Remote control of system UI that no keyboard event can trigger: the
     /// server performs the action natively (see `RemoteAction`).
@@ -67,6 +72,16 @@ enum ColorMode: UInt8, Codable {
     case wide = 1
 }
 
+/// PCM sample format on the `audio` packet. Values are append-only: 0 is the
+/// original 16-bit format, 1 is the 24-bit format added in 0.13.
+enum AudioWireFormat: UInt8, Codable {
+    case int16 = 0
+    case int24 = 1
+
+    var bytesPerSample: Int { self == .int16 ? 2 : 3 }
+    var bytesPerFrame: Int { bytesPerSample * 2 }
+}
+
 /// What a client asks the server to stream: a logical size plus how sharp.
 ///
 /// The server may refuse (no virtual display to recreate, or the display is
@@ -80,6 +95,9 @@ struct SessionConfig {
     /// Rides in the byte that used to be reserved, so a server that predates it
     /// reads 0 (standard) and behaves exactly as before.
     var color: ColorMode = .standard
+    /// 0 = int16 (the original format), 1 = packed int24. Older servers ignore
+    /// this byte; a client only sets 1 after seeing `FLAG_SUPPORTS_AUDIO_24`.
+    var audio: AudioWireFormat = .int16
 
     static let payloadSize = 8
 
@@ -91,7 +109,8 @@ struct SessionConfig {
             base.storeBytes(of: UInt16(clamping: height).bigEndian, toByteOffset: 2, as: UInt16.self)
             base.storeBytes(of: quality, toByteOffset: 4, as: UInt8.self)
             base.storeBytes(of: color.rawValue, toByteOffset: 5, as: UInt8.self)
-            base.storeBytes(of: UInt16(0).bigEndian, toByteOffset: 6, as: UInt16.self)
+            base.storeBytes(of: audio.rawValue, toByteOffset: 6, as: UInt8.self)
+            base.storeBytes(of: UInt8(0), toByteOffset: 7, as: UInt8.self)
         }
         return data
     }
@@ -104,8 +123,13 @@ struct SessionConfig {
             let height = Int(UInt16(bigEndian: base.load(fromByteOffset: 2, as: UInt16.self)))
             let quality = base.load(fromByteOffset: 4, as: UInt8.self)
             let color = ColorMode(rawValue: base.load(fromByteOffset: 5, as: UInt8.self)) ?? .standard
-            guard (320...7680).contains(width), (240...4320).contains(height) else { return nil }
-            return SessionConfig(width: width, height: height, quality: quality, color: color)
+            let audio = AudioWireFormat(rawValue: base.load(fromByteOffset: 6, as: UInt8.self)) ?? .int16
+            // (0,0) is an audio-only request: keep the current capture size.
+            let sized = (320...7680).contains(width) && (240...4320).contains(height)
+            let audioOnly = width == 0 && height == 0
+            guard sized || audioOnly else { return nil }
+            return SessionConfig(width: width, height: height, quality: quality,
+                                 color: color, audio: audio)
         }
     }
 }

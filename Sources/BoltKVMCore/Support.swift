@@ -138,7 +138,7 @@ func authenticateServer(conn: TCPConnection, key: Data,
             // and ignore the trailing flag byte, so the layout stays compatible.
             var payload = Data([1])
             payload.appendInt64BE(Int64(Date().timeIntervalSince1970 * 1_000_000))
-            payload.append(FLAG_SUPPORTS_KEY_EXCHANGE)
+            payload.append(FLAG_SUPPORTS_KEY_EXCHANGE | FLAG_SUPPORTS_AUDIO_24)
             try conn.send(packet(type: .authOk, ptsMicros: 0, payload: payload))
             // Auth ok is the last plaintext packet: everything after it is sealed.
             let keys = deriveSessionKeys(psk: key, nonce: nonce)

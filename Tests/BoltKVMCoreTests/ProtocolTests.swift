@@ -116,6 +116,44 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(RemoteAction.missionControl.rawValue, 1)
     }
 
+
+    func testAudioFormatRidesInReservedByte() {
+        let c = SessionConfig(width: 3008, height: 1692, quality: 1, audio: .int24)
+        let data = c.encode()
+        XCTAssertEqual(data[6], AudioWireFormat.int24.rawValue)
+        guard let back = SessionConfig.decode(data) else { return XCTFail("decode failed") }
+        XCTAssertEqual(back.audio, .int24)
+
+        var legacy = data
+        legacy[6] = 0
+        XCTAssertEqual(SessionConfig.decode(legacy)?.audio, .int16)
+        var future = data
+        future[6] = 0xFF
+        XCTAssertEqual(SessionConfig.decode(future)?.audio, .int16)
+        XCTAssertEqual(AudioWireFormat.int16.bytesPerFrame, 4)
+        XCTAssertEqual(AudioWireFormat.int24.bytesPerFrame, 6)
+    }
+
+    func testAudioOnlyConfigAllowsZeroSizeButRejectsHalfZero() {
+        let audioOnly = SessionConfig(width: 0, height: 0, quality: 0, audio: .int24)
+        XCTAssertNotNil(SessionConfig.decode(audioOnly.encode()))
+        let half = SessionConfig(width: 0, height: 1080, quality: 0, audio: .int24)
+        XCTAssertNil(SessionConfig.decode(half.encode()))
+    }
+
+    func test24BitPCMKeepsTopBitsAndSign() {
+        let input: [Int32] = [0, 1, -1, 0x007F_FFFF, -0x0080_0000, 0x1234_5678]
+        let data = input.withUnsafeBufferPointer { AudioPCM24.pack($0) }
+        XCTAssertEqual(data.count, input.count * 3)
+        var output = [Int32](repeating: 0, count: input.count)
+        output.withUnsafeMutableBufferPointer { buf in
+            AudioPCM24.unpack(data, into: buf.baseAddress!, count: input.count)
+        }
+        for (i, s) in input.enumerated() {
+            XCTAssertEqual(output[i], (s >> 8) << 8, "sample \(i)")
+        }
+    }
+
     func testSessionConfigRejectsImpossibleSizes() {
         // A malicious or buggy client must not be able to make the server build a
         // virtual display of 0×0 or 60000×60000.

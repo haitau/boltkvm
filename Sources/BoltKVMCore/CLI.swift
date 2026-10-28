@@ -197,7 +197,8 @@ public enum CLI {
 
                 var captureW = width
                 var captureH = height
-                if let req = requested, let current = virtualDisplay,
+                if let req = requested, req.width > 0, req.height > 0,
+                   let current = virtualDisplay,
                    current.logicalWidth != req.width || current.logicalHeight != req.height {
                     log("client requested \(req.width)x\(req.height) (quality \(req.quality)); recreating virtual display")
                     let previous = virtualDisplay
@@ -233,9 +234,10 @@ public enum CLI {
                     }
                 }
 
-                let desiredColor = requested?.color ?? .standard
+                let desiredColor = requested.flatMap { $0.width > 0 ? $0.color : nil } ?? .standard
                 let server = Server(width: captureW, height: captureH, codec: codec, connection: conn,
                             dumpPath: dump.isEmpty ? nil : dump, audioEnabled: audio,
+                            audioFormat: requested?.audio ?? .int16,
                             preferredDisplayID: argInt(args, "--display-id", 0) != 0
                                 ? CGDirectDisplayID(argInt(args, "--display-id", 0))
                                 : virtualDisplay?.displayID,
@@ -516,9 +518,7 @@ public enum CLI {
         let reconnect = args.contains("--reconnect")
         let audioRecord = argValue(args, "--audio-record", "")
         let wantsAudio = args.contains("--audio") || !audioRecord.isEmpty
-        let audio: AudioPlayer? = wantsAudio
-            ? AudioPlayer(play: args.contains("--audio"), recordPath: audioRecord.isEmpty ? nil : audioRecord)
-            : nil
+        var audio: AudioPlayer?
 
         let clipboardEnabled = !args.contains("--no-clipboard")
         NSApplication.shared.setActivationPolicy(.regular)
@@ -566,7 +566,40 @@ public enum CLI {
                             conn: c, nonce: challengeNonce,
                             forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                         log("auth ok")
-                        installPauseOnRouteChange(audio, conn: c)
+                        // Negotiate 24-bit before creating the sink. A server
+                        // that does not advertise it (or no config support)
+                        // keeps the original int16 path.
+                        let supportsAudio24 = authOkFlags(payload) & FLAG_SUPPORTS_AUDIO_24 != 0
+                        var use24 = false
+                        if header.payloadLength >= 1, payload.first == 1 {
+                            var config = requested
+                                ?? SessionConfig(width: 0, height: 0, quality: 0, color: .standard)
+                            if wantsAudio, supportsAudio24 {
+                                config.audio = .int24
+                                use24 = true
+                            }
+                            if requested != nil || use24 {
+                                do {
+                                    try c.send(packet(type: .config, payload: config.encode()))
+                                    use24 = wantsAudio && supportsAudio24 && config.audio == .int24
+                                    log("sent config \(config.width)x\(config.height) audio=\(use24 ? "int24" : "int16")")
+                                } catch {
+                                    use24 = false
+                                    log("could not send config: \(error)")
+                                }
+                            }
+                        }
+                        if wantsAudio {
+                            let fmt: AudioWireFormat = use24 ? .int24 : .int16
+                            if audio == nil || audio?.wireFormat != fmt {
+                                audio?.finish()
+                                audio = AudioPlayer(
+                                    play: args.contains("--audio"),
+                                    recordPath: audioRecord.isEmpty ? nil : audioRecord,
+                                    wireFormat: fmt)
+                            }
+                            installPauseOnRouteChange(audio, conn: c)
+                        }
                         if clipboardEnabled {
                             let sync = ClipboardSync(conn: c, enabled: true,
                                                      maxItemBytes: clipboardMaxItemBytes(args),
@@ -580,10 +613,6 @@ public enum CLI {
                             decoder.setClockOffset(t2 - (authSentAt + t3) / 2,
                                                    rttMs: Double(t3 - authSentAt) / 1000.0)
                         }
-                        if header.payloadLength >= 1, payload.first == 1, let requested {
-                            try? c.send(packet(type: .config, payload: requested.encode()))
-                            log("sent config \(requested.width)x\(requested.height) quality=\(requested.quality)")
-                        }
                         try? c.send(timeSyncRequest())
                     }
                     pump.onFormat = { _ in
@@ -595,7 +624,7 @@ public enum CLI {
                             }
                         }
                     }
-                    pump.onAudio = { [audio, weak c] payload in
+                    pump.onAudio = { [weak c] payload in
                         if audio != nil, !askedInitialMute, let c {
                             do {
                                 try c.send(packet(type: .command,

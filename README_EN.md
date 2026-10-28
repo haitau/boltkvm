@@ -17,7 +17,7 @@ Low-latency screen control between two Macs. A single app bundle serves both rol
 Grab the latest `BoltKVM-<version>.zip` and its `.sha256` from [Releases](https://github.com/haitau/boltkvm/releases):
 
 ```bash
-V=0.12.1   # replace with the release version
+V=0.13     # replace with the release version
 unzip BoltKVM-$V.zip -d BoltKVM-$V
 shasum -a 256 -c BoltKVM-$V.zip.sha256
 open BoltKVM-$V/BoltKVM.app
@@ -34,7 +34,7 @@ Release builds are ad-hoc signed: allow the app in **System Settings → Privacy
 | Capture-to-decode latency | P95 < 33 ms | P95 **25.4–27.0 ms** | Pass (all three decode runs stayed under 33 ms) |
 | GUI capture-to-present latency | P95 < 50 ms | P50 **31.0 ms**, P95 **33.2 ms**, 60.0 fps | Pass ([B5 Latency Report](docs/reports/2026-10-23-b5-latency.md)) |
 | Stability | 8-hour soak | 8h00m01s: 0 disconnects, 0 decode errors, 0 watchdog rebuilds | Pass |
-| Audio | 0 bytes by default | Off by default; 1.54 Mbps / −34 dBFS when enabled, RSS 134→135 MB over 12 min | Pass (optional) |
+| Audio | 0 bytes by default | Off by default; 48 kHz stereo, 16-bit at 1.54 Mbps (measured: −34 dBFS, RSS 134→135 MB over 12 min) or 24-bit at 2.30 Mbps (0.13, format verified end to end) | Pass (16-bit measured; 24-bit listening acceptance pending) |
 | Input continuity | 8 hours without dropped events | 466 forwarded batches over 8h, 0 tap failures (CLI client; the probe delivered 458 events, so the 8-event difference is unverified; 8h GUI soak pending) | Partial |
 
 Decode latency and GUI presentation latency are tracked separately: capture-to-decode P95 stays under 27 ms, while the GUI renderer triggers `MTKView.draw()` immediately upon frame arrival rather than waiting for the next display vsync tick, keeping capture-to-present P95 at 33.2 ms. See the [B5 Latency Report](docs/reports/2026-10-23-b5-latency.md) and [Audio & GUI Stability Report](docs/reports/2026-10-23-audio-and-gui-stability.md) for raw logs.
@@ -189,7 +189,7 @@ Common server flags:
 --virtual-display builtin          # Built-in CGVirtualDisplay (default); "external" uses an existing display
 --virtual-display-size 3008x1692   # Logical resolution of the virtual display
 --bind auto                        # Bind only bridge* interfaces by default; pass 127.0.0.1 for loopback tests
---audio                            # Enable system audio capture (48 kHz stereo signed 16-bit PCM, ~1.5 Mbps)
+--audio                            # Enable system audio capture (48 kHz stereo; negotiated 16/24-bit, ~1.5/2.3 Mbps)
 --local-mute                       # Explicitly mute the controlled Mac's default output (off by default)
 --codec hevc                       # Use HEVC instead of the default ProRes 422 encoder
 ```
@@ -207,7 +207,7 @@ Soak and rescue helper scripts:
 Pushing a `v*` tag triggers GitHub Actions to build, run self-tests, package and sign the app bundle, and publish a GitHub Release:
 
 ```bash
-git tag v0.12.1 && git push origin v0.12.1
+git tag v0.13 && git push origin v0.13
 ```
 
 Pushing `main` alone never publishes a release—`release.yml` only runs for `v*` tags. Make sure CI is green on `main` before tagging. See [docs/releasing.md](docs/releasing.md) for code signing and notarization details.

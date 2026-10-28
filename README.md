@@ -17,7 +17,7 @@
 最新发布包见 [Releases](https://github.com/haitau/boltkvm/releases)，每次发布附带 `BoltKVM-<版本>.zip` 与同名 `.sha256`：
 
 ```bash
-V=0.12.1   # 换成实际发布版本
+V=0.13     # 换成实际发布版本
 unzip BoltKVM-$V.zip -d BoltKVM-$V
 shasum -a 256 -c BoltKVM-$V.zip.sha256
 open BoltKVM-$V/BoltKVM.app
@@ -34,7 +34,7 @@ open BoltKVM-$V/BoltKVM.app
 | 解码链路延迟 | P95 < 33 ms | P95 **25.4–27.0 ms** | 达标（三轮解码 P95 均 < 33 ms） |
 | GUI 采集→上屏延迟 | P95 < 50 ms | P50 **31.0 ms**、P95 **33.2 ms**、60.0 fps | 达标（详见 [B5 延迟报告](docs/reports/2026-10-23-b5-latency.md)） |
 | 稳定性 | 8 小时不断连 | 8h00m01s：0 断连、0 解码失败、0 看门狗重建 | 达标 |
-| 音频 | 默认零字节 | 默认不传；开启后 48 kHz/16-bit 双声道 1.54 Mbps、−34 dBFS，12 分钟 RSS 134→135 MB | 达标（可选） |
+| 音频 | 默认零字节 | 默认不传；开启后 48 kHz 双声道，16-bit 1.54 Mbps（已测：−34 dBFS、12 分钟 RSS 134→135 MB）或 24-bit 2.30 Mbps（0.13 新增，端到端格式已验证） | 达标（16-bit 已测；24-bit 待听感验收） |
 | 输入连续性 | 8 小时不丢事件 | 8h 内 466 次转发、tap 失效 0（CLI 客户端；探针投递 458 次，差额未核对）；GUI 客户端 8h 输入长跑由用户确认完成（2026-10-28） | 达标 |
 
 解码链路与 GUI 呈现链路分开统计：解码链路 P95 在 27 ms 以内；GUI 渲染采用到帧即时触发 `MTKView.draw()` 的泵送模式，消除了等待显示刷新周期的排队开销，采集→上屏 P95 为 33.2 ms。详见 [B5 延迟报告](docs/reports/2026-10-23-b5-latency.md) 与 [音频与 GUI 稳定性报告](docs/reports/2026-10-23-audio-and-gui-stability.md)。
@@ -157,7 +157,7 @@ defaults write io.github.boltkvm server.audio -bool true
 
 主控端正在播放转发音频时，如果默认输出设备发生变化（蓝牙耳机开关、有线耳机插拔），客户端会立即停止本地转发播放并静音**主控端整机默认输出**（不只是 BoltKVM 播放器），同时向服务端发一次 `pauseMedia`，服务端用 MediaRemote 暂停当前 Now Playing 应用。设备稳定后客户端重建一次音频图，2.5 s 后恢复主控端系统输出；被控端媒体保持暂停，不自动恢复。多个 CoreAudio 通知会合并，不会连续发暂停；日志为 `muted Pro system output during route change` 与 `output route changed; asked server to pause media`。
 
-`--local-mute` 仍是显式 opt-in；客户端选音频时走同一套 `AudioOutputMute`，但由协议命令触发。若旧进程被强杀，下一次启动仍会读取 `~/Library/Application Support/BoltKVM/mute-state.json` 恢复。当前音频线格式仍是 48 kHz / 16-bit / 双声道；24-bit（以及可选 96 kHz）需要协议协商，尚未实现。
+`--local-mute` 仍是显式 opt-in；客户端选音频时走同一套 `AudioOutputMute`，但由协议命令触发。若旧进程被强杀，下一次启动仍会读取 `~/Library/Application Support/BoltKVM/mute-state.json` 恢复。音频线格式在认证后协商：服务端在 authOk 中带 24-bit 能力位，客户端在 config 中请求 packed int24；没有该能力位的旧端自动回退 48 kHz / 16-bit。两种格式都是双声道，int16 约 1.54 Mbps、int24 约 2.30 Mbps；96 kHz 未实现。24-bit 解码到 float32 后交给混音器，避免 int32 播放连接在当前 macOS 上返回 -10868。
 
 ### 剪切板同步
 
@@ -220,7 +220,7 @@ defaults write io.github.boltkvm server.audio -bool true
 --virtual-display builtin          # 内建虚拟屏（默认）；external 使用外部已有显示器
 --virtual-display-size 3008x1692   # 虚拟屏逻辑尺寸
 --bind auto                        # 默认仅绑定 bridge* 雷雳接口；本机回环测试传 127.0.0.1
---audio                            # 开启系统音频采集与转发（48 kHz 双声道 PCM，约 1.5 Mbps）
+--audio                            # 开启系统音频采集与转发（48 kHz 双声道；协商 16/24-bit，约 1.5/2.3 Mbps）
 --local-mute                       # 显式静音被控端默认输出（默认不静音；仅特殊场景使用）
 --no-clipboard                     # 关闭剪切板同步（默认开启）
 --clipboard-max-mb 512             # 非文件项单次上限（MB）
@@ -241,7 +241,7 @@ defaults write io.github.boltkvm server.audio -bool true
 推送 `v*` 标签即可触发 GitHub Actions 自动编译、自测、打包签名并创建 GitHub Release：
 
 ```bash
-git tag v0.12.1 && git push origin v0.12.1
+git tag v0.13 && git push origin v0.13
 ```
 
 只推送 `main` 不会触发发布——`release.yml` 仅在推送 `v*` 标签时运行；打标签前请确认 `main` 上的 CI 全绿。发布流程与签名说明见 [发布流程](docs/releasing.md)。
