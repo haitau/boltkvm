@@ -110,6 +110,8 @@ final class ProtocolTests: XCTestCase {
     func testPauseMediaActionKeepsExistingCommandValues() {
         // New command at the end; old servers ignore it, old clients never send it.
         XCTAssertEqual(RemoteAction.pauseMedia.rawValue, 7)
+        XCTAssertEqual(RemoteAction.muteLocalOutput.rawValue, 8)
+        XCTAssertEqual(RemoteAction.unmuteLocalOutput.rawValue, 9)
         XCTAssertEqual(RemoteAction.hideDesktop.rawValue, 6)
         XCTAssertEqual(RemoteAction.missionControl.rawValue, 1)
     }

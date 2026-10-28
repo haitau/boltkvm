@@ -36,3 +36,4 @@
 | 2026-10-28 | [permissions-and-tcc](2026-10-28-permissions-and-tcc.md) | 双权限入口与 TCC 重授权 | 两个入口与重置项已落地；mini 辅助功能待授权 |
 | 2026-10-28 | [fullscreen-toolbar-first-reveal](2026-10-28-fullscreen-toolbar-first-reveal.md) | 全屏工具栏首次弹出无按钮 | 已修：改回原生标准工具栏项 + 首次显隐预热；放弃视觉不符的浮层 |
 | 2026-10-28 | [audio-local-mute](2026-10-28-audio-local-mute.md) | mini 本地被莫名静音 | 已修：默认不再设备静音，改为暂停当前媒体；mini 214 验证 |
+| 2026-10-28 | [audio-route-mute](2026-10-28-audio-route-mute.md) | 音频选中静音、换设备停两端 | 代码/无音频单测通过，实机听感待验证 |

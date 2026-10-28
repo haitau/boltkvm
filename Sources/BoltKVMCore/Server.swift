@@ -31,6 +31,11 @@ final class Server: NSObject, SCStreamOutput {
     private let clipboardMaxTransferBytes: Int64
     private var clipboard: ClipboardSync?
     private var localMute: AudioOutputMute?
+    /// Mute requested by the controller for this session after it actually
+    /// selected audio. Kept separate from the explicit `--local-mute` opt-in so
+    /// stop() restores whichever one is active.
+    private var clientAudioMute: AudioOutputMute?
+    private var clientAudioMuteLock = NSLock()
     private var dumped = false
 
     private let audioTarget = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000,
@@ -350,7 +355,14 @@ final class Server: NSObject, SCStreamOutput {
                         }
                     } else if h.type == .command {
                         if let raw = payload.first, let action = RemoteAction(rawValue: raw) {
-                            self.performRemote(action)
+                            switch action {
+                            case .muteLocalOutput:
+                                self.setClientAudioActive(true)
+                            case .unmuteLocalOutput:
+                                self.setClientAudioActive(false)
+                            default:
+                                self.performRemote(action)
+                            }
                         }
                     } else if h.type == .clipboard {
                         self.clipboard?.handleClipboard(payload)
@@ -553,9 +565,29 @@ final class Server: NSObject, SCStreamOutput {
         }
     }
 
+    private func setClientAudioActive(_ active: Bool) {
+        clientAudioMuteLock.lock()
+        defer { clientAudioMuteLock.unlock() }
+        if active {
+            guard clientAudioMute == nil, localMute == nil else { return }
+            let mute = AudioOutputMute()
+            mute.start()
+            clientAudioMute = mute
+            log("audio: client selected audio; muted controlled Mac output")
+        } else if let mute = clientAudioMute {
+            mute.stop()
+            clientAudioMute = nil
+            log("audio: client audio ended; restored controlled Mac output")
+        }
+    }
+
     func stop() async {
         localMute?.stop()
         localMute = nil
+        clientAudioMuteLock.lock()
+        clientAudioMute?.stop()
+        clientAudioMute = nil
+        clientAudioMuteLock.unlock()
         clipboard?.stop()
         clipboard = nil
         if let stream {

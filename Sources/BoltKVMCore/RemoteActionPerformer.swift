@@ -91,6 +91,9 @@ func performRemoteAction(_ action: RemoteAction) {
         postShortcut(.spaceLeft)
     case .spaceRight:
         postShortcut(.spaceRight)
+    case .muteLocalOutput, .unmuteLocalOutput:
+        // Handled by Server before this generic action dispatcher.
+        return
     case .pauseMedia:
         guard let mediaRemotePause else { return }
         // Pause is command 1; some players expose Stop (3) but not Pause.

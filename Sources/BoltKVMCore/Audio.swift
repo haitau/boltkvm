@@ -71,11 +71,18 @@ final class AudioPlayer: @unchecked Sendable {
     private var playbackActive = false
     private var starts = 0
     private var lastCompletion = DispatchTime.now().uptimeNanoseconds
-    private var rebuildQueued = false
+    /// Incremented on the control queue for every route signal; only the last
+    /// scheduled rebuild may run. This coalesces a Bluetooth switch's burst of
+    /// notifications instead of starting a new graph for each one.
+    private var rebuildToken = 0
     /// Client-side hook for A-2: the output device moved while audio is being
     /// played from the server, so the server should pause its player.
     var onOutputRouteChange: (() -> Void)?
+    /// Fired immediately, before the graph rebuild, so the client can stop all
+    /// local system audio while the output device is changing.
+    var onOutputRouteChangeBegan: (() -> Void)?
     private var routeNotifyQueued = false
+    private var routeBeganAt: UInt64 = 0
     /// More than ~2.5 s of queued audio means the output is not draining; older
     /// audio is worse than no audio (it drifts further behind every second).
     private let maxScheduled = 256
@@ -310,27 +317,17 @@ final class AudioPlayer: @unchecked Sendable {
     /// the watchdog. Debounced so one device switch (several notifications a few
     /// milliseconds apart on Bluetooth) rebuilds once.
     private func requestRebuild(reason: String) {
-        lock.lock()
-        if finished {
-            lock.unlock()
-            return
-        }
-        if rebuildQueued {
-            lock.unlock()
-            return
-        }
-        rebuildQueued = true
-        lock.unlock()
-
-        log("audio: \(reason); rebuilding output graph in 150 ms")
-        controlQueue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            self.rebuildQueued = false
-            let done = self.finished
-            self.lock.unlock()
-            guard !done else { return }
-            self.buildGraph(reason: reason)
+        controlQueue.async { [weak self] in
+            guard let self, !self.isFinished else { return }
+            self.rebuildToken += 1
+            let token = self.rebuildToken
+            // Wait for the route to be quiet. If another notification arrives,
+            // the token changes and this build is skipped.
+            self.controlQueue.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                guard let self, !self.isFinished else { return }
+                guard token == self.rebuildToken else { return }
+                self.buildGraph(reason: reason)
+            }
         }
     }
 
@@ -346,7 +343,7 @@ final class AudioPlayer: @unchecked Sendable {
             // A notification from the graph we already replaced must not tear
             // down the new one.
             guard active, current == generation else { return }
-            self.requestRebuild(reason: "output configuration changed")
+            self.handleOutputRouteSignal(reason: "output configuration changed")
         }
     }
 
@@ -360,7 +357,7 @@ final class AudioPlayer: @unchecked Sendable {
             mElement: kAudioObjectPropertyElementMain
         )
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.requestRebuild(reason: "default output device changed")
+            self?.handleOutputRouteSignal(reason: "default output device changed")
             self?.notifyOutputRouteChange()
         }
         let status = AudioObjectAddPropertyListenerBlock(
@@ -371,6 +368,55 @@ final class AudioPlayer: @unchecked Sendable {
             return
         }
         outputListener = block
+    }
+
+    /// A route signal can arrive from CoreAudio before AVAudioEngine notices,
+    /// and several times for one wired/Bluetooth switch. Stop the old graph
+    /// immediately, tell the app to mute system output, then coalesce the
+    /// rebuild. The later `onOutputRouteChange` is the deliberately delayed
+    /// pause request; it is not the thing that stops local playback.
+    private func handleOutputRouteSignal(reason: String) {
+        controlQueue.async { [weak self] in
+            self?.suspendOnControlQueue()
+        }
+        notifyRouteChangeBegan()
+        requestRebuild(reason: reason)
+    }
+
+    /// Runs on `controlQueue`. Stops the old graph immediately instead of
+    /// waiting for the 150/450 ms rebuild timer, so audio does not keep playing
+    /// into the device that is being unplugged. The old graph is discarded;
+    /// buildGraph() will create a fresh one after the route settles.
+    private func suspendOnControlQueue() {
+        guard !isFinished else { return }
+        let oldPlayer = player
+        let oldEngine = engine
+        player = nil
+        engine = nil
+        lock.lock()
+        generation += 1
+        scheduled = 0
+        playbackActive = false
+        lock.unlock()
+        oldPlayer?.stop()
+        oldEngine?.stop()
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+            self.observer = nil
+        }
+    }
+
+    private func notifyRouteChangeBegan() {
+        let now = DispatchTime.now().uptimeNanoseconds
+        lock.lock()
+        if finished || now &- routeBeganAt < 500_000_000 {
+            lock.unlock()
+            return
+        }
+        routeBeganAt = now
+        let callback = onOutputRouteChangeBegan
+        lock.unlock()
+        callback?()
     }
 
     /// Debounced so one Bluetooth switch (several CoreAudio notifications) sends

@@ -549,7 +549,7 @@ public enum CLI {
                     decoder.renderer = RenderSession.shared.renderer
                     lastDecoder = decoder
                     var inputStarted = false
-                    var askedInitialPause = false
+                    var askedInitialMute = false
                     var clipboardSync: ClipboardSync?
                     let pump = SessionPump(conn: c, decoder: decoder)
                     pump.onClipboard = { clipboardSync?.handleClipboard($0) }
@@ -587,18 +587,17 @@ public enum CLI {
                         try? c.send(timeSyncRequest())
                     }
                     pump.onFormat = { _ in
-                        // The server's command pump is ready once the format
-                        // arrives. Send the one-time pause now; sending it in
-                        // onAuthOk raced the pump and was sometimes lost. Only
-                        // a client that actually plays audio gets here.
-                        if audio != nil, !askedInitialPause {
-                            askedInitialPause = true
+                        // Selecting audio must mute the controlled Mac's local
+                        // output, not pause its player: that player is the source
+                        // we are forwarding.
+                        if audio != nil, !askedInitialMute {
+                            askedInitialMute = true
                             do {
                                 try c.send(packet(type: .command,
-                                                  payload: Data([RemoteAction.pauseMedia.rawValue])))
-                                log("audio: asked server to pause media (client audio enabled)")
+                                                  payload: Data([RemoteAction.muteLocalOutput.rawValue])))
+                                log("audio: asked server to mute local output (client audio enabled)")
                             } catch {
-                                log("audio: could not send initial pause request: \(error)")
+                                log("audio: could not send local mute request: \(error)")
                             }
                         }
                         if wantsInput && !inputStarted {

@@ -38,6 +38,13 @@ final class ClientSession: @unchecked Sendable {
     /// with a local NSEvent monitor (no Input Monitoring permission needed).
     weak var inputView: NSView?
     private var audio: AudioPlayer?
+    /// A route change mutes Pro's whole default output (not just BoltKVM's
+    /// player) until the device has settled. AudioOutputMute saves and restores
+    /// the exact mute/volume state.
+    private var routeSystemMute: AudioOutputMute?
+    private var routeSystemMuteTimer: DispatchWorkItem?
+    private let audioRouteLock = NSLock()
+    private var lastRoutePauseAt: UInt64 = 0
     private var clipboard: ClipboardSync?
     private var decoder: VideoDecoder?
     private(set) var state: State = .idle
@@ -49,6 +56,9 @@ final class ClientSession: @unchecked Sendable {
 
     init(renderer: Renderer) {
         self.renderer = renderer
+        // A previous client run killed during a route change may have left the
+        // marker behind; put Pro's output back before this session starts.
+        AudioOutputMute.restoreStaleState()
     }
 
     var isActive: Bool { task != nil }
@@ -102,7 +112,7 @@ final class ClientSession: @unchecked Sendable {
                 let audio = playAudio ? AudioPlayer(play: true, recordPath: nil) : nil
                 self.audio = audio
                 var gotAuthOk = false
-                var askedInitialPause = false
+                var askedInitialMute = false
                 var sentAuthResponse = false
                 var authRejected = false
                 var endedNormally = false
@@ -170,8 +180,20 @@ final class ClientSession: @unchecked Sendable {
                         // playing the forwarded audio. Tell the server to pause
                         // its current Now Playing app, so music does not keep
                         // running on a speaker nobody is listening to.
-                        audio?.onOutputRouteChange = { [weak c] in
-                            guard let c else { return }
+                        audio?.onOutputRouteChangeBegan = { [weak self] in
+                            self?.beginRouteSystemMute()
+                        }
+                        audio?.onOutputRouteChange = { [weak self, weak c] in
+                            guard let self, let c else { return }
+                            // One route change can produce several CoreAudio
+                            // notifications. Pause the remote media once, not
+                            // on every notification.
+                            let now = DispatchTime.now().uptimeNanoseconds
+                            self.audioRouteLock.lock()
+                            let due = now &- self.lastRoutePauseAt >= 2_000_000_000
+                            if due { self.lastRoutePauseAt = now }
+                            self.audioRouteLock.unlock()
+                            guard due else { return }
                             do {
                                 try c.send(packet(type: .command,
                                                   payload: Data([RemoteAction.pauseMedia.rawValue])))
@@ -200,19 +222,18 @@ final class ClientSession: @unchecked Sendable {
                     }
                     pump.onFormat = { format in
                         // The first format means the server's command pump is
-                        // fully started. Send the one-time pause here, not
-                        // during the auth handshake: a command sent before the
-                        // pump starts can be lost. A controller with audio
-                        // disabled never reaches this block, so reconnecting
-                        // must not touch the remote's Now Playing app.
-                        if audio != nil, !askedInitialPause {
-                            askedInitialPause = true
+                        // fully started. Selecting audio must not pause the
+                        // controlled Mac's player: its sound is what we forward.
+                        // Mute its local output instead, leaving the source
+                        // playing, so it is heard only on this controller.
+                        if audio != nil, !askedInitialMute {
+                            askedInitialMute = true
                             do {
                                 try c.send(packet(type: .command,
-                                                  payload: Data([RemoteAction.pauseMedia.rawValue])))
-                                log("audio: asked server to pause media (client audio enabled)")
+                                                  payload: Data([RemoteAction.muteLocalOutput.rawValue])))
+                                log("audio: asked server to mute local output (client audio enabled)")
                             } catch {
-                                log("audio: could not send initial pause request: \(error)")
+                                log("audio: could not send local mute request: \(error)")
                             }
                         }
                         let size = (format.width, format.height)
@@ -260,6 +281,7 @@ final class ClientSession: @unchecked Sendable {
                 self.windowInput = nil
                 self.clipboard?.stop()
                 self.clipboard = nil
+                self.endRouteSystemMute()
                 self.audio?.finish()
                 self.audio = nil
                 if authRejected { break }
@@ -283,6 +305,7 @@ final class ClientSession: @unchecked Sendable {
             self.windowInput = nil
             self.clipboard?.stop()
             self.clipboard = nil
+            self.endRouteSystemMute()
             self.audio?.finish()
             self.audio = nil
             self.decoder = nil
@@ -330,6 +353,39 @@ final class ClientSession: @unchecked Sendable {
     /// Ask the remote to perform a system-UI action (Mission Control, …).
     /// Keystrokes cannot do this: macOS ignores synthetic events for its own
     /// hotkeys, so the server performs the action itself.
+    /// Mute Pro's whole default output while the audio device is changing.
+    /// This intentionally stops other local apps too, per the 2026-10-28
+    /// requirement; the saved state is restored after the route settles.
+    private func beginRouteSystemMute() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isActive else { return }
+            if self.routeSystemMute == nil {
+                let mute = AudioOutputMute()
+                mute.start()
+                self.routeSystemMute = mute
+                log("audio: muted Pro system output during route change")
+            }
+            self.routeSystemMuteTimer?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                self?.endRouteSystemMute()
+            }
+            self.routeSystemMuteTimer = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+        }
+    }
+
+    private func endRouteSystemMute() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.routeSystemMuteTimer?.cancel()
+            self.routeSystemMuteTimer = nil
+            guard let mute = self.routeSystemMute else { return }
+            mute.stop()
+            self.routeSystemMute = nil
+            log("audio: restored Pro system output after route change")
+        }
+    }
+
     func sendCommand(_ action: RemoteAction) {
         guard let conn, isActive else { return }
         do {
@@ -341,6 +397,7 @@ final class ClientSession: @unchecked Sendable {
     }
 
     func disconnect() {
+        endRouteSystemMute()
         _ = bumpGeneration()
         task?.cancel()
         task = nil

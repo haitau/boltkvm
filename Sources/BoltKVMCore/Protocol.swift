@@ -128,6 +128,13 @@ enum RemoteAction: UInt8 {
     /// The controlled Mac pauses its current Now Playing app so the music does
     /// not keep running on a speaker nobody is listening to (A-2).
     case pauseMedia = 7
+    /// The controller has actually selected this host's audio. Mute the
+    /// controlled Mac's local output while capture continues, so the sound is
+    /// heard only on the controller and the source keeps playing.
+    case muteLocalOutput = 8
+    /// The controller deselected audio or is ending the session. Restore the
+    /// controlled Mac's output to exactly the state saved by muteLocalOutput.
+    case unmuteLocalOutput = 9
 }
 
 struct PacketHeader {
