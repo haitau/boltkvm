@@ -70,7 +70,7 @@
 - **A-1 已实现**：服务端在 `--audio` 采集启动后静音默认输出，断开时恢复；优先使用 CoreAudio 的 `kAudioDevicePropertyMute`，不支持时退回音量 0；默认输出变化时把静音迁移到新设备。实测硬件静音不影响 ScreenCaptureKit 采集（静音期间客户端录音仍有 −29 dBFS 的测试音），客户端断开后 `output muted` 恢复为 false。崩溃恢复用 `~/Library/Application Support/BoltKVM/mute-state.json`，`kill -9` 后重启服务端会先恢复再继续。`--no-local-mute` 可关闭该行为。详见 [夜间报告](../reports/2026-10-27-nightly-open-items.md)。
 - **A-2 已实现**：客户端音频输出设备变化 → 0.5 s 防抖 → `pauseMedia` 命令 → 服务端 MediaRemote 暂停当前 Now Playing 应用；只在主控端播放转发音频时触发，录音-only 不触发。本机用切换默认输出设备（内置扬声器 ↔ BlackHole）实测命令到达服务端、MediaRemote 返回成功；真实播放器（网易云音乐）暂停效果因锁屏无法在夜间验证。
 - **A-3 已实现（核心）**：文本、HTML/RTF、PNG、文件/文件夹双向同步；协议、分块、SHA-256、回环抑制、Concealed 过滤、客户端开关与可配置上限已落地。本机回环实测 48 B 文本、116 B 富文本、17 MB PNG（69 块）、5 MB 文件 + 文件夹（逐文件校验）通过；1 MB 上限会按预期拒绝 17 MB 图片。跨机、GUI 实机、真实 `~/Downloads` 路径与超大文件长跑仍待验证；同机回环因两端共享粘贴板会各落一份，属测试环境现象。
-- **A-4 已修复工具栏回归、待最终视觉确认**：第一版在关闭分隔线的同时把标题栏设为透明、窗口背景设为黑色，浅色外观下工具栏文字/图标变成黑上黑，调度中心/桌面等按钮全部不可见。现改为只设 `titlebarSeparatorStyle = .none`，显式 `titlebarAppearsTransparent = false`，保留原生标题栏材质；窗口模式截图中工具栏按钮已恢复，全屏工具栏隐藏时顶部 4 px 连续 3 轮显隐采样无白色整行。A-4 的画面位移逻辑与 `ChromeLayout` 未改。
+- **A-4 已修复工具栏回归、待最终视觉确认**：第一版在关闭分隔线的同时把标题栏设为透明、窗口背景设为黑色，浅色外观下工具栏文字/图标变成黑上黑，调度中心/桌面等按钮全部不可见。现改为只设 `titlebarSeparatorStyle = .none`，显式 `titlebarAppearsTransparent = false`，保留原生标题栏材质；窗口模式与全屏工具栏显示时截图中按钮均可见，全屏工具栏隐藏时顶部 4 px 连续 3 轮显隐采样无白色整行。A-4 的画面位移逻辑与 `ChromeLayout` 未改。
 
 记录边界：
 
