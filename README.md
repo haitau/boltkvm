@@ -61,7 +61,7 @@ CGEvent 注入              ◄── 输入与音频 ──────── C
 ./scripts/install-app.sh    # 编译 release、签名、安装到 /Applications 并启动
 ```
 
-首次启动选择角色，后续可在顶部菜单「角色」中切换。只组装 `dist/BoltKVM.app`、不安装时用 `./Packaging/build-app.sh`。安装脚本会把上一版保留为 `/Applications/BoltKVM.app.bak`，签名优先使用本机稳定的 `BoltKVM Local` 证书。
+首次启动选择角色，后续可在顶部菜单「角色」中切换。只组装 `dist/BoltKVM.app`、不安装时用 `./Packaging/build-app.sh`。安装脚本只在安装过程中用 `/Applications` 下的临时目录暂存旧版，失败时恢复、成功后删除，不会留下 `.bak`；签名优先使用本机稳定的 `BoltKVM Local` 证书。
 
 单个应用包支持两种运行角色：
 
@@ -133,7 +133,7 @@ tccutil reset Accessibility io.github.boltkvm
 ./scripts/install-app.sh
 ```
 
-这会把最新构建直接安装到本机 `/Applications/BoltKVM.app` 并启动，旧版保留在 `/Applications/BoltKVM.app.bak`。两台 Mac 各自运行一次即可；若被控端已配置 SSH，可执行 `./scripts/deploy-app.sh <被控端地址>` 自动完成打包、上传、停旧进程与启动。
+这会把最新构建直接安装到本机 `/Applications/BoltKVM.app` 并启动；安装失败会从临时暂存恢复旧版，成功不会在 `/Applications` 留下 `.bak`。两台 Mac 各自运行一次即可；若被控端已配置 SSH，可执行 `./scripts/deploy-app.sh <被控端地址>` 自动完成打包、上传、停旧进程与启动。
 
 ### 2. 配置被控端
 

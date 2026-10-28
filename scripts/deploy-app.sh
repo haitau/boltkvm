@@ -26,24 +26,27 @@ scp -q /tmp/BoltKVM.app.tgz "$HOST:/tmp/BoltKVM.app.tgz"
 
 ssh "$HOST" 'bash -s' <<'REMOTE'
 set -euo pipefail
-BACKUP=/Applications/BoltKVM.app.bak
+# Stage the old bundle outside /Applications. It is restored on failure and
+# removed on success, so the app folder never keeps a .bak bundle.
+STAGE=$(mktemp -d /tmp/boltkvm-deploy.XXXXXX)
+OLD="$STAGE/old.app"
+trap 'rm -rf "$STAGE"' EXIT
 OLD_REQ=""
 if [ -e /Applications/BoltKVM.app ]; then
   OLD_REQ=$(codesign -d -r- /Applications/BoltKVM.app 2>&1 | sed -n '/^designated/p' || true)
-  rm -rf "$BACKUP"
-  mv /Applications/BoltKVM.app "$BACKUP"
+  mv /Applications/BoltKVM.app "$OLD"
 fi
 if ! tar -xzf /tmp/BoltKVM.app.tgz -C /Applications; then
-  if [ -e "$BACKUP" ]; then
+  if [ -e "$OLD" ]; then
     rm -rf /Applications/BoltKVM.app
-    mv "$BACKUP" /Applications/BoltKVM.app
+    mv "$OLD" /Applications/BoltKVM.app
   fi
   echo "解包失败，已恢复旧版本。" >&2
   exit 1
 fi
 if ! codesign --verify --deep --strict /Applications/BoltKVM.app; then
   rm -rf /Applications/BoltKVM.app
-  if [ -e "$BACKUP" ]; then mv "$BACKUP" /Applications/BoltKVM.app; fi
+  if [ -e "$OLD" ]; then mv "$OLD" /Applications/BoltKVM.app; fi
   echo "签名校验失败，已恢复旧版本。" >&2
   exit 1
 fi

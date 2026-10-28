@@ -6,9 +6,12 @@
 #   ./scripts/install-app.sh --reset-permissions # also clear old TCC entries
 #   BOLTKVM_NO_LAUNCH=1 ./scripts/install-app.sh
 #
-# The previous bundle is kept as /Applications/BoltKVM.app.bak so a bad build
-# can be rolled back. Quit BoltKVM before running this; the script also asks the
-# app to quit and waits for its capture helper.
+# The previous bundle is staged inside a hidden temporary directory under
+# /Applications only for the duration of the swap. It is restored on failure and
+# deleted on success; this script does not leave a .bak bundle behind.
+#
+# Quit BoltKVM before running this; the script also asks the app to quit and
+# waits for its capture helper.
 #
 # If the signing requirement changes (for example an old ad-hoc build is
 # replaced by a stable-certificate build), the old Screen Recording and
@@ -19,7 +22,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DEST="/Applications/BoltKVM.app"
-BACKUP="/Applications/BoltKVM.app.bak"
 APP="dist/BoltKVM.app"
 DO_BUILD=1
 FORCE_RESET=0
@@ -84,15 +86,19 @@ ditto "$APP" "$STAGE/BoltKVM.app"
 codesign --verify --deep --strict "$STAGE/BoltKVM.app"
 
 if [ -e "$DEST" ]; then
-  rm -rf "$BACKUP"
-  mv "$DEST" "$BACKUP"
+  mv "$DEST" "$STAGE/old.app"
 fi
 if ! mv "$STAGE/BoltKVM.app" "$DEST"; then
-  if [ -e "$BACKUP" ]; then mv "$BACKUP" "$DEST"; fi
+  if [ -e "$STAGE/old.app" ]; then mv "$STAGE/old.app" "$DEST"; fi
   echo "安装失败，已尝试恢复旧版本。" >&2
   exit 1
 fi
-codesign --verify --deep --strict "$DEST"
+if ! codesign --verify --deep --strict "$DEST"; then
+  rm -rf "$DEST"
+  if [ -e "$STAGE/old.app" ]; then mv "$STAGE/old.app" "$DEST"; fi
+  echo "签名校验失败，已恢复旧版本。" >&2
+  exit 1
+fi
 
 if [ "$NEED_RESET" = 1 ]; then
   # Same effect as the user running these two commands manually. Do it after the
@@ -113,7 +119,6 @@ CODESIGN_INFO=$(codesign -dv --verbose=4 "$DEST" 2>&1 || true)
 AUTH=$(printf '%s\n' "$CODESIGN_INFO" | awk -F= '/Authority=/{print $2; exit}')
 echo "已安装 $DEST"
 echo "版本 $VERSION ($BUILD)，签名 ${AUTH:-ad-hoc}"
-if [ -e "$BACKUP" ]; then echo "旧版本保留在 $BACKUP"; fi
 
 if [ "${BOLTKVM_NO_LAUNCH:-0}" != "1" ]; then
   open -a "$DEST"
