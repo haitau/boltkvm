@@ -619,6 +619,18 @@ final class Server: NSObject, SCStreamOutput {
             // not unmute a Mac whose music is still playing.
             log("audio: client ended with audio active; pausing media before unmute")
             await MainActor.run { performRemoteAction(.pauseMedia) }
+            // MediaRemote accepting the command is not the same as the player
+            // being stopped. Keep the device muted until Now Playing reports
+            // paused; unmuting on the same tick leaks a short burst.
+            if audioState.mute != nil || localMute != nil {
+                let confirmed = await waitForMediaPause()
+                if confirmed {
+                    log("audio: Now Playing confirmed paused; restoring output")
+                } else {
+                    log("audio: pause not confirmed; holding output mute a little longer")
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+            }
         }
         localMute?.stop()
         localMute = nil

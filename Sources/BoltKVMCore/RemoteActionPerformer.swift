@@ -14,6 +14,7 @@ import Foundation
 /// absence is tolerated (logged, then the key-injection fallback runs).
 private typealias CoreDockSendNotificationFn = @convention(c) (CFString, Int32) -> Int32
 private typealias MediaRemoteSendCommandFn = @convention(c) (Int32, CFDictionary?) -> Bool
+private typealias MediaRemoteGetIsPlayingFn = @convention(c) (DispatchQueue, @escaping @convention(block) (Bool) -> Void) -> Void
 
 private let dockNotify: CoreDockSendNotificationFn? = {
     let path = "/System/Library/Frameworks/ApplicationServices.framework/Frameworks/HIServices.framework/HIServices"
@@ -37,6 +38,65 @@ private let mediaRemotePause: MediaRemoteSendCommandFn? = {
     }
     return unsafeBitCast(symbol, to: MediaRemoteSendCommandFn.self)
 }()
+
+/// A pause command is only an acknowledgement that MediaRemote accepted the
+/// command; the player stops asynchronously. Querying this lets the server keep
+/// the output muted until the app actually reports paused, instead of unmuting
+/// on the same runloop tick and leaking a short burst.
+private let mediaRemoteGetIsPlaying: MediaRemoteGetIsPlayingFn? = {
+    let path = "/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote"
+    guard let handle = dlopen(path, RTLD_NOW),
+          let symbol = dlsym(handle, "MRMediaRemoteGetNowPlayingApplicationIsPlaying") else {
+        return nil
+    }
+    return unsafeBitCast(symbol, to: MediaRemoteGetIsPlayingFn.self)
+}()
+
+private final class ResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func take() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if done { return false }
+        done = true
+        return true
+    }
+}
+
+private func queryMediaPlaying() async -> Bool? {
+    guard let query = mediaRemoteGetIsPlaying else { return nil }
+    return await withCheckedContinuation { continuation in
+        let once = ResumeOnce()
+        let queue = DispatchQueue.global(qos: .userInitiated)
+        query(queue) { playing in
+            if once.take() { continuation.resume(returning: playing) }
+        }
+        queue.asyncAfter(deadline: .now() + 0.4) {
+            if once.take() { continuation.resume(returning: nil) }
+        }
+    }
+}
+
+/// Wait until the Now Playing app reports stopped. A second poll after a short
+/// settle avoids treating the first "no" as final while the player is still
+/// draining its buffer. Returns false if MediaRemote cannot answer or the
+/// timeout expires; the caller then keeps a conservative mute grace period.
+func waitForMediaPause(timeout: TimeInterval = 1.5) async -> Bool {
+    guard mediaRemoteGetIsPlaying != nil else {
+        try? await Task.sleep(nanoseconds: 600_000_000)
+        return false
+    }
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if let playing = await queryMediaPlaying(), !playing {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            if let again = await queryMediaPlaying(), !again { return true }
+        }
+        try? await Task.sleep(nanoseconds: 80_000_000)
+    }
+    log("media: Now Playing still reports playing after pause timeout")
+    return false
+}
 
 @discardableResult
 private func sendDockNotification(_ name: String, argument: Int32 = 0) -> Bool {
