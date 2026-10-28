@@ -34,9 +34,24 @@ final class ClientChromeLayoutTests: XCTestCase {
                        "the drawable must not be resized: that is what distorted the picture")
     }
 
+    func testFullscreenVisibleToolbarBandDoesNotUseTransparentChildHeight() {
+        // The child window is 68 pt, but its bottom 16 pt is transparent and
+        // the visible toolbar host is 52 pt. Shifting by 68 leaves a 16 pt
+        // strip of desktop between toolbar and picture.
+        let visible = ClientController.ChromeLayout.videoFrame(
+            content: content, chrome: 52, fullScreen: true, toolbarVisible: true
+        )
+        let childHeight = ClientController.ChromeLayout.videoFrame(
+            content: content, chrome: 68, fullScreen: true, toolbarVisible: true
+        )
+        XCTAssertEqual(visible, CGRect(x: 0, y: -52, width: 3008, height: 1692))
+        XCTAssertEqual(childHeight.origin.y, -68,
+                       "this is the old, gap-producing shift; keep the distinction explicit")
+    }
+
     func testFullscreenMenuBarAndToolbarBandMovePictureByFullChrome() {
-        // 30 pt menu bar + 68 pt toolbar; a fixed 52/68 shift left the remote
-        // picture under the bottom half of the toolbar.
+        // Menu bar plus toolbar can occupy 98 visible points; the caller must
+        // pass the measured contentLayoutRect chrome, not the child height.
         let frame = ClientController.ChromeLayout.videoFrame(
             content: content, chrome: 98, fullScreen: true, toolbarVisible: true
         )

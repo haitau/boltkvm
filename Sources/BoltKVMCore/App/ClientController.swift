@@ -263,12 +263,14 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         // new contentLayoutRect; use the last known band height for that frame
         // instead of showing one unshifted frame.
         var chrome = measured > 0 ? measured : (toolbarVisible ? chromeHeight : 0)
-        // In fullscreen the toolbar window's bottom is 68 pt from the top when
-        // the menu bar is hidden, and 98 pt when it is showing; the windowed
-        // band is 52 pt. Shift by the real chrome so no remote pixel is hidden
-        // under the menu bar or toolbar.
-        if fullScreen, toolbarVisible {
-            chrome = max(chrome, fullScreenChromeHeight)
+        // The contentLayoutRect is the authoritative end of the *visible*
+        // toolbar band (52 pt on this macOS; larger if the system ever includes
+        // the menu bar in the layout). Do not use the fullscreen toolbar child
+        // window's full height (68 pt): its bottom 16 pt is transparent, so
+        // shifting by 68 leaves a 16 pt strip of desktop/black between the
+        // toolbar and the picture.
+        if fullScreen, toolbarVisible, chrome <= 0 {
+            chrome = fullScreenChromeHeight
         }
         let frame = ChromeLayout.videoFrame(
             content: bounds.size,
@@ -290,15 +292,21 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     }
 
     private var fullScreenChromeHeight: CGFloat {
-        guard let window, let child = fullScreenToolbarWindow,
-              child.frame.height > 0 else { return 98 }
+        guard let window else { return 98 }
+        if let content = window.contentView {
+            let measured = content.bounds.height - window.contentLayoutRect.height
+            if measured >= 40, measured <= 140 { return measured }
+        }
+        if let toolbar = window.toolbar,
+           let host = toolbar.value(forKey: "_toolbarView") as? NSView,
+           host.frame.height >= 40, host.frame.height <= 140 {
+            return host.frame.height
+        }
+        guard let child = fullScreenToolbarWindow, child.frame.height > 0 else { return 52 }
         let screenTop = window.screen?.frame.maxY ?? window.frame.maxY
         let fromTop = screenTop - child.frame.minY
-        // During the reveal animation the child moves through intermediate
-        // positions; clamp to the plausible chrome band and fall back to the
-        // child height so one bad animation frame cannot leave a gap.
         if fromTop >= 40, fromTop <= 140 { return fromTop }
-        return max(68, child.frame.height)
+        return 52
     }
 
     /// Neither the `windowWillEnterFullScreen` delegate callbacks nor the
