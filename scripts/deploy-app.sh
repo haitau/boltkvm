@@ -6,8 +6,10 @@
 #   scripts/deploy-app.sh <被控端地址>
 #
 # Precondition: BoltKVM.app must have Screen Recording permission on the target.
-# TCC cannot be scripted; grant it once in System Settings → Privacy & Security →
-# Screen Recording, then run this. Re-running is safe (idempotent).
+# TCC cannot be granted by a script, but this script clears stale TCC entries when
+# the signing requirement changes; grant Screen Recording and Accessibility once
+# in System Settings, then run this. Re-running with the same signature keeps the
+# grants.
 set -euo pipefail
 HOST="${1:?usage: deploy-app.sh <host>}"
 cd "$(dirname "$0")/.."
@@ -25,7 +27,9 @@ scp -q /tmp/BoltKVM.app.tgz "$HOST:/tmp/BoltKVM.app.tgz"
 ssh "$HOST" 'bash -s' <<'REMOTE'
 set -euo pipefail
 BACKUP=/Applications/BoltKVM.app.bak
+OLD_REQ=""
 if [ -e /Applications/BoltKVM.app ]; then
+  OLD_REQ=$(codesign -d -r- /Applications/BoltKVM.app 2>&1 | sed -n '/^designated/p' || true)
   rm -rf "$BACKUP"
   mv /Applications/BoltKVM.app "$BACKUP"
 fi
@@ -49,8 +53,19 @@ defaults write io.github.boltkvm role -string server
 # shell that is running them (heredoc text is part of its own argv).
 pkill -f 'soak-star[t]' 2>/dev/null || true
 pkill -f 'boltkvm serve[r]' 2>/dev/null || true
-pkill -f 'BoltKVM.app/Contents/MacOS/BoltKVM' 2>/dev/null || true
+for pid in $(pgrep -x BoltKVM 2>/dev/null || true); do kill -TERM "$pid" 2>/dev/null || true; done
+for pid in $(pgrep -x boltkvm-server 2>/dev/null || true); do kill -TERM "$pid" 2>/dev/null || true; done
 sleep 2
+
+NEW_REQ=$(codesign -d -r- /Applications/BoltKVM.app 2>&1 | sed -n '/^designated/p' || true)
+if [ -z "$OLD_REQ" ] || [ "$OLD_REQ" != "$NEW_REQ" ]; then
+  for service in ScreenCapture Accessibility; do
+    /usr/bin/tccutil reset "$service" io.github.boltkvm >/dev/null 2>&1 || true
+  done
+  echo "签名/权限身份已变化，已清除旧 TCC 条目；请在被控端上重新授予屏幕录制与辅助功能。"
+else
+  echo "签名身份未变，保留现有 TCC 授权。"
+fi
 
 open -a /Applications/BoltKVM.app
 sleep 4

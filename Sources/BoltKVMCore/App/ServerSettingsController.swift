@@ -13,6 +13,8 @@ final class ServerSettingsController: NSWindowController {
     private let statusDot = NSView()
     private let permissionButton = NSButton(title: L.t("server.panel.openSettings"),
                                             target: nil, action: nil)
+    private let accessibilityButton = NSButton(title: L.t("server.panel.openAccessibility"),
+                                               target: nil, action: nil)
     private let resolutionPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let qualityPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let portField = NSTextField(string: "")
@@ -65,9 +67,18 @@ final class ServerSettingsController: NSWindowController {
         permissionButton.target = self
         permissionButton.action = #selector(openPrivacySettings)
         permissionButton.bezelStyle = .rounded
-        permissionButton.frame = NSRect(x: 24, y: 284, width: 200, height: 24)
-        permissionButton.isHidden = true
+        permissionButton.frame = NSRect(x: 24, y: 284, width: 210, height: 24)
+        permissionButton.isHidden = false
         content.addSubview(permissionButton)
+
+        // Screen Recording and Accessibility are independent TCC services.
+        // Both controls stay visible; a missing one must not hide the other.
+        accessibilityButton.target = self
+        accessibilityButton.action = #selector(openAccessibilitySettings)
+        accessibilityButton.bezelStyle = .rounded
+        accessibilityButton.frame = NSRect(x: 242, y: 284, width: 210, height: 24)
+        accessibilityButton.isHidden = false
+        content.addSubview(accessibilityButton)
 
         let resolutionLabel = NSTextField(labelWithString: L.t("server.menu.resolution"))
         resolutionLabel.alignment = .right
@@ -208,8 +219,15 @@ final class ServerSettingsController: NSWindowController {
     /// Called by the controller on every state change.
     func updateStatus(_ text: String, connected: Bool, needsPermission: Bool) {
         statusLabel.stringValue = text
-        permissionButton.isHidden = !needsPermission
-        let color: NSColor = needsPermission ? .systemOrange : (connected ? .systemGreen : .secondaryLabelColor)
+        // Keep both permission buttons available even after one is granted;
+        // hiding the granted one is what previously left users with a single
+        // button and no obvious way back to the other settings page.
+        permissionButton.isHidden = false
+        accessibilityButton.isHidden = false
+        let needsAccessibility = server?.needsAccessibility == true
+        let color: NSColor = (needsPermission || needsAccessibility)
+            ? .systemOrange
+            : (connected ? .systemGreen : .secondaryLabelColor)
         statusDot.layer?.backgroundColor = color.cgColor
         toggleButton.title = server?.wantedState == true
             ? L.t("server.menu.stop")
@@ -308,7 +326,15 @@ final class ServerSettingsController: NSWindowController {
     }
 
     @objc private func openPrivacySettings() {
+        _ = CGRequestScreenCaptureAccess()
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func openAccessibilitySettings() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
         NSWorkspace.shared.open(url)
     }
 

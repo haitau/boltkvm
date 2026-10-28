@@ -62,8 +62,8 @@
 "server.status.needsPermission" = "Screen Recording required";
 "server.status.port" = "Port %d";
 "server.status.stats" = "%@ fps · port %d";
-"server.permission.hint" = "Click “Grant Permission…”";
-"server.menu.permission" = "Grant Permission… (Screen Recording)";
+"server.permission.hint" = "Click “Screen Recording Permission…” in the menu bar";
+"server.menu.permission" = "Screen Recording Permission…";
 "server.menu.start" = "Start Server";
 "server.menu.stop" = "Stop Server";
 "server.menu.login" = "Launch at Login";
@@ -75,8 +75,8 @@
 "server.login.failed.detail" = "%@\n\nSign the app with the self-signed identity and try again (./scripts/make-signing-identity.sh).";
 
 "server.status.needsAccessibility" = "Accessibility required";
-"server.accessibility.hint" = "Input injection needs Accessibility";
-"server.menu.accessibility" = "Grant Permission… (Accessibility)";
+"server.accessibility.hint" = "Click “Accessibility Permission…” in the menu bar; without it input injection does not work";
+"server.menu.accessibility" = "Accessibility Permission…";
 "server.menu.resolution" = "Display Resolution";
 "server.menu.resolution.custom" = "Custom…";
 "server.menu.quality" = "Picture Quality";
@@ -86,6 +86,10 @@
 "server.resolution.custom.detail" = "Enter WIDTHxHEIGHT, for example 2560x1440. The virtual display uses it as logical size; the stream follows.";
 "server.resolution.custom.invalid" = "Format must be WIDTHxHEIGHT (width 640–7680, height 480–4320).";
 "common.ok" = "OK";
+"server.menu.resetPermissions" = "Reset Permissions and Re-authorize…";
+"server.reset.title" = "Reset Screen Recording and Accessibility permissions?";
+"server.reset.message" = "This removes the app’s old entries for both permissions and opens System Settings again. Re-enable BoltKVM, then quit and reopen the app. Use this only if repeated authorization does not take effect.";
+"server.reset.confirm" = "Reset and Re-authorize";
 "common.cancel" = "Cancel";
 "menu.remote" = "Remote";
 "menu.remote.missionControl" = "Mission Control";
@@ -113,7 +117,7 @@
 "client.hosts.height" = "Height";
 "server.panel.title" = "Remote Mac";
 "server.panel.heading" = "This Mac can be controlled remotely";
-"server.panel.openSettings" = "Open System Settings (Screen Recording)…";
+"server.panel.openSettings" = "Screen Recording…";
 "server.panel.custom" = "Custom…";
 "server.panel.port" = "Port";
 "server.panel.hint" = "Changing resolution or quality rebuilds the virtual display and restarts the service, so it takes effect immediately. After closing this panel, reopen it from the BoltKVM menu bar icon, where you can also stop the service or switch roles.";
@@ -137,3 +141,4 @@
 "server.panel.rotate.done" = "New password: %@. The server is restarting with it.";
 "server.panel.rotate.failed" = "Rotation failed: %@";
 "client.state.badKey" = "The host refused the connection — most likely a wrong password (%@)";
+"server.panel.openAccessibility" = "Accessibility…";

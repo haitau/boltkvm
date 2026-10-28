@@ -14,7 +14,7 @@ import ServiceManagement
 ///
 /// TCC follows the responsible process, so the Screen Recording grant on
 /// BoltKVM.app covers the child.
-final class ServerAppController: NSObject {
+final class ServerAppController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var startStopItem: NSMenuItem?
     private var stateItem: NSMenuItem?
@@ -40,6 +40,7 @@ final class ServerAppController: NSObject {
     private(set) var clientConnected = false
     var wantedState: Bool { wanted }
     var needsScreenRecording: Bool { !CGPreflightScreenCaptureAccess() }
+    var needsAccessibility: Bool { !AXIsProcessTrusted() }
 
     private var running: Bool { process?.isRunning == true }
 
@@ -52,9 +53,11 @@ final class ServerAppController: NSObject {
         // Injection needs Accessibility; capture needs Screen Recording. They are
         // separate TCC items and the app owns both now that it is the process the
         // user launched (the helper inherits them as responsible-process child).
+        // Both menu entries stay visible even after one grant: the user must be
+        // able to see and repair either permission independently (and a
+        // checkmark shows the current state).
         let canInject = AXIsProcessTrusted()
-        permissionItem?.isHidden = canCapture
-        accessibilityItem?.isHidden = canInject
+        updatePermissionItems()
         guard canCapture else {
             // A server has no window, so the permission lives in the menu bar
             // instead of a modal dialog that would block launch.
@@ -86,7 +89,7 @@ final class ServerAppController: NSObject {
             return
         }
         wanted = true
-        permissionItem?.isHidden = true
+        updatePermissionItems()
         reapOrphanHelpers()
         launch()
     }
@@ -134,15 +137,19 @@ final class ServerAppController: NSObject {
 
         let permission = NSMenuItem(title: L.t("server.menu.permission"), action: #selector(openPermissions), keyEquivalent: "")
         permission.target = self
-        permission.isHidden = true
+        permission.isHidden = false
         menu.addItem(permission)
         permissionItem = permission
 
         let access = NSMenuItem(title: L.t("server.menu.accessibility"), action: #selector(openAccessibility), keyEquivalent: "")
         access.target = self
-        access.isHidden = true
+        access.isHidden = false
         menu.addItem(access)
         accessibilityItem = access
+
+        let resetItem = NSMenuItem(title: L.t("server.menu.resetPermissions"), action: #selector(resetPermissions), keyEquivalent: "")
+        resetItem.target = self
+        menu.addItem(resetItem)
 
         let settings = NSMenuItem(title: L.t("server.menu.settings"), action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
@@ -177,9 +184,26 @@ final class ServerAppController: NSObject {
         let quit = NSMenuItem(title: L.t("server.menu.quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
 
+        menu.delegate = self
         item.menu = menu
         statusItem = item
         updateMenu()
+    }
+
+    /// TCC remembers the code requirement that was granted. If the app was
+    /// re-signed with another identity (or an old ad-hoc entry survived), the
+    /// switches in System Settings can look ON while preflight still returns
+    /// false. Keep both permissions visible with a state checkmark, and offer a
+    /// reset that clears only this bundle's two entries before re-requesting.
+    private func updatePermissionItems() {
+        permissionItem?.isHidden = false
+        accessibilityItem?.isHidden = false
+        permissionItem?.state = CGPreflightScreenCaptureAccess() ? .on : .off
+        accessibilityItem?.state = AXIsProcessTrusted() ? .on : .off
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        updatePermissionItems()
     }
 
     private func updateMenu() {
@@ -345,6 +369,9 @@ final class ServerAppController: NSObject {
         _ = CGRequestScreenCaptureAccess()
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         NSWorkspace.shared.open(url)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.updatePermissionItems()
+        }
     }
 
     @objc private func openAccessibility() {
@@ -352,6 +379,43 @@ final class ServerAppController: NSObject {
         _ = AXIsProcessTrustedWithOptions(options)
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         NSWorkspace.shared.open(url)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.updatePermissionItems()
+        }
+    }
+
+    /// Clear only this app's Screen Recording and Accessibility entries. This is
+    /// the same operation as:
+    ///   tccutil reset ScreenCapture io.github.boltkvm
+    ///   tccutil reset Accessibility io.github.boltkvm
+    /// It is intentionally behind a confirmation: it throws away valid grants.
+    @objc private func resetPermissions() {
+        let alert = NSAlert()
+        alert.messageText = L.t("server.reset.title")
+        alert.informativeText = L.t("server.reset.message")
+        alert.addButton(withTitle: L.t("server.reset.confirm"))
+        alert.addButton(withTitle: L.t("common.cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let bundleID = Bundle.main.bundleIdentifier ?? "io.github.boltkvm"
+        for service in ["ScreenCapture", "Accessibility"] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            process.arguments = ["reset", service, bundleID]
+            do {
+                try process.run()
+                process.waitUntilExit()
+            } catch {
+                log("permission reset: tccutil \(service) failed: \(error.localizedDescription)")
+            }
+        }
+        updatePermissionItems()
+        _ = CGRequestScreenCaptureAccess()
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+        NSWorkspace.shared.open(url)
+        log("permission reset: cleared ScreenCapture and Accessibility; grant both again, then restart")
     }
 
     @objc private func toggleLoginItem() {

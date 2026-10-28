@@ -62,8 +62,8 @@
 "server.status.needsPermission" = "需要屏幕录制权限";
 "server.status.port" = "端口 %d";
 "server.status.stats" = "%@ fps · 端口 %d";
-"server.permission.hint" = "点「授权…」";
-"server.menu.permission" = "授权…（屏幕录制）";
+"server.permission.hint" = "点菜单栏「屏幕录制权限…」";
+"server.menu.permission" = "屏幕录制权限…";
 "server.menu.start" = "启动服务";
 "server.menu.stop" = "停止服务";
 "server.menu.login" = "开机自动启动";
@@ -76,8 +76,8 @@
 
 /* 辅助功能 */
 "server.status.needsAccessibility" = "需要辅助功能权限";
-"server.accessibility.hint" = "不授权则键鼠注入无效";
-"server.menu.accessibility" = "授权…（辅助功能）";
+"server.accessibility.hint" = "点菜单栏「辅助功能权限…」；不授权则键鼠注入无效";
+"server.menu.accessibility" = "辅助功能权限…";
 "server.menu.resolution" = "分辨率";
 "server.menu.resolution.custom" = "自定义…";
 "server.menu.quality" = "画面质量";
@@ -87,6 +87,10 @@
 "server.resolution.custom.detail" = "输入 宽x高，例如 2560x1440。虚拟屏用它作为逻辑尺寸，码流跟着变。";
 "server.resolution.custom.invalid" = "格式不对，应为 宽x高（宽 640–7680，高 480–4320）。";
 "common.ok" = "好";
+"server.menu.resetPermissions" = "重置权限并重新授权…";
+"server.reset.title" = "重置屏幕录制与辅助功能权限？";
+"server.reset.message" = "会清除本应用在这两项权限里的旧记录，然后重新打开系统设置。你需要重新勾选 BoltKVM，并退出重开应用。仅在反复授权仍不生效时使用。";
+"server.reset.confirm" = "重置并重新授权";
 "common.cancel" = "取消";
 "menu.remote" = "远程";
 "menu.remote.missionControl" = "调度中心";
@@ -114,7 +118,7 @@
 "client.hosts.height" = "高度";
 "server.panel.title" = "被控端";
 "server.panel.heading" = "这台 Mac 允许被远程控制";
-"server.panel.openSettings" = "打开系统设置（屏幕录制）…";
+"server.panel.openSettings" = "屏幕录制权限…";
 "server.panel.custom" = "自定义…";
 "server.panel.port" = "端口";
 "server.panel.hint" = "分辨率和画质会重建虚拟屏并重启服务；改完立刻生效。关闭此窗口后，可以从菜单栏的 BoltKVM 图标重新打开，也能在那里停止服务或切换角色。";
@@ -138,3 +142,4 @@
 "server.panel.rotate.done" = "已重新生成，新密码是 %@。服务正在用新密码重启。";
 "server.panel.rotate.failed" = "重新生成失败：%@";
 "client.state.badKey" = "被控端拒绝了连接，多半是连接密码不对（%@）";
+"server.panel.openAccessibility" = "辅助功能权限…";

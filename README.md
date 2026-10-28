@@ -105,12 +105,23 @@ CGEvent 注入              ◄── 输入与音频 ──────── C
 
 主控端应用使用窗口内 `NSEvent` 本地监听捕获键鼠，无需申请「输入监控」权限（仅 CLI 全屏 `--input` 模式使用 `CGEventTap` 时需要输入监控权限）。
 
+被控端设置面板固定显示两个独立按钮：「屏幕录制权限…」和「辅助功能权限…」，分别打开系统设置中对应的页面；菜单栏也有同样两项，并用勾选状态显示当前是否已授权。任意一项缺授权时状态点变橙，不会因为另一项已授权而隐藏入口。
+
 打包脚本会优先使用本机稳定的 `BoltKVM Local` 证书；没有该证书时才回退 ad-hoc 签名（`-`）。ad-hoc 每次重编译都会改变二进制 `cdhash`，导致 macOS TCC 将其视为新应用并要求重新授权；稳定证书可让屏幕录制/辅助功能授权跨重编译保留。首次使用可生成并信任：
 
 ```bash
 ./scripts/make-signing-identity.sh                                  # 生成并信任 "BoltKVM Local"
 ./scripts/install-app.sh
 ```
+
+`install-app.sh` 会比较新旧应用的设计要求（designated requirement）：签名身份没变时保留现有 TCC 授权；首次安装、ad-hoc 切换为稳定证书、或 `--reset-permissions` 时，只清除本应用 `ScreenCapture` / `Accessibility` 两项旧记录，再启动应用让你重新勾选。等价的命令是：
+
+```bash
+tccutil reset ScreenCapture io.github.boltkvm
+tccutil reset Accessibility io.github.boltkvm
+```
+
+如果系统设置里的开关看起来是开的、但应用仍报未授权，先退出应用，在菜单栏选择「重置权限并重新授权…」，或执行上面的命令，再重新打开应用授权。TCC 授权本身不能由脚本代替用户点击，脚本只能清除不匹配的旧记录。`deploy-app.sh` 在被控端做同样的签名比较和重置。
 
 应用图标由 `swift scripts/make-icon.swift Packaging/AppIcon.icns` 生成。
 
@@ -126,7 +137,7 @@ CGEvent 注入              ◄── 输入与音频 ──────── C
 
 ### 2. 配置被控端
 
-首次打开选择「作为被控端」，按面板提示授予「屏幕录制」与「辅助功能」权限后重开应用。
+首次打开选择「作为被控端」，在面板中分别点「屏幕录制权限…」和「辅助功能权限…」，授予两项权限后重开应用（两项都必须授权：屏幕录制负责采集，辅助功能负责键鼠注入）。
 
 首次启动会在 `~/.boltkvm-key`（权限 0600）自动生成 8 位连接密码，并在面板底部展示：
 
