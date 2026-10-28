@@ -25,9 +25,9 @@
   - 第一次 `isVisible = true` 让 AppKit 创建 `NSToolbarFullScreenWindow`；
   - 下一个 runloop 隐藏，再在 200 ms 后显示；进入全屏 0.7 s 后还会在指针不在顶边时做一次隐藏预热；
   - 之后同一全屏会话直接显示，不再重复预热。
-- 居中：使用 macOS 13+ 的 `centeredItemIdentifiers = [tbMission, tbDesktop]`，把两个标准项作为一个居中集合。旧的 `centeredItemIdentifier` 只能指定一个锚点，窗口从 1200 pt 拉宽到远端尺寸后两个按钮会留在右侧；必须在 `window.toolbar` 赋值后再设置该属性。窗口标题改为 `titleVisibility = .hidden`，避免标题和居中按钮重叠。
+- 布局以 macOS「屏幕共享」窗口为准：标题栏左侧是主机名 + 连接状态副标题，动作按钮在右侧；不使用 `centeredItemIdentifiers`。标准 `NSToolbarItem` 在 `.unified` 样式下显示图标和文字，窗口标题可见时工具栏有足够高度容纳文字。
 - 画面位移使用全屏工具栏窗口的实际下沿：菜单栏显示时是 30 + 68 = 98 pt，菜单栏自动隐藏时是 68 pt（窗口模式仍是 52 pt）。之前只按固定 52/68 下移，远端画面会顶到菜单栏/工具栏下沿，或留下黑带。
-- 窗口模式保留原生标题栏材质、交通灯和分隔线策略；标题隐藏，52 pt 标题栏里只显示图标（toolTip 可读），全屏 68 pt 工具栏显示图标和文字。
+- 窗口模式保留原生标题栏材质、交通灯和分隔线策略；标题显示主机名，副标题显示 `已连接 · fps · Mbps · 缩放/P3`，与屏幕共享一致。
 
 ## 验证
 
@@ -41,7 +41,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --disable-sa
 
 本机 macOS 27.0.1、3008×1692 逻辑分辨率：
 
-1. 窗口模式截取主窗口顶部：原生工具栏显示 `调度中心` / `桌面` 两个标准项（图标 + 文字）与右侧 `已连接 · 60 fps · ... · P3` 状态，没有自定义浮层的黑带/裁字。
+1. 窗口模式截取主窗口顶部：标题在左（主机名 + 状态副标题），`调度中心` / `桌面` 两个标准项在右（图标 + 文字），没有自定义浮层的黑带/裁字。
 2. 进入全屏后第一次移动指针到顶边，日志：
    - `fs: toolbar shown at the top edge (content shifted down by 68/98 pt)`（本次实测菜单栏自动隐藏时为 68 pt）；
    - `CGWindowList` 中 `NSToolbarFullScreenWindow` 为 3008×68、位于 y=30；

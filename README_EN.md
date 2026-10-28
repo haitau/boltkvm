@@ -73,8 +73,8 @@ A single app bundle supports both roles:
 **Controller** (single window)
 
 - Opens to the saved host list—double-click a host to connect, or click **Edit** to configure display name, IP address, port, resolution, password, color mode, and input/audio toggles per host;
-- After connecting, the window maps one stream pixel to one physical pixel (**1:1**) when it fits; otherwise it scales down proportionally to the visible area and the toolbar shows the scale percentage (only when below 100%). Full screen (⌃⌘F) on a matching display is 100%, giving the crispest text;
-- The centered toolbar provides **Mission Control** and **Desktop** shortcuts for the remote Mac, with live `fps · Mbps` metrics on the right;
+- After connecting, the window maps one stream pixel to one physical pixel (**1:1**) when it fits; otherwise it scales down proportionally to the visible area and the window subtitle shows the scale percentage (only when below 100%). Full screen (⌃⌘F) on a matching display is 100%, giving the crispest text;
+- The toolbar provides **Mission Control** and **Desktop** shortcuts on the right, matching Screen Sharing's title-left / controls-right layout; the window title shows the host and the subtitle carries live `fps · Mbps` metrics;
 - In full screen the toolbar is an overlay: it auto-hides and reveals after a short dwell at the top edge, and the remote picture moves down by exactly one toolbar height without being resized or re-scaled (the bottom goes off-screen). This matches macOS Screen Sharing instead of squeezing the drawable;
 - Closing the video window disconnects the session and returns to the host list;
 - Keyboard and mouse events are forwarded only while the pointer is inside the video view. Pressing keys or mouse buttons and then moving the pointer out, unfocusing the window, or disconnecting automatically synthesizes release events; modifier flags are also reconciled before each key event to prevent stuck modifiers.
@@ -88,7 +88,7 @@ The controller's **Edit → Color** offers two choices; the setting is sent to t
 | Standard (default) | 8-bit 4:2:0 BT.709 | ProRes 422 | ~1.9 Gbps | Everyday use |
 | Wide gamut | 10-bit 4:2:2 Display P3 | ProRes 422 (P3 tagged) | ~1.85 Gbps | Smoother gradients; real wide-gamut gain only when capturing a physical P3 display |
 
-To be precise: when the server uses a **virtual display**, that display's framebuffer is sRGB (measured: pure red in that space maps to P3 as `0.918 / 0.200 / 0.139`, i.e. sRGB red), so wide gamut does **not** widen the gamut at this layer—it only removes one intermediate quantization step. The real benefit appears when `--display-id` captures a physical P3 display. The controller shows a `P3` badge at the right end of the toolbar for a wide-gamut stream.
+To be precise: when the server uses a **virtual display**, that display's framebuffer is sRGB (measured: pure red in that space maps to P3 as `0.918 / 0.200 / 0.139`, i.e. sRGB red), so wide gamut does **not** widen the gamut at this layer—it only removes one intermediate quantization step. The real benefit appears when `--display-id` captures a physical P3 display. The controller shows a `P3` badge in the window subtitle for a wide-gamut stream.
 
 ProRes 422 is 10-bit 4:2:2 on the wire, so the client always decodes ProRes to 10-bit—even in Standard mode; the 8-bit figure above refers to the capture pixel format. The HEVC path remains 8-bit 4:2:0.
 
