@@ -2,7 +2,7 @@
 
 ## 范围
 
-本轮是 0.13 (237) 关窗静音与耳机切换实测通过后的只读代码复查，覆盖音频生命周期、传输/认证、输入释放、剪切板文件接收、文档一致性。审计不包含长时间听音、真实网易云暂停或物理拔插的再次验证；没有产生可听声音。
+本轮是 0.13 (237) 关窗静音与耳机切换实测通过后的只读代码复查；审计修复后的 build 243 已部署到 Pro / mini，覆盖音频生命周期、传输/认证、输入释放、剪切板文件接收、文档一致性。审计不包含长时间听音、真实网易云暂停或物理拔插的再次验证；没有产生可听声音。
 
 ## 已修复
 
@@ -31,9 +31,9 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 - 新增 `test44kTo48kConversionProducesFrames`：44.1 kHz → 48 kHz 输出 1114 帧，`AVAudioConverter` 无错误；
 - 新增 `testProductionPumpRejectsFrameBeforeAuthentication`：未认证明文 frame 返回 `EPROTO`；
 - 新增 `AudioRequest.recordOnly` 的 byte 7 编解码断言；
-- 0.13 (239) 本地回环短跑：认证/X25519 完成，`sent config 0x0 ... request=unselected`，服务端正常推流，客户端收到 100 帧；
-- 0.13 (239) record-only 短跑（不播放、不发声）：`sent config 0x0 audio=int24 request=recordOnly`，服务端 `audio source ... target=int24` 并发送音频，客户端录制 960 帧；服务端日志没有 `muteLocalOutput` 或暂停命令；
-- 0.13 (239) 本机 → mini 跨机短跑：认证/X25519 完成，收到 206 帧、0 解码失败；mini 与 Pro 均已安装 239，`/Applications` 无 `.bak` 残留。
+- 0.13 (243) 本地回环短跑：认证/X25519 完成，`sent config 0x0 ... request=unselected`，服务端正常推流，客户端收到 100 帧；
+- 0.13 (243) record-only 短跑（不播放、不发声）：`sent config 0x0 audio=int24 request=recordOnly`，服务端 `audio source ... target=int24` 并发送音频，客户端录制 960 帧；服务端日志没有 `muteLocalOutput` 或暂停命令；
+- 0.13 (243) 本机 → mini 跨机短跑：认证/X25519 完成，收到 206 帧、0 解码失败；mini 与 Pro 均已安装 243，`/Applications` 无 `.bak` 残留；最终跨机短跑收到 119 帧、0 解码失败。
 
 ## 仍保留的边界
 
