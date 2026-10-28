@@ -14,10 +14,10 @@
 
 ## 下载与安装
 
-最新发布包见 [Releases](https://github.com/haitau/boltkvm/releases)，每次发布附带 `BoltKVM-<版本>.zip` 与同名 `.sha256`。当前最新发布为 **v0.12.1**；0.13 尚未打标签、未推送，只是本机验收构建：
+最新发布包见 [Releases](https://github.com/haitau/boltkvm/releases)，每次发布附带 `BoltKVM-<版本>.zip` 与同名 `.sha256`。当前最新发布为 **v0.13**。本版包含 24-bit/48 kHz 音频、认证/按键释放与音频生命周期修复；`v0.13` 标签与发布包已推送：
 
 ```bash
-V=0.12.1   # 0.13 正式发布后改成实际版本
+V=0.13
 unzip BoltKVM-$V.zip -d BoltKVM-$V
 shasum -a 256 -c BoltKVM-$V.zip.sha256
 open BoltKVM-$V/BoltKVM.app
@@ -34,7 +34,7 @@ open BoltKVM-$V/BoltKVM.app
 | 解码链路延迟 | P95 < 33 ms | P95 **25.4–27.0 ms** | 达标（三轮解码 P95 均 < 33 ms） |
 | GUI 采集→上屏延迟 | P95 < 50 ms | P50 **31.0 ms**、P95 **33.2 ms**、60.0 fps | 达标（详见 [B5 延迟报告](docs/reports/2026-10-23-b5-latency.md)） |
 | 稳定性 | 8 小时不断连 | 8h00m01s：0 断连、0 解码失败、0 看门狗重建 | 达标 |
-| 音频 | 默认零字节 | 默认不传；只有主控端明确选择音频才采集发送。开启后 48 kHz 双声道，16-bit 1.54 Mbps（已测：−34 dBFS、12 分钟 RSS 134→135 MB）或 24-bit 2.30 Mbps（0.13 新增，端到端格式已验证） | 达标（16-bit 已测；24-bit 传输与关窗/路由行为已实测，24-bit 听感仍待确认） |
+| 音频 | 默认零字节 | 默认不传；只有主控端明确选择音频才采集发送。开启后 48 kHz 双声道，16-bit 1.54 Mbps（已测：−34 dBFS、12 分钟 RSS 134→135 MB）或 24-bit 2.30 Mbps（0.13 新增，端到端格式已验证） | 达标（16-bit 已测；0.13 (245) 的 24-bit 传输与关窗/路由已实测并由用户复测正常；24-bit 专门听感未单列） |
 | 输入连续性 | 8 小时不丢事件 | 8h 内 466 次转发、tap 失效 0（CLI 客户端；探针投递 458 次，差额未核对）；GUI 客户端 8h 输入长跑由用户确认完成（2026-10-28） | 达标 |
 
 解码链路与 GUI 呈现链路分开统计：解码链路 P95 在 27 ms 以内；GUI 渲染采用到帧即时触发 `MTKView.draw()` 的泵送模式，消除了等待显示刷新周期的排队开销，采集→上屏 P95 为 33.2 ms。详见 [B5 延迟报告](docs/reports/2026-10-23-b5-latency.md) 与 [音频与 GUI 稳定性报告](docs/reports/2026-10-23-audio-and-gui-stability.md)。

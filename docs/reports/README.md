@@ -38,5 +38,5 @@
 | 2026-10-28 | [audio-local-mute](2026-10-28-audio-local-mute.md) | mini 本地被莫名静音 | 历史记录；最终语义见 audio-route-mute：选中静音本地输出、不暂停源，关闭窗口/换设备才暂停 |
 | 2026-10-28 | [audio-route-mute](2026-10-28-audio-route-mute.md) | 音频选中静音、换设备停两端 | 代码/无音频单测通过，实机听感待验证 |
 | 2026-10-28 | [code-audit-fixes](2026-10-28-code-audit-fixes.md) | 全量代码审计：认证前分配、明文降级、按键释放、44.1 kHz 转换、录制语义 | 10 项已修复；105 项测试通过（1 skip）；authOk flags/共享 marker/unmute 边界保留 |
-| 2026-10-28 | [音频转换器复用回归](2026-10-28-audio-converter-reuse.md) | 0.13 (243) 每会话只剩首个音频包，Pro 无声；改为 `.noDataNow` 后 record-only 恢复 2.3 Mbps | 105 项测试通过（1 skip）；245 双端部署；无可听复测 |
-| 2026-10-28 | [v0.13-release](2026-10-28-v0.13-release.md) | v0.13 候选：24-bit/48 kHz 协商、音频状态机、0.13 本地验收版 | 当次 102 项测试通过（1 skip）；24-bit record-only 端到端通过；tag 已撤回，听感/授权/CI 待完成 |
+| 2026-10-28 | [音频转换器复用回归](2026-10-28-audio-converter-reuse.md) | 0.13 (243) 每会话只剩首个音频包，Pro 无声；改为 `.noDataNow` 后 record-only 恢复 2.3 Mbps | 105 项测试通过（1 skip）；245 双端部署；用户复测音频无异常，随 v0.13 发布 |
+| 2026-10-28 | [v0.13-release](2026-10-28-v0.13-release.md) | v0.13 发布：24-bit/48 kHz 协商、音频状态机、认证/生命周期修复 | 已发布；105 项测试通过（1 skip）；0.13 (245) 用户复测音频无异常；tag 已推送 |
