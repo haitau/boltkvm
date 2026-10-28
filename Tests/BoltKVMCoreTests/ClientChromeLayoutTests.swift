@@ -49,13 +49,13 @@ final class ClientChromeLayoutTests: XCTestCase {
                        "this is the old, gap-producing shift; keep the distinction explicit")
     }
 
-    func testFullscreenMenuBarAndToolbarBandMovePictureByFullChrome() {
-        // Menu bar plus toolbar can occupy 98 visible points; the caller must
-        // pass the measured contentLayoutRect chrome, not the child height.
+    func testFullscreenMenuBarAndToolbarBandMovePictureByBoth() {
+        // When the app menu bar pops out, the toolbar child moves down 30 pt;
+        // the picture must move by 30 + 52, not by 52 or by the child's 68.
         let frame = ClientController.ChromeLayout.videoFrame(
-            content: content, chrome: 98, fullScreen: true, toolbarVisible: true
+            content: content, chrome: 82, fullScreen: true, toolbarVisible: true
         )
-        XCTAssertEqual(frame, CGRect(x: 0, y: -98, width: 3008, height: 1692))
+        XCTAssertEqual(frame, CGRect(x: 0, y: -82, width: 3008, height: 1692))
     }
 
     func testMissingChromeMeasuredBeforeLayoutDoesNotMovePicture() {
