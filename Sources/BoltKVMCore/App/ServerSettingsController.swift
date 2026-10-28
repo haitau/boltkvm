@@ -10,6 +10,7 @@ final class ServerSettingsController: NSWindowController {
     private weak var server: ServerAppController?
 
     private let statusLabel = NSTextField(labelWithString: "")
+    private let versionLabel = NSTextField(labelWithString: "BoltKVM \(AppVersion.display)")
     private let statusDot = NSView()
     private let permissionButton = NSButton(title: L.t("server.panel.openSettings"),
                                             target: nil, action: nil)
@@ -36,7 +37,7 @@ final class ServerSettingsController: NSWindowController {
                               styleMask: [.titled, .closable],
                               backing: .buffered,
                               defer: false)
-        window.title = L.t("server.panel.title")
+        window.title = "\(L.t("server.panel.title"))  ·  \(AppVersion.display)"
         window.isReleasedWhenClosed = false
         super.init(window: window)
         build()
@@ -54,6 +55,12 @@ final class ServerSettingsController: NSWindowController {
         title.font = .systemFont(ofSize: 15, weight: .semibold)
         title.frame = NSRect(x: 24, y: 352, width: 300, height: 22)
         content.addSubview(title)
+
+        versionLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        versionLabel.textColor = .secondaryLabelColor
+        versionLabel.alignment = .right
+        versionLabel.frame = NSRect(x: 330, y: 354, width: 126, height: 16)
+        content.addSubview(versionLabel)
 
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 5

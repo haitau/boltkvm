@@ -13,13 +13,14 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
     private let table = NSTableView()
     private let scroll = NSScrollView()
     private let emptyLabel = NSTextField(labelWithString: L.t("client.hosts.empty"))
+    private let versionLabel = NSTextField(labelWithString: "BoltKVM \(AppVersion.display)")
 
     init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 380),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered,
                               defer: false)
-        window.title = L.t("client.hosts.title")
+        window.title = "\(L.t("client.hosts.title"))  ·  \(AppVersion.display)"
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
@@ -61,7 +62,11 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         connect.bezelStyle = .rounded
         connect.keyEquivalent = "\r"
 
-        let buttons = NSStackView(views: [add, edit, remove, NSView(), connect])
+        versionLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        versionLabel.textColor = .secondaryLabelColor
+        versionLabel.setContentHuggingPriority(.required, for: .horizontal)
+        versionLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let buttons = NSStackView(views: [add, edit, remove, NSView(), versionLabel, connect])
         buttons.orientation = .horizontal
         buttons.spacing = 8
         buttons.translatesAutoresizingMaskIntoConstraints = false

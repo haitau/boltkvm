@@ -241,6 +241,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: L.t("menu.about"),
                         action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
                         keyEquivalent: "")
+        let versionItem = NSMenuItem(title: "BoltKVM \(AppVersion.display)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        appMenu.addItem(versionItem)
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: L.t("menu.role.server"), action: #selector(useServerRole), keyEquivalent: "")
         appMenu.addItem(withTitle: L.t("menu.role.client"), action: #selector(useClientRole), keyEquivalent: "")

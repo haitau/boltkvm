@@ -69,7 +69,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = L.t("client.window.title")
+        window.title = "\(L.t("client.window.title"))  ·  \(AppVersion.display)"
         window.isReleasedWhenClosed = false
         // Fullscreen puts the content under the titlebar. AppKit still draws a
         // 1 pt separator at the very top while the toolbar is hidden, and its

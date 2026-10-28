@@ -13,7 +13,7 @@
 | P1-应用化 | 单应用双角色 + 内建虚拟显示 | **已完成**：阶段 1–9 全部落地，实测 GUI 12 分钟稳定运行与音频转发 | [应用化方案](2026-10-22-app-and-vdscreen-integration.md)、[音频与 GUI 稳定性报告](../reports/2026-10-23-audio-and-gui-stability.md) |
 | P1-连接管理 | 被控端列表（R1）与按主机配置分辨率（R2） | **已完成**：启动展示主机列表，连接时通过 `config` 包动态调整服务端虚拟屏尺寸 | [连接管理设计](2026-10-22-connection-manager-design.md) |
 | P1-密码 | 8 位连接密码、256 位静态密钥与前向保密 | **已完成**：首次启动自动生成 8 位口令（PBKDF2 拉伸），支持切换 64 个十六进制字符（256 位）的静态密钥，每会话 X25519 密钥交换 | [ADR-0004](../adr/0004-psk-over-pairing-code.md) |
-| P1-发布 | GitHub Actions 自动构建与发布 | **已就绪**：`ci.yml`（构建 + 全部 XCTest 单元测试（当前 99 项，1 项跳过；无音频输出设备的 runner 会跳过音频回归）+ selftest + cryptotest + 打包）与 `release.yml`（推送 `v*` 标签自动发布） | [发布流程](../releasing.md) |
+| P1-发布 | GitHub Actions 自动构建与发布 | **已就绪**：`ci.yml`（构建 + 全部 XCTest 单元测试（当前 102 项，1 项跳过；无音频输出设备的 runner 会跳过音频回归）+ selftest + cryptotest + 打包）与 `release.yml`（推送 `v*` 标签自动发布） | [发布流程](../releasing.md) |
 | 版本号 | 本地与发布构建版本盖章 | **已完成**：`build-app.sh` 默认用 `git describe`/`git rev-list` 写入 `CFBundleShortVersionString`/`CFBundleVersion`，CI 用 `BOLTKVM_VERSION`/`BOLTKVM_BUILD` 覆盖；v0.12 起生效 | [发布流程](../releasing.md) |
 | B5 | 解码与 GUI 呈现延迟 SLO 核定 | **已完成**：解码链路 P95 25.4–27.0 ms（< 33 ms）；GUI 采集→上屏 P95 33.2 ms（< 50 ms） | [B5 延迟报告](../reports/2026-10-23-b5-latency.md) |
 | B6 | 服务端慢客户端防堆积与超时保护 | **已完成**：发送队列限制 4 帧 / 8 MB 上限并配合 `SO_SNDTIMEO` 2 秒超时，防止慢客户端拖垮服务端内存 | — |
