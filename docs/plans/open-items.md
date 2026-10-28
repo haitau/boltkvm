@@ -87,3 +87,9 @@
 - **安装流程**：`scripts/install-app.sh` 比较旧应用与新应用的 designated requirement。相同稳定证书重新编译时保留 TCC 授权；首次安装、ad-hoc 切换稳定证书、旧应用缺失或传 `--reset-permissions` 时自动执行两项 `tccutil reset`，再启动应用等待用户授权。`scripts/deploy-app.sh` 在被控端做同样处理，并改用精确进程名停止旧进程。
 - **本机验证**：menu / 面板实际读到两个权限入口与重置项；屏幕录制按钮打开 `录屏与系统录音`，辅助功能按钮切到对应页面；同一签名重装输出「签名身份未变，保留现有 TCC 授权。」；强制 `--reset-permissions` 输出清除提示且退出码 0（测试时两项本来都未授权）。mini 已部署 212，日志为 `screen recording: true, accessibility: false`，采集恢复但辅助功能仍需用户点「辅助功能权限…」授权。
 - **边界**：TCC 授权不能由脚本代替用户勾选；跨机「旧签名升级 → 自动清旧记录 → 重新授权 → 采集/注入恢复」仍未完整实机验证。详见 [权限与 TCC 报告](../reports/2026-10-28-permissions-and-tcc.md)。
+
+### 4.3 2026-10-28 全屏工具栏首次弹出无按钮
+
+- **已实现**：全屏改用内容视图内的浮层（`NSVisualEffectView`），不再依赖首次布局失败的 `NSToolbarFullScreenWindow`；浮层在创建时完成「调度中心」「桌面」「退出全屏」与状态文字的布局，第一次顶边停留即可见。窗口模式仍用原生工具栏；全屏时隐藏原生工具栏并 `orderOut` 其全屏子窗口，避免空白带覆盖浮层。
+- **验证**：全新启动后第一次上移顶边即显示三个按钮；点击「退出全屏」后 `AXFullScreen` 为 false；隐藏状态截帧无白线/空白带；`swift test` 91 项通过（1 项跳过）。详见 [全屏工具栏报告](../reports/2026-10-28-fullscreen-toolbar-first-reveal.md)。
+- **边界**：未做旧版 macOS、多显示器、深浅色切换的逐一验证；A-4 的长周期闪烁仍需单独录屏确认。

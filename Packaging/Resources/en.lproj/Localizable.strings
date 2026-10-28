@@ -103,6 +103,8 @@
 "client.toolbar.desktop.tip" = "Show the remote desktop";
 "client.toolbar.desktop.restore" = "Restore Windows";
 "client.toolbar.desktop.restore.tip" = "Bring the windows that were moved aside back";
+"client.toolbar.exitFullScreen" = "Exit Full Screen";
+"client.toolbar.exitFullScreen.tip" = "Return to windowed mode";
 "client.hosts.title" = "BoltKVM";
 "client.hosts.empty" = "No saved Macs yet — click ＋ to add one";
 "client.hosts.column" = "Remote Macs";

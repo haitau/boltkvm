@@ -74,7 +74,7 @@ A single app bundle supports both roles:
 
 - Opens to the saved host list—double-click a host to connect, or click **Edit** to configure display name, IP address, port, resolution, password, color mode, and input/audio toggles per host;
 - After connecting, the window maps one stream pixel to one physical pixel (**1:1**) when it fits; otherwise it scales down proportionally to the visible area and the toolbar shows the scale percentage (only when below 100%). Full screen (⌃⌘F) on a matching display is 100%, giving the crispest text;
-- The centered toolbar provides **Mission Control** and **Desktop** shortcuts for the remote Mac, with live `fps · Mbps` metrics on the right;
+- The centered toolbar provides **Mission Control** and **Desktop** shortcuts for the remote Mac, with live `fps · Mbps` metrics on the right; the full-screen overlay also has an **Exit Full Screen** button;
 - In full screen the toolbar is an overlay: it auto-hides and reveals after a short dwell at the top edge, and the remote picture moves down by exactly one toolbar height without being resized or re-scaled (the bottom goes off-screen). This matches macOS Screen Sharing instead of squeezing the drawable;
 - Closing the video window disconnects the session and returns to the host list;
 - Keyboard and mouse events are forwarded only while the pointer is inside the video view. Pressing keys or mouse buttons and then moving the pointer out, unfocusing the window, or disconnecting automatically synthesizes release events; modifier flags are also reconciled before each key event to prevent stuck modifiers.

@@ -39,9 +39,17 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private static let tbStatus = NSToolbarItem.Identifier("boltkvm.status")
     /// Live `fps · bitrate` label hosted in the toolbar's trailing edge.
     private let toolbarStatusLabel = NSTextField(labelWithString: "")
+    /// Fullscreen replacement for the native toolbar. AppKit's
+    /// `NSToolbarFullScreenWindow` does not lay out view-based items on its first
+    /// reveal on this macOS; a normal view inside the content view is
+    /// deterministic and can be shown on the very first top-edge dwell.
+    private var chromeOverlay: NSVisualEffectView?
+    private var chromeOverlayStack: NSStackView?
+    private var chromeOverlayStatusLabel: NSTextField?
+    private var chromeOverlayVisible = false
     /// "桌面" becomes "还原窗口" after the remote moved its windows aside, so the
     /// second press does what the title says instead of toggling the remote back.
-    private var desktopButton: NSButton?
+    private var desktopButtons: [NSButton] = []
     private var desktopHidden = false
 
     /// Set when the list window opens this controller: prefills the fields and
@@ -130,7 +138,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         session?.onState = { [weak self] state in
             guard let self else { return }
             self.stateText = state.text
-            self.toolbarStatusLabel.textColor = state == .streaming ? .systemGreen : .secondaryLabelColor
+            let color: NSColor = state == .streaming ? .systemGreen : .secondaryLabelColor
+            self.toolbarStatusLabel.textColor = color
+            self.chromeOverlayStatusLabel?.textColor = color
             self.refreshToolbarStatus()
             // Closing the window is the disconnect (R4); there is no button.
             if state == .streaming, self.reportTimer == nil {
@@ -163,6 +173,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         toolbarStatusLabel.textColor = .secondaryLabelColor
         toolbarStatusLabel.alignment = .right
         installToolbar()
+        installFullScreenOverlay(in: content)
         setupFullScreenChrome()
         layoutVideo()
     }
@@ -194,10 +205,11 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         window?.toolbarStyle = .unified
     }
 
-    /// The three remote actions as one horizontally centred group. Screen
-    /// Sharing puts them in the middle of the title bar; individual NSToolbarItems
-    /// cannot be centred as a group, so they live in one view-based item.
-    private func remoteActionsView() -> NSView {
+    /// The remote actions as one horizontally centred group. Screen Sharing puts
+    /// them in the middle of the title bar; individual NSToolbarItems cannot be
+    /// centred as a group, so they live in one view-based item. The fullscreen
+    /// overlay adds an Exit Full Screen button.
+    private func remoteActionsView(includeFullScreen: Bool = false) -> NSStackView {
         let stack = NSStackView()
         stack.orientation = .horizontal
         stack.spacing = 26
@@ -207,12 +219,18 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         // Control and Show Desktop (com.apple.expose.front.awake) is accepted and
         // then does nothing here; the keyboard route needs Accessibility, the
         // AppleScript route needs Automation, and this app gets neither.
-        let entries: [(String, String, String, Selector)] = [
+        var entries: [(String, String, String, Selector)] = [
             (L.t("client.toolbar.missionControl"), "square.grid.2x2",
              L.t("client.toolbar.missionControl.tip"), #selector(showMissionControl)),
             (L.t("client.toolbar.desktop"), "display",
              L.t("client.toolbar.desktop.tip"), #selector(showDesktop)),
         ]
+        if includeFullScreen {
+            entries.append((L.t("client.toolbar.exitFullScreen"),
+                            "arrow.down.right.and.arrow.up.left",
+                            L.t("client.toolbar.exitFullScreen.tip"),
+                            #selector(toggleFullScreenAction)))
+        }
         for (title, symbol, tip, action) in entries {
             let button = NSButton(title: title, target: self, action: action)
             button.image = toolbarImage(symbol)
@@ -222,7 +240,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             button.font = .systemFont(ofSize: 11)
             button.toolTip = tip
             stack.addArrangedSubview(button)
-            if action == #selector(showDesktop) { desktopButton = button }
+            if action == #selector(showDesktop) { desktopButtons.append(button) }
         }
         stack.setFrameSize(stack.fittingSize)
         return stack
@@ -230,6 +248,69 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
     private func toolbarImage(_ name: String) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)
+    }
+
+    /// The fullscreen chrome is a normal subview of the content view, above the
+    /// video. Unlike `NSToolbarFullScreenWindow` it exists (and has laid-out
+    /// buttons) before the first reveal, so the first top-edge dwell already
+    /// shows the controls.
+    private func installFullScreenOverlay(in content: NSView) {
+        let overlay = NSVisualEffectView()
+        overlay.material = .titlebar
+        overlay.blendingMode = .withinWindow
+        overlay.state = .active
+        overlay.wantsLayer = true
+        overlay.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96).cgColor
+        overlay.isHidden = true
+        let stack = remoteActionsView(includeFullScreen: true)
+        overlay.addSubview(stack)
+        let status = NSTextField(labelWithString: "")
+        status.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        status.textColor = .secondaryLabelColor
+        status.alignment = .right
+        overlay.addSubview(status)
+        content.addSubview(overlay)
+        chromeOverlay = overlay
+        chromeOverlayStack = stack
+        chromeOverlayStatusLabel = status
+    }
+
+    private func layoutFullScreenOverlay(in bounds: NSRect) {
+        guard let overlay = chromeOverlay else { return }
+        let height = min(max(0, chromeHeight), bounds.height)
+        overlay.frame = NSRect(x: 0, y: bounds.height - height,
+                               width: bounds.width, height: height)
+        overlay.autoresizingMask = [.width, .minYMargin]
+        if let stack = chromeOverlayStack {
+            stack.setFrameSize(stack.fittingSize)
+            let size = stack.frame.size
+            stack.frame = NSRect(x: (bounds.width - size.width) / 2,
+                                 y: (height - size.height) / 2,
+                                 width: size.width, height: size.height)
+        }
+        if let status = chromeOverlayStatusLabel {
+            let width = min(240, max(120, bounds.width - 24))
+            status.frame = NSRect(x: bounds.width - width - 12,
+                                  y: (height - 18) / 2,
+                                  width: width, height: 18)
+        }
+    }
+
+    private func setChromeOverlayVisible(_ visible: Bool) {
+        chromeOverlayVisible = visible
+        chromeOverlay?.isHidden = !visible
+    }
+
+    private func showChromeOverlay() {
+        setChromeOverlayVisible(true)
+        layoutVideo()
+        log("fs: toolbar shown at the top edge (content shifted down by \(Int(chromeHeight)) pt)")
+    }
+
+    private func hideChromeOverlay() {
+        setChromeOverlayVisible(false)
+        layoutVideo()
+        log("fs: toolbar hidden")
     }
 
     // MARK: - Fullscreen chrome
@@ -271,17 +352,31 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         let bounds = content.bounds
         let measured = max(0, bounds.height - window.contentLayoutRect.height)
         if measured > 0 { chromeHeight = measured }
-        let toolbarVisible = window.toolbar?.isVisible ?? false
-        // The tick that reveals the toolbar runs before AppKit publishes the
+        let fullScreen = window.styleMask.contains(.fullScreen)
+        let toolbarVisible = fullScreen ? chromeOverlayVisible : (window.toolbar?.isVisible ?? false)
+        // The tick that reveals the chrome runs before AppKit publishes the
         // new contentLayoutRect; use the last known band height for that frame
         // instead of showing one unshifted frame.
         let chrome = measured > 0 ? measured : (toolbarVisible ? chromeHeight : 0)
         let frame = ChromeLayout.videoFrame(
             content: bounds.size,
             chrome: chrome,
-            fullScreen: window.styleMask.contains(.fullScreen),
+            fullScreen: fullScreen,
             toolbarVisible: toolbarVisible
         )
+        layoutFullScreenOverlay(in: bounds)
+        if fullScreen {
+            chromeOverlay?.isHidden = !chromeOverlayVisible
+            // AppKit keeps its own empty NSToolbarFullScreenWindow above the
+            // content even after `toolbar.isVisible = false`; it covers this
+            // overlay's top band. Remove it from the screen while fullscreen.
+            for child in window.childWindows ?? []
+            where String(describing: type(of: child)).contains("ToolbarFullScreen") {
+                child.orderOut(nil)
+            }
+        } else {
+            chromeOverlay?.isHidden = true
+        }
         if videoView.frame != frame {
             videoView.frame = frame
         }
@@ -316,7 +411,15 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         let fullScreen = window.styleMask.contains(.fullScreen)
         if appliedFullScreen != fullScreen {
             appliedFullScreen = fullScreen
-            window.toolbar?.isVisible = !fullScreen
+            if fullScreen {
+                // The native fullscreen toolbar overlay is not used; the
+                // in-content overlay is already built and laid out.
+                window.toolbar?.isVisible = false
+                setChromeOverlayVisible(false)
+            } else {
+                setChromeOverlayVisible(false)
+                window.toolbar?.isVisible = true
+            }
             window.titlebarSeparatorStyle = .none
             topEdgeEnteredAt = nil
             layoutVideo()
@@ -328,7 +431,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         }
         let y = NSEvent.mouseLocation.y
         let top = screen.frame.maxY
-        let visible = window.toolbar?.isVisible ?? false
+        let visible = chromeOverlayVisible
         // A short dwell at the edge avoids popping the chrome (and moving the
         // picture) when the pointer merely crosses the top on its way to a
         // remote menu item.
@@ -338,10 +441,8 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             } else {
                 if topEdgeEnteredAt == nil { topEdgeEnteredAt = Date() }
                 if let entered = topEdgeEnteredAt, Date().timeIntervalSince(entered) >= 0.2 {
-                    window.toolbar?.isVisible = true
                     topEdgeEnteredAt = nil
-                    layoutVideo()
-                    log("fs: toolbar shown at the top edge (content shifted down by \(Int(chromeHeight)) pt)")
+                    showChromeOverlay()
                 }
             }
         } else {
@@ -350,9 +451,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             // toolbar height; the hide threshold has to clear that band or the
             // two states fight (the old 110 pt hysteresis).
             if y < top - 110, visible {
-                window.toolbar?.isVisible = false
-                layoutVideo()
-                log("fs: toolbar hidden")
+                hideChromeOverlay()
             }
         }
         // Covers the window/content relayout that follows a toolbar change.
@@ -475,7 +574,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         if session?.isActive == true, streamColor == .wide {
             parts.append("P3")
         }
-        toolbarStatusLabel.stringValue = parts.joined(separator: " · ")
+        let text = parts.joined(separator: " · ")
+        toolbarStatusLabel.stringValue = text
+        chromeOverlayStatusLabel?.stringValue = text
     }
 
     // MARK: - Remote system shortcuts
@@ -502,12 +603,13 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     }
 
     private func updateDesktopButton() {
-        guard let button = desktopButton else { return }
-        button.title = desktopHidden ? L.t("client.toolbar.desktop.restore")
-                                     : L.t("client.toolbar.desktop")
-        button.toolTip = desktopHidden ? L.t("client.toolbar.desktop.restore.tip")
-                                       : L.t("client.toolbar.desktop.tip")
-        button.image = toolbarImage(desktopHidden ? "macwindow.on.rectangle" : "display")
+        for button in desktopButtons {
+            button.title = desktopHidden ? L.t("client.toolbar.desktop.restore")
+                                         : L.t("client.toolbar.desktop")
+            button.toolTip = desktopHidden ? L.t("client.toolbar.desktop.restore.tip")
+                                           : L.t("client.toolbar.desktop.tip")
+            button.image = toolbarImage(desktopHidden ? "macwindow.on.rectangle" : "display")
+        }
     }
 
     @objc func toggleFullScreenAction(_ sender: Any?) {
