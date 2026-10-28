@@ -33,7 +33,7 @@
 
 ```bash
 swift build -c release --disable-sandbox --scratch-path .build
-# 通过；app 版本 0.12.2 (220)
+# 通过；app 版本 0.12.2 (221)
 
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --disable-sandbox --scratch-path .build
 # Executed 93 tests, with 1 test skipped and 0 failures
