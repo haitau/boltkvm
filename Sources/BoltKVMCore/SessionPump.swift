@@ -26,6 +26,12 @@ final class SessionPump {
     /// Lifetime totals every 60 s; the CLI smoke test uses it to prove the loop
     /// is still alive on a quiet screen.
     var onLongWindow: ((_ packets: Int, _ frames: Int) -> Void)?
+    /// Set by real GUI/CLI clients. Tests that drive the pump with raw packets
+    /// leave it false; production paths must not accept frames before auth.
+    var requireAuthenticatedTransport = false
+    private var authenticated = false
+    private let keepAliveLock = NSLock()
+    private var keepAliveAllowed = false
 
     let decoder: VideoDecoder
     private let conn: TCPConnection
@@ -48,7 +54,12 @@ final class SessionPump {
         // session would look dead to a read timeout.
         let ping = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "boltkvm.clock.ping"))
         ping.schedule(deadline: .now() + 3, repeating: 3)
-        ping.setEventHandler { [conn] in _ = try? conn.send(timeSyncRequest()) }
+        ping.setEventHandler { [weak self, conn] in
+            // The handshake swaps ciphers; a ping sealed with the old key is
+            // rejected by the peer and tears down a valid session.
+            guard self?.allowsKeepAlive == true else { return }
+            _ = try? conn.send(timeSyncRequest())
+        }
         ping.resume()
         defer { ping.cancel() }
 
@@ -69,20 +80,26 @@ final class SessionPump {
                 try onChallenge?(payload)
             case .authOk:
                 try onAuthOk?(header, payload)
+                authenticated = true
             case .format:
+                try requireSession()
                 if let f = StreamFormat.decode(payload) {
                     try decoder.configure(f)
                     onFormat?(f)
                 }
             case .frame:
+                try requireSession()
                 frames += 1
                 winFrames += 1
                 decoder.decode(payload, ptsMicros: header.ptsMicros)
             case .audio:
+                try requireSession()
                 onAudio?(payload)
             case .clipboard:
+                try requireSession()
                 onClipboard?(payload)
             case .fileTransfer:
+                try requireSession()
                 onFileTransfer?(payload)
             case .timeSync:
                 handleTimeSync(header, payload, decoder: decoder)
@@ -99,5 +116,23 @@ final class SessionPump {
                 onLongWindow?(packets, frames)
             }
         }
+    }
+
+    /// Called after the client has installed its session ciphers.
+    func allowKeepAlive() {
+        keepAliveLock.lock()
+        keepAliveAllowed = true
+        keepAliveLock.unlock()
+    }
+
+    private var allowsKeepAlive: Bool {
+        keepAliveLock.lock()
+        defer { keepAliveLock.unlock() }
+        return keepAliveAllowed
+    }
+
+    private func requireSession() throws {
+        guard requireAuthenticatedTransport else { return }
+        guard authenticated, conn.hasSessionCipher else { throw POSIXError(.EPROTO) }
     }
 }

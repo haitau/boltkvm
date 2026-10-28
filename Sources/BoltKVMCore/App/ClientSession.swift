@@ -148,6 +148,7 @@ final class ClientSession: @unchecked Sendable {
                     var wantInput = forwardInput
                     var authResponseSentAt: Int64 = 0
                     let pump = SessionPump(conn: c, decoder: decoder)
+                    pump.requireAuthenticatedTransport = true
                     pump.onClipboard = { [weak self] payload in self?.clipboard?.handleClipboard(payload) }
                     pump.onFileTransfer = { [weak self] payload in self?.clipboard?.handleFile(payload) }
                     pump.onChallenge = { payload in
@@ -170,6 +171,9 @@ final class ClientSession: @unchecked Sendable {
                             let rtt = Double(t3 - authResponseSentAt) / 1000.0
                             decoder.setClockOffset(offset, rttMs: rtt)
                         }
+                        guard self.isCurrent(gen), !Task.isCancelled else {
+                            throw POSIXError(.ECANCELED)
+                        }
                         if let challengeNonce {
                             try enableClientEncryption(
                                 conn: c, nonce: challengeNonce, key: sessionKey,
@@ -186,14 +190,13 @@ final class ClientSession: @unchecked Sendable {
                             if playAudio, supportsAudio24 {
                                 config.audio = .int24
                             }
-                            if playAudio || self.requestedConfig != nil {
-                                do {
-                                    try c.send(packet(type: .config, payload: config.encode()))
-                                    use24 = playAudio && supportsAudio24 && config.audio == .int24
-                                    log("sending config \(config.width)x\(config.height) quality=\(config.quality) colour=\(config.color) audio=\(use24 ? "int24" : "int16")")
-                                } catch {
-                                    log("audio: could not send config: \(error)")
-                                }
+                            config.audioRequest = playAudio ? .selected : .unselected
+                            do {
+                                try c.send(packet(type: .config, payload: config.encode()))
+                                use24 = playAudio && supportsAudio24 && config.audio == .int24
+                                log("sending config \(config.width)x\(config.height) quality=\(config.quality) colour=\(config.color) audio=\(use24 ? "int24" : "int16") request=\(config.audioRequest)")
+                            } catch {
+                                log("audio: could not send config: \(error)")
                             }
                         }
                         if playAudio {
@@ -202,6 +205,13 @@ final class ClientSession: @unchecked Sendable {
                                 wireFormat: use24 ? .int24 : .int16)
                             audio = player
                             self.audio = player
+                            // A close can race authOk. Do not publish a player
+                            // after the generation that owns this task is gone.
+                            guard self.isCurrent(gen) else {
+                                self.audio = nil
+                                player.finish()
+                                throw POSIXError(.ECANCELED)
+                            }
                             self.installAudioRouteCallbacks(player, connection: c)
                             log("audio: wire format \(use24 ? "int24" : "int16") at 48 kHz")
                         }
@@ -216,8 +226,10 @@ final class ClientSession: @unchecked Sendable {
                             sync.start()
                             self.clipboard = sync
                         }
+                        pump.allowKeepAlive()
                     }
                     pump.onFormat = { format in
+                        guard self.isCurrent(gen) else { return }
                         let size = (format.width, format.height)
                         DispatchQueue.main.async {
                             self.renderer.setColorMode(format.color)
@@ -230,6 +242,7 @@ final class ClientSession: @unchecked Sendable {
                         }
                     }
                     pump.onAudio = { [weak c] payload in
+                        guard self.isCurrent(gen) else { return }
                         // Do not mute on the first video frame: the server may
                         // have been launched without --audio, in which case
                         // there is no audio stream and muting would silence the
@@ -271,19 +284,23 @@ final class ClientSession: @unchecked Sendable {
                     }
                 }
                 // Per-attempt teardown. Keep the window and the renderer alive;
-                // the next attempt reuses them.
-                self.conn = nil
-                self.decoder?.report()
-                self.decoder = nil
-                self.input?.stop()
-                self.input = nil
-                self.windowInput?.stop()
-                self.windowInput = nil
-                self.clipboard?.stop()
-                self.clipboard = nil
-                self.endRouteSystemMute()
-                self.audio?.finish()
-                self.audio = nil
+                // the next attempt reuses them. Only the generation that owns
+                // these fields may clear them: disconnect() can install a new
+                // session before this detached task unwinds.
+                if self.isCurrent(gen) {
+                    self.conn = nil
+                    self.decoder?.report()
+                    self.decoder = nil
+                    self.input?.stop()
+                    self.input = nil
+                    self.windowInput?.stop()
+                    self.windowInput = nil
+                    self.clipboard?.stop()
+                    self.clipboard = nil
+                    self.endRouteSystemMute()
+                    self.audio?.finish()
+                    self.audio = nil
+                }
                 if authRejected { break }
                 if Task.isCancelled || !self.isCurrent(gen) { return }
                 if endedNormally { log("server closed the session; reconnecting") }
@@ -388,9 +405,12 @@ final class ClientSession: @unchecked Sendable {
             guard let self, self.isActive else { return }
             if self.routeSystemMute == nil {
                 let mute = AudioOutputMute()
-                mute.start()
-                self.routeSystemMute = mute
-                log("audio: muted Pro system output during route change")
+                if mute.start() {
+                    self.routeSystemMute = mute
+                    log("audio: muted Pro system output during route change")
+                } else {
+                    log("audio: could not mute Pro system output during route change")
+                }
             }
             self.routeSystemMuteTimer?.cancel()
             let work = DispatchWorkItem { [weak self] in
@@ -446,8 +466,13 @@ final class ClientSession: @unchecked Sendable {
         windowInput = nil
         clipboard?.stop()
         clipboard = nil
-        audio?.finish()
+        // AVAudioEngine teardown can wait on the audio control queue; closing
+        // the window must not block AppKit's main thread on it.
+        let player = audio
         audio = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            player?.finish()
+        }
         decoder?.report()
         decoder = nil
         // Presentation is a separate leg from decoding: report it too, otherwise

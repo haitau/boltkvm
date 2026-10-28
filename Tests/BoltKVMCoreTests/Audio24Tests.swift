@@ -6,6 +6,31 @@ import AVFoundation
 /// record-only AudioPlayer still runs each wire packet through the same
 /// AudioPCM24 decoder/file writer used during playback.
 final class Audio24Tests: XCTestCase {
+    /// ScreenCaptureKit can deliver 44.1 kHz from USB/Bluetooth outputs. The
+    /// simple AVAudioConverter overload throws -50 for sample-rate conversion;
+    /// this guards the block-based path used by Server.handleAudio.
+    func test44kTo48kConversionProducesFrames() throws {
+        let src = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 44_100,
+                                channels: 2, interleaved: false)!
+        let dst = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000,
+                                channels: 2, interleaved: true)!
+        let converter = try XCTUnwrap(AVAudioConverter(from: src, to: dst))
+        let input = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: src, frameCapacity: 1024))
+        input.frameLength = 1024
+        let output = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: dst, frameCapacity: 3072))
+        var supplied = false
+        var error: NSError?
+        let status = converter.convert(to: output, error: &error) { _, outStatus in
+            if supplied { outStatus.pointee = .endOfStream; return nil }
+            supplied = true
+            outStatus.pointee = .haveData
+            return input
+        }
+        XCTAssertNil(error)
+        XCTAssertNotEqual(status, .error)
+        XCTAssertGreaterThan(output.frameLength, 0)
+    }
+
     func test24BitGraphBuildsWithoutPlayingAudio() throws {
         let player = AudioPlayer(play: true, recordPath: nil, wireFormat: .int24)
         guard player.isPlaybackActive else {

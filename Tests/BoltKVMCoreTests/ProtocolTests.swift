@@ -134,6 +134,37 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(AudioWireFormat.int24.bytesPerFrame, 6)
     }
 
+    func testAudioRequestRidesInReservedByte7() {
+        let selected = SessionConfig(width: 0, height: 0, quality: 0,
+                                     audio: .int24, audioRequest: .selected)
+        let selectedData = selected.encode()
+        XCTAssertEqual(selectedData[7], AudioRequest.selected.rawValue)
+        XCTAssertEqual(SessionConfig.decode(selectedData)?.audioRequest, .selected)
+
+        let unselected = SessionConfig(width: 3008, height: 1692, quality: 1,
+                                       audioRequest: .unselected)
+        let unselectedData = unselected.encode()
+        XCTAssertEqual(unselectedData[7], AudioRequest.unselected.rawValue)
+        XCTAssertEqual(SessionConfig.decode(unselectedData)?.audioRequest, .unselected)
+
+        // `--audio-record` captures without playing, so it must still request
+        // capture while suppressing local playback/mute.
+        let recordOnly = SessionConfig(width: 0, height: 0, quality: 0,
+                                       audioRequest: .recordOnly)
+        let recordOnlyData = recordOnly.encode()
+        XCTAssertEqual(recordOnlyData[7], AudioRequest.recordOnly.rawValue)
+        XCTAssertEqual(SessionConfig.decode(recordOnlyData)?.audioRequest, .recordOnly)
+
+        // Configs from builds before the field reserve byte 7 as zero; the
+        // server must keep the legacy "server decides" behaviour for them.
+        var legacy = selectedData
+        legacy[7] = 0
+        XCTAssertEqual(SessionConfig.decode(legacy)?.audioRequest, .unspecified)
+        var future = selectedData
+        future[7] = 0xFF
+        XCTAssertEqual(SessionConfig.decode(future)?.audioRequest, .unspecified)
+    }
+
     func testAudioOnlyConfigAllowsZeroSizeButRejectsHalfZero() {
         let audioOnly = SessionConfig(width: 0, height: 0, quality: 0, audio: .int24)
         XCTAssertNotNil(SessionConfig.decode(audioOnly.encode()))

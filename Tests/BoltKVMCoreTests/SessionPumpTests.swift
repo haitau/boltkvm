@@ -62,6 +62,22 @@ final class SessionPumpTests: XCTestCase {
         XCTAssertEqual(clock, 123_456_789)
     }
 
+    /// Production clients opt into the gate: a plaintext format/frame before
+    /// authOk (a rogue server that skipped the PSK handshake) must be rejected
+    /// rather than rendered or forwarded.
+    func testProductionPumpRejectsFrameBeforeAuthentication() throws {
+        let (conn, peer) = makePair()
+        let pump = SessionPump(conn: conn, decoder: VideoDecoder())
+        pump.requireAuthenticatedTransport = true
+        writeAll(peer, packet(type: .frame, flags: 0, ptsMicros: 0,
+                              payload: Data([0, 1, 2])))
+        close(peer)
+        XCTAssertThrowsError(try pump.run()) { error in
+            XCTAssertEqual((error as? POSIXError)?.code, .EPROTO)
+        }
+        XCTAssertEqual(pump.frames, 0)
+    }
+
     func testDeadlineStopsBeforeReading() throws {
         let (conn, peer) = makePair()
         let pump = SessionPump(conn: conn, decoder: VideoDecoder())

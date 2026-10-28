@@ -87,6 +87,23 @@ enum AudioWireFormat: UInt8, Codable {
 /// The server may refuse (no virtual display to recreate, or the display is
 /// external); it then keeps its current size and the client learns the truth
 /// from the `format` packet.
+/// Whether this controller actually selected audio for the host. Byte 7 used
+/// to be reserved, so a client that predates this field sends 0 and keeps the
+/// legacy "server decides" behaviour. A new client always says selected or
+/// unselected explicitly, which lets the server avoid capturing/sending audio
+/// for a session whose controller has audio unchecked.
+enum AudioRequest: UInt8 {
+    /// Old clients send 0; the server keeps its legacy "audio if --audio" rule.
+    case unspecified = 0
+    /// The controller explicitly wants the forwarded audio played locally.
+    case selected = 1
+    /// The controller explicitly does not want audio for this host.
+    case unselected = 2
+    /// Diagnostic recording only: capture and send audio, but do not play it
+    /// locally and never ask the controlled Mac to mute its output.
+    case recordOnly = 3
+}
+
 struct SessionConfig {
     var width: Int
     var height: Int
@@ -98,6 +115,8 @@ struct SessionConfig {
     /// 0 = int16 (the original format), 1 = packed int24. Older servers ignore
     /// this byte; a client only sets 1 after seeing `FLAG_SUPPORTS_AUDIO_24`.
     var audio: AudioWireFormat = .int16
+    /// Explicit audio selection; 0 keeps compatibility with older clients.
+    var audioRequest: AudioRequest = .unspecified
 
     static let payloadSize = 8
 
@@ -110,7 +129,7 @@ struct SessionConfig {
             base.storeBytes(of: quality, toByteOffset: 4, as: UInt8.self)
             base.storeBytes(of: color.rawValue, toByteOffset: 5, as: UInt8.self)
             base.storeBytes(of: audio.rawValue, toByteOffset: 6, as: UInt8.self)
-            base.storeBytes(of: UInt8(0), toByteOffset: 7, as: UInt8.self)
+            base.storeBytes(of: audioRequest.rawValue, toByteOffset: 7, as: UInt8.self)
         }
         return data
     }
@@ -124,12 +143,13 @@ struct SessionConfig {
             let quality = base.load(fromByteOffset: 4, as: UInt8.self)
             let color = ColorMode(rawValue: base.load(fromByteOffset: 5, as: UInt8.self)) ?? .standard
             let audio = AudioWireFormat(rawValue: base.load(fromByteOffset: 6, as: UInt8.self)) ?? .int16
+            let audioRequest = AudioRequest(rawValue: base.load(fromByteOffset: 7, as: UInt8.self)) ?? .unspecified
             // (0,0) is an audio-only request: keep the current capture size.
             let sized = (320...7680).contains(width) && (240...4320).contains(height)
             let audioOnly = width == 0 && height == 0
             guard sized || audioOnly else { return nil }
             return SessionConfig(width: width, height: height, quality: quality,
-                                 color: color, audio: audio)
+                                 color: color, audio: audio, audioRequest: audioRequest)
         }
     }
 }
@@ -560,6 +580,24 @@ final class TCPConnection: @unchecked Sendable {
         }
     }
 
+    /// Wait until at least one byte is readable, without consuming it. This
+    /// lets the handshake wait briefly for an optional config packet and then
+    /// read that whole frame with the normal session timeout, instead of
+    /// abandoning a partially read frame when the short wait expires.
+    func waitReadable(seconds: Int) -> Bool {
+        var descriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(0, seconds)) * 1_000_000_000
+        while true {
+            let now = DispatchTime.now().uptimeNanoseconds
+            if now >= deadline { return false }
+            let remaining = min(1_000, max(1, Int((deadline - now) / 1_000_000)))
+            let result = poll(&descriptor, 1, Int32(remaining))
+            if result > 0 { return descriptor.revents & Int16(POLLIN) != 0 }
+            if result == 0 { continue }
+            if errno != EINTR { return false }
+        }
+    }
+
     func recvExact(_ count: Int) throws -> Data {
         var out = Data(count: count)
         var got = 0
@@ -626,8 +664,16 @@ final class TCPConnection: @unchecked Sendable {
     func setSessionCiphers(send: SessionCipher?, recv: SessionCipher?) {
         sendLock.lock()
         outCipher = send
-        sendLock.unlock()
         inCipher = recv
+        sendLock.unlock()
+    }
+
+    /// True only after both directions have a session cipher. A peer that
+    /// skips the handshake must not be able to send plaintext frames.
+    var hasSessionCipher: Bool {
+        sendLock.lock()
+        defer { sendLock.unlock() }
+        return inCipher != nil && outCipher != nil
     }
 }
 

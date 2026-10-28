@@ -39,6 +39,7 @@ final class Server: NSObject, SCStreamOutput {
     /// even when muting the device failed. The cleanup path uses it to pause
     /// the Now Playing app before restoring the controlled Mac's output.
     private var clientAudioActive = false
+    private var clientAudioEnding = false
     private var clientAudioMuteLock = NSLock()
     private var dumped = false
 
@@ -52,6 +53,7 @@ final class Server: NSObject, SCStreamOutput {
     private var audioPackets = 0
     private var audioBytes = 0
     private var audioLoggedSource = false
+    private var audioConversionErrorLogged = false
 
     private var stream: SCStream?
     private var session: VTCompressionSession?
@@ -422,13 +424,16 @@ final class Server: NSObject, SCStreamOutput {
         let point = lastMousePoint ?? CGPoint(x: displayBounds.midX, y: displayBounds.midY)
         // Release the keys we actually pressed (either hand), not just the left
         // ones: a right ⌘ held at disconnect would stay down otherwise.
-        let keys = heldModifiers.isEmpty ? Set<CGKeyCode>([55, 56, 58, 59]) : heldModifiers
+        var keys = heldModifiers
+        keys.formUnion(pressedKeys)
+        if keys.isEmpty { keys = Set<CGKeyCode>([55, 56, 58, 59]) }
         for code in keys {
             guard let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else { continue }
             e.flags = []
             e.post(tap: .cghidEventTap)
         }
         heldModifiers.removeAll()
+        pressedKeys.removeAll()
         injectedFlags = 0
         let ups: [(CGEventType, CGMouseButton)] = [
             (.leftMouseUp, .left), (.rightMouseUp, .right), (.otherMouseUp, .center),
@@ -465,6 +470,9 @@ final class Server: NSObject, SCStreamOutput {
     /// (not just the bit) is what lets a right-hand ⌃ be released by its own
     /// key up instead of being mistaken for the left one.
     private var heldModifiers = Set<CGKeyCode>()
+    /// Every non-modifier key we posted down and have not released. Without
+    /// this, a held letter survives a disconnect and repeats forever.
+    private var pressedKeys = Set<CGKeyCode>()
     /// `inject()` runs on the reader thread, `releaseInjectedInput()` can be
     /// called from the send queue when a write fails; without this a release
     /// can be followed by a late key-down and leave the remote stuck.
@@ -513,6 +521,9 @@ final class Server: NSObject, SCStreamOutput {
     private func inject(_ ev: InputEvent) {
         injectLock.lock()
         defer { injectLock.unlock() }
+        // A late event after the disconnect release would leave the key down
+        // with no later sweep to fix it.
+        guard !isDisconnected else { return }
         let p = CGPoint(
             x: displayBounds.minX + ev.x * displayBounds.width,
             y: displayBounds.minY + ev.y * displayBounds.height
@@ -525,10 +536,12 @@ final class Server: NSObject, SCStreamOutput {
         switch ev.type {
         case .keyDown, .keyUp:
             syncModifiers(to: ev.flags)
-            guard let e = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(ev.keyCode), keyDown: ev.type == .keyDown) else { return }
+            let code = CGKeyCode(ev.keyCode)
+            guard let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: ev.type == .keyDown) else { return }
             e.flags = CGEventFlags(rawValue: ev.flags)
             if ev.isRepeat { e.setIntegerValueField(.keyboardEventAutorepeat, value: 1) }
             e.post(tap: .cghidEventTap)
+            if ev.type == .keyDown { pressedKeys.insert(code) } else { pressedKeys.remove(code) }
         case .flagsChanged:
             guard let e = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(ev.keyCode), keyDown: true) else { return }
             e.type = .flagsChanged
@@ -584,6 +597,7 @@ final class Server: NSObject, SCStreamOutput {
         defer { clientAudioMuteLock.unlock() }
         let state = (clientAudioActive, clientAudioMute)
         clientAudioActive = false
+        clientAudioEnding = true
         clientAudioMute = nil
         return state
     }
@@ -591,6 +605,13 @@ final class Server: NSObject, SCStreamOutput {
     private func setClientAudioActive(_ active: Bool) {
         clientAudioMuteLock.lock()
         defer { clientAudioMuteLock.unlock() }
+        guard !clientAudioEnding else {
+            // A mute command already queued on the socket can be processed while
+            // stop() is waiting for Now Playing to pause. Ignoring it prevents a
+            // fresh mute after the state has been restored.
+            log("audio: ignoring client audio command; session is ending")
+            return
+        }
         if active {
             clientAudioActive = true
             guard clientAudioMute == nil, localMute == nil else { return }
@@ -735,9 +756,30 @@ final class Server: NSObject, SCStreamOutput {
             sbuf, at: 0, frameCount: Int32(frames), into: inBuf.mutableAudioBufferList)
         guard copyStatus == noErr else { return }
 
-        let capacity = AVAudioFrameCount(Double(frames) * audioTarget.sampleRate / src.sampleRate) + 32
+        let capacity = AVAudioFrameCount(Double(frames) * audioTarget.sampleRate / src.sampleRate) + 1024
         guard let outBuf = AVAudioPCMBuffer(pcmFormat: audioTarget, frameCapacity: capacity) else { return }
-        do { try audioConverter?.convert(to: outBuf, from: inBuf) } catch { return }
+        guard let converter = audioConverter else { return }
+        // The simple convert(to:from:) overload is not valid for sample-rate
+        // conversion (44.1 kHz devices are common); it throws -50 and the packet
+        // used to vanish silently. Feed the converter through the block API.
+        var supplied = false
+        var conversionError: NSError?
+        _ = converter.convert(to: outBuf, error: &conversionError) { _, status in
+            if supplied {
+                status.pointee = .endOfStream
+                return nil
+            }
+            supplied = true
+            status.pointee = .haveData
+            return inBuf
+        }
+        if let conversionError {
+            if !audioConversionErrorLogged {
+                audioConversionErrorLogged = true
+                log("audio: conversion from \(Int(src.sampleRate)) Hz failed: \(conversionError.localizedDescription)")
+            }
+            return
+        }
 
         let n = Int(outBuf.frameLength)
         guard n > 0 else { return }

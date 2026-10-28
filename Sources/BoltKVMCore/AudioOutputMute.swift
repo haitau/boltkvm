@@ -394,12 +394,16 @@ final class AudioOutputMute: @unchecked Sendable {
         var value = target
         let size = UInt32(MemoryLayout<Float32>.size)
         if AudioObjectSetPropertyData(dev, &address, 0, nil, size, &value) == noErr { return true }
-        var ok = true
+        // Per-channel devices are common. A write to one channel is a real
+        // state change, even if the other channel does not exist; reporting
+        // total failure here would delete the restore marker and leave that
+        // channel at zero forever.
+        var changed = false
         for element in [AudioObjectPropertyElement(1), AudioObjectPropertyElement(2)] {
             address.mElement = element
-            if AudioObjectSetPropertyData(dev, &address, 0, nil, size, &value) != noErr { ok = false }
+            if AudioObjectSetPropertyData(dev, &address, 0, nil, size, &value) == noErr { changed = true }
         }
-        return ok
+        return changed
     }
 
     private static func defaultOutputDevice() -> AudioDeviceID? {

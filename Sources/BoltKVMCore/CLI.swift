@@ -194,6 +194,10 @@ public enum CLI {
                     }
                 }
                 let audio = args.contains("--audio")
+                // A new client says explicitly whether it selected audio. Do
+                // not capture/send audio for an unchecked host; old clients
+                // send 0 (unspecified) and keep the legacy server-decides path.
+                let audioRequested = requested?.audioRequest != .unselected
 
                 var captureW = width
                 var captureH = height
@@ -236,7 +240,8 @@ public enum CLI {
 
                 let desiredColor = requested.flatMap { $0.width > 0 ? $0.color : nil } ?? .standard
                 let server = Server(width: captureW, height: captureH, codec: codec, connection: conn,
-                            dumpPath: dump.isEmpty ? nil : dump, audioEnabled: audio,
+                            dumpPath: dump.isEmpty ? nil : dump,
+                            audioEnabled: audio && audioRequested,
                             audioFormat: requested?.audio ?? .int16,
                             preferredDisplayID: argInt(args, "--display-id", 0) != 0
                                 ? CGDirectDisplayID(argInt(args, "--display-id", 0))
@@ -253,17 +258,20 @@ public enum CLI {
                     log("session start failed: \(error)")
                     // start() may have created the clipboard timer or muted the
                     // output before the capture failed; unwind both.
-                    await server.stop()
                     conn.close()
+                    await server.stop()
                     continue
                 }
                 while !server.isDisconnected {
                     if let d = deadline, DispatchTime.now().uptimeNanoseconds >= d { break }
                     try await Task.sleep(nanoseconds: 500_000_000)
                 }
+                // Closing the socket first stops the reader, so a mute command
+                // already queued cannot be processed after stop() restores the
+                // output.
+                conn.close()
                 await server.stop()
                 server.reportLine()
-                conn.close()
                 log("session ended; accepting next client")
                 if let d = deadline, DispatchTime.now().uptimeNanoseconds >= d { break }
             }
@@ -517,7 +525,11 @@ public enum CLI {
         let wantsInput = args.contains("--input")
         let reconnect = args.contains("--reconnect")
         let audioRecord = argValue(args, "--audio-record", "")
-        let wantsAudio = args.contains("--audio") || !audioRecord.isEmpty
+        let playsAudio = args.contains("--audio")
+        let wantsAudio = playsAudio || !audioRecord.isEmpty
+        let audioRequest: AudioRequest = playsAudio
+            ? .selected
+            : (audioRecord.isEmpty ? .unselected : .recordOnly)
         var audio: AudioPlayer?
 
         let clipboardEnabled = !args.contains("--no-clipboard")
@@ -552,6 +564,7 @@ public enum CLI {
                     var askedInitialMute = false
                     var clipboardSync: ClipboardSync?
                     let pump = SessionPump(conn: c, decoder: decoder)
+                    pump.requireAuthenticatedTransport = true
                     pump.onClipboard = { clipboardSync?.handleClipboard($0) }
                     pump.onFileTransfer = { clipboardSync?.handleFile($0) }
                     pump.onChallenge = { payload in
@@ -578,15 +591,14 @@ public enum CLI {
                                 config.audio = .int24
                                 use24 = true
                             }
-                            if requested != nil || use24 {
-                                do {
-                                    try c.send(packet(type: .config, payload: config.encode()))
-                                    use24 = wantsAudio && supportsAudio24 && config.audio == .int24
-                                    log("sent config \(config.width)x\(config.height) audio=\(use24 ? "int24" : "int16")")
-                                } catch {
-                                    use24 = false
-                                    log("could not send config: \(error)")
-                                }
+                            config.audioRequest = audioRequest
+                            do {
+                                try c.send(packet(type: .config, payload: config.encode()))
+                                use24 = wantsAudio && supportsAudio24 && config.audio == .int24
+                                log("sent config \(config.width)x\(config.height) audio=\(use24 ? "int24" : "int16") request=\(config.audioRequest)")
+                            } catch {
+                                use24 = false
+                                log("could not send config: \(error)")
                             }
                         }
                         if wantsAudio {
@@ -594,7 +606,7 @@ public enum CLI {
                             if audio == nil || audio?.wireFormat != fmt {
                                 audio?.finish()
                                 audio = AudioPlayer(
-                                    play: args.contains("--audio"),
+                                    play: playsAudio,
                                     recordPath: audioRecord.isEmpty ? nil : audioRecord,
                                     wireFormat: fmt)
                             }
@@ -614,6 +626,7 @@ public enum CLI {
                                                    rttMs: Double(t3 - authSentAt) / 1000.0)
                         }
                         try? c.send(timeSyncRequest())
+                        pump.allowKeepAlive()
                     }
                     pump.onFormat = { _ in
                         if wantsInput && !inputStarted {
@@ -625,7 +638,7 @@ public enum CLI {
                         }
                     }
                     pump.onAudio = { [weak c] payload in
-                        if audio != nil, !askedInitialMute, let c {
+                        if playsAudio, audio != nil, !askedInitialMute, let c {
                             do {
                                 try c.send(packet(type: .command,
                                                   payload: Data([RemoteAction.muteLocalOutput.rawValue])))
@@ -698,7 +711,11 @@ public enum CLI {
         let requested = parseRequestSize(args)
         let seconds = Double(argInt(args, "--seconds", 20))
         let audioRecord = argValue(args, "--audio-record", "")
-        let wantsAudio = args.contains("--audio") || !audioRecord.isEmpty
+        let playsAudio = args.contains("--audio")
+        let wantsAudio = playsAudio || !audioRecord.isEmpty
+        let audioRequest: AudioRequest = playsAudio
+            ? .selected
+            : (audioRecord.isEmpty ? .unselected : .recordOnly)
         var audio: AudioPlayer?
         var askedInitialMute = false
         do {
@@ -708,6 +725,7 @@ public enum CLI {
             let decoder = VideoDecoder()
             let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(seconds * 1_000_000_000)
             let pump = SessionPump(conn: conn, decoder: decoder)
+            pump.requireAuthenticatedTransport = true
             var clipboardSync: ClipboardSync?
             pump.onClipboard = { clipboardSync?.handleClipboard($0) }
             pump.onFileTransfer = { clipboardSync?.handleFile($0) }
@@ -730,10 +748,12 @@ public enum CLI {
                     config.audio = .int24
                     use24 = true
                 }
-                if header.payloadLength >= 1, payload.first == 1, (requested != nil || use24) {
+                config.audioRequest = audioRequest
+                if header.payloadLength >= 1, payload.first == 1 {
                     do {
                         try conn.send(packet(type: .config, payload: config.encode()))
-                        log("sent config \(config.width)x\(config.height) audio=\(use24 ? "int24" : "int16")")
+                        use24 = wantsAudio && supportsAudio24 && config.audio == .int24
+                        log("sent config \(config.width)x\(config.height) audio=\(use24 ? "int24" : "int16") request=\(config.audioRequest)")
                     } catch {
                         use24 = false
                         log("could not send config: \(error)")
@@ -745,7 +765,7 @@ public enum CLI {
                 }
                 if wantsAudio {
                     let fmt: AudioWireFormat = use24 ? .int24 : .int16
-                    audio = AudioPlayer(play: args.contains("--audio"),
+                    audio = AudioPlayer(play: playsAudio,
                                         recordPath: audioRecord.isEmpty ? nil : audioRecord,
                                         wireFormat: fmt)
                     installPauseOnRouteChange(audio, conn: conn)
@@ -764,9 +784,10 @@ public enum CLI {
                                            rttMs: Double(t3 - authSentAt) / 1000.0)
                 }
                 try? conn.send(timeSyncRequest())
+                pump.allowKeepAlive()
             }
             pump.onAudio = { payload in
-                if audio != nil, !askedInitialMute {
+                if playsAudio, audio != nil, !askedInitialMute {
                     try? conn.send(packet(type: .command,
                                           payload: Data([RemoteAction.muteLocalOutput.rawValue])))
                     askedInitialMute = true

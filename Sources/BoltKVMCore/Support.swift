@@ -118,12 +118,17 @@ func authenticateServer(conn: TCPConnection, key: Data,
     let nonce = randomNonce()
     try conn.send(packet(type: .authChallenge, ptsMicros: 0, payload: nonce))
     conn.setRecvTimeout(timeoutSeconds)
-    defer { conn.setRecvTimeout(0) }
+    defer { conn.setRecvTimeout(TCPConnection.sessionRecvTimeout) }
     let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(timeoutSeconds) * 1_000_000_000
     let expected = authMAC(key: key, nonce: nonce)
     while DispatchTime.now().uptimeNanoseconds < deadline {
         let hd = try conn.recvExact(HEADER_SIZE)
         guard let h = PacketHeader.decode(hd) else { throw POSIXError(.EBADMSG) }
+        // This read is before authentication; do not let a 20-byte header make
+        // the server allocate gigabytes (the listener has a backlog of one).
+        guard h.payloadLength <= UInt32(TCPConnection.maxPayload) else {
+            throw POSIXError(.EBADMSG)
+        }
         let payload = try conn.recvExact(Int(h.payloadLength))
         if h.type == .authResponse {
             guard authMACMatches(expected, payload) else { throw POSIXError(.EACCES) }
@@ -157,27 +162,35 @@ private func awaitClientUpgrade(conn: TCPConnection, key: Data, nonce: Data) thr
     // Same 2 s budget as the client's wait for the reply: if we gave up earlier
     // we would start the session while the client still expects an authExchange
     // reply, and that packet would arrive as garbage mid-stream.
-    conn.setRecvTimeout(2)
-    defer { conn.setRecvTimeout(0) }
-    guard let (head, body) = try? conn.recvFrame() else { return nil }
+    // Wait for the first byte before giving the frame a full session read
+    // budget. The old code used a 2 s timeout for the whole frame; a slow or
+    // fragmented config left half a frame consumed and desynchronised the
+    // stream. If no upgrade/config arrives, this is an old client: start the
+    // session normally.
+    guard conn.waitReadable(seconds: 2) else { return nil }
+    conn.setRecvTimeout(TCPConnection.sessionRecvTimeout)
+    defer { conn.setRecvTimeout(TCPConnection.sessionRecvTimeout) }
+    let (head, body) = try conn.recvFrame()
 
     if head.type == .authExchange, body.count == 32 {
-        if let upgraded = try? finishKeyExchange(conn: conn, key: key, nonce: nonce, peerPublic: body) {
-            // The exchange consumed the first frame; the size request (if any)
-            // is the next one.
-            return upgraded ? conn.nextConfig() : nil
+        // The exchange consumed the first frame; the size request (if any)
+        // is the next one.
+        guard try finishKeyExchange(conn: conn, key: key, nonce: nonce, peerPublic: body) else {
+            return nil
         }
-        return nil
+        return try conn.nextConfig()
     }
     return head.type == .config ? SessionConfig.decode(body) : nil
 }
 
 private extension TCPConnection {
     /// Reads at most one config frame, then restores the timeout.
-    func nextConfig() -> SessionConfig? {
-        setRecvTimeout(1)
-        defer { setRecvTimeout(0) }
-        guard let (head, body) = try? recvFrame(), head.type == .config else { return nil }
+    func nextConfig() throws -> SessionConfig? {
+        guard waitReadable(seconds: 1) else { return nil }
+        setRecvTimeout(TCPConnection.sessionRecvTimeout)
+        defer { setRecvTimeout(TCPConnection.sessionRecvTimeout) }
+        let (head, body) = try recvFrame()
+        guard head.type == .config else { return nil }
         return SessionConfig.decode(body)
     }
 }
