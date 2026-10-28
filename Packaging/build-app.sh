@@ -2,18 +2,25 @@
 # Assembles dist/BoltKVM.app from the SwiftPM build. No Xcode project: the
 # bundle is just Info.plist + a Mach-O + (optionally) an icon.
 #
-# Signing identity: BOLTKVM_CODESIGN_IDENTITY, default "-" (ad-hoc). Ad-hoc
-# signing changes the cdhash on every build, which makes macOS treat the app as
-# new for TCC — grant Screen Recording once per build, or sign with a stable
-# self-signed certificate ("BoltKVM Local") and keep the permission.
+# Signing identity: BOLTKVM_CODESIGN_IDENTITY. If unset and the local
+# "BoltKVM Local" identity exists, use it; otherwise fall back to "-" (ad-hoc).
+# Ad-hoc signing changes the cdhash on every build, which makes macOS treat the
+# app as new for TCC. The stable local identity keeps Screen Recording and
+# Accessibility grants across rebuilds.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-IDENTITY="${BOLTKVM_CODESIGN_IDENTITY:--}"
+if [ -n "${BOLTKVM_CODESIGN_IDENTITY:-}" ]; then
+  IDENTITY="$BOLTKVM_CODESIGN_IDENTITY"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -q '"BoltKVM Local"'; then
+  IDENTITY="BoltKVM Local"
+else
+  IDENTITY="-"
+fi
 APP="dist/BoltKVM.app"
 
 echo "==> swift build -c release"
-swift build -c release
+swift build -c release ${BOLTKVM_SWIFT_BUILD_FLAGS:-}
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -24,12 +31,13 @@ cp .build/release/boltkvm "$APP/Contents/MacOS/boltkvm-server"   # not "boltkvm"
 cp Packaging/Info.plist "$APP/Contents/Info.plist"
 
 # Stamp the bundle so Finder -> Get Info always answers "which build is this".
-# CI passes BOLTKVM_VERSION (tag) and BOLTKVM_BUILD (run number); a local build
-# falls back to git describe, which keeps the exact tag/commit and adds
-# "-dirty" when the working tree has uncommitted edits.
+# CI passes BOLTKVM_VERSION (tag) and BOLTKVM_BUILD (run number). A local build
+# uses the numeric version from Info.plist; using `git describe` here produced
+# strings like "0.12.1-29-g8330f9f", which are not valid CFBundleShortVersion
+# values and made LaunchServices/TCC comparisons unreliable.
 DEFAULT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
 DEFAULT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Contents/Info.plist")
-VERSION="${BOLTKVM_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo "$DEFAULT_VERSION")}"
+VERSION="${BOLTKVM_VERSION:-$DEFAULT_VERSION}"
 VERSION="${VERSION#v}"
 BUILD="${BOLTKVM_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo "$DEFAULT_BUILD")}"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"

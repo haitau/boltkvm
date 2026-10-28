@@ -58,9 +58,10 @@ CGEvent 注入              ◄── 输入与音频 ──────── C
 ## 应用模式（推荐）
 
 ```bash
-./Packaging/build-app.sh    # 编译 release 并组装 dist/BoltKVM.app
-open dist/BoltKVM.app       # 首次启动选择角色，后续可在顶部菜单「角色」中切换
+./scripts/install-app.sh    # 编译 release、签名、安装到 /Applications 并启动
 ```
+
+首次启动选择角色，后续可在顶部菜单「角色」中切换。只组装 `dist/BoltKVM.app`、不安装时用 `./Packaging/build-app.sh`。安装脚本会把上一版保留为 `/Applications/BoltKVM.app.bak`，签名优先使用本机稳定的 `BoltKVM Local` 证书。
 
 单个应用包支持两种运行角色：
 
@@ -104,11 +105,11 @@ open dist/BoltKVM.app       # 首次启动选择角色，后续可在顶部菜�
 
 主控端应用使用窗口内 `NSEvent` 本地监听捕获键鼠，无需申请「输入监控」权限（仅 CLI 全屏 `--input` 模式使用 `CGEventTap` 时需要输入监控权限）。
 
-默认打包使用 ad-hoc 签名（`-`），每次重编译都会改变二进制 `cdhash`，导致 macOS TCC 将其视为新应用并要求重新授权。日常开发建议生成并信任本地自签名证书：
+打包脚本会优先使用本机稳定的 `BoltKVM Local` 证书；没有该证书时才回退 ad-hoc 签名（`-`）。ad-hoc 每次重编译都会改变二进制 `cdhash`，导致 macOS TCC 将其视为新应用并要求重新授权；稳定证书可让屏幕录制/辅助功能授权跨重编译保留。首次使用可生成并信任：
 
 ```bash
 ./scripts/make-signing-identity.sh                                  # 生成并信任 "BoltKVM Local"
-BOLTKVM_CODESIGN_IDENTITY="BoltKVM Local" ./Packaging/build-app.sh
+./scripts/install-app.sh
 ```
 
 应用图标由 `swift scripts/make-icon.swift Packaging/AppIcon.icns` 生成。
@@ -118,10 +119,10 @@ BOLTKVM_CODESIGN_IDENTITY="BoltKVM Local" ./Packaging/build-app.sh
 ### 1. 构建与部署
 
 ```bash
-./Packaging/build-app.sh
+./scripts/install-app.sh
 ```
 
-将生成的 `dist/BoltKVM.app` 拷贝到两台 Mac 的 `/Applications`。若被控端已配置 SSH，可执行 `./scripts/deploy-app.sh <被控端地址>` 自动完成打包、上传、停旧进程与启动。
+这会把最新构建直接安装到本机 `/Applications/BoltKVM.app` 并启动，旧版保留在 `/Applications/BoltKVM.app.bak`。两台 Mac 各自运行一次即可；若被控端已配置 SSH，可执行 `./scripts/deploy-app.sh <被控端地址>` 自动完成打包、上传、停旧进程与启动。
 
 ### 2. 配置被控端
 

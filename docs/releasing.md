@@ -24,7 +24,7 @@ git push origin v0.12.1
 发版前检查：
 
 - `main` 的 CI 全绿；
-- 本地构建的版本号已盖章：`build-app.sh` 默认用 `git describe --tags --always --dirty` 与 `git rev-list --count HEAD` 写入 `CFBundleShortVersionString` / `CFBundleVersion`，也可用 `BOLTKVM_VERSION` / `BOLTKVM_BUILD` 覆盖；
+- 本地构建的版本号已盖章：`build-app.sh` 默认使用 `Packaging/Info.plist` 的数值版本（当前 0.12.2）与提交数 `git rev-list --count HEAD`，CI 用 `BOLTKVM_VERSION`（标签）与 `BOLTKVM_BUILD`（运行号）覆盖；本地不再把 `git describe` 的 `0.12.1-29-g...` 直接写进 `CFBundleShortVersionString`，因为它不是合法的数值版本；
 - 只给要发布的提交打 `v*` 标签，不要在普通提交上打标签。
 
 **只推送 `main` 不会发布**：`release.yml` 只监听 `v*` 标签，普通提交只触发 `ci.yml`。因此日常合并、文档修正都不需要担心误发版；要发版时先确认 `main` 的 CI 全绿，再打标签。
@@ -32,9 +32,9 @@ git push origin v0.12.1
 ## 版本号规则
 
 - Git 标签：`v0.12.1`（发布名显示为 `0.12.1`）；
-- `CFBundleShortVersionString`：`0.12.1`（标签去掉 `v`）；
+- `CFBundleShortVersionString`：发布时用标签去掉 `v`（如 `0.12.1`）；本地开发默认 `0.12.2`；
 - `CFBundleVersion`：CI 使用 `GITHUB_RUN_NUMBER`，本地使用提交数 `git rev-list --count HEAD`；
-- 本地工作树有未提交改动时，`git describe --dirty` 会得到 `0.12.1-1-gabc1234-dirty` 这类版本串，便于区分已发布包。
+- 本地构建用 `CFBundleVersion`（提交数）区分最新代码；工作树有未提交改动时不会改变 `CFBundleShortVersionString`，避免产生 macOS 不接受的版本串。
 
 ## 持续集成（CI）
 

@@ -140,11 +140,20 @@ BOLTKVM_AUDIO_ROUTE_TEST=1 \
   swift test --disable-sandbox --scratch-path .build --filter AudioRouteChangeTests
 ```
 
-已组装 `dist/BoltKVM.app`（ad-hoc 签名，包含本次 helper）。`/Applications/BoltKVM.app` 仍是旧版本；明早若要从应用里看效果，先运行 `dist/BoltKVM.app`，或在仓库执行 `Packaging/build-app.sh` 后替换。直接替换 `/Applications` 版本会改变 ad-hoc 签名，macOS 会要求重新授予「屏幕录制」权限。
+2026-10-28 09:11 更新：已用 `./scripts/install-app.sh` 把最新构建安装到 `/Applications/BoltKVM.app`（0.12.2 / build 203），应用与内置 helper 均为本次版本；签名使用本机稳定的 `BoltKVM Local` 证书（非 ad-hoc），上一版保留在 `/Applications/BoltKVM.app.bak`，并已启动应用。稳定签名下，屏幕录制/辅助功能授权只需授予一次；若从旧的 ad-hoc 版本升级，首次切到被控端时仍需按提示重新授权。
+
+## 后续安装方式
+
+```bash
+./scripts/install-app.sh              # 编译、签名、安装到 /Applications 并启动
+./scripts/install-app.sh --no-build   # 安装现有 dist/BoltKVM.app
+```
+
+`Packaging/build-app.sh` 仍只组装 `dist/BoltKVM.app`（CI/远端部署用）；它现在默认优先使用 `BoltKVM Local` 稳定证书，本地版本用 `Info.plist` 的数值版本，避免把 `0.12.1-29-g...` 写进 `CFBundleShortVersionString`。
 
 ## 明早建议
 
-1. 解锁后运行 `dist/BoltKVM.app`，先验证 A-4：全屏、等待工具栏隐藏超过一个轮询周期，录屏或截帧看顶部；同时确认 A-3 复选框与接收目录。
+1. 直接使用已安装的 `/Applications/BoltKVM.app`（0.12.2）验证 A-4：全屏、等待工具栏隐藏超过一个轮询周期，录屏或截帧看顶部；同时确认 A-3 复选框与接收目录。若系统提示屏幕录制/辅助功能，按提示授权后重开应用。
 2. 用两台机器或雷雳对端验证 A-3：文本、富文本、PNG、单文件、文件夹、同名文件、断线中断；确认不会出现同机回环的两份。
 3. 播放网易云音乐，切蓝牙/有线，确认 A-2 真能暂停；若不响应，补 AppleScript 或媒体键回退。
 4. 听感确认 A-1：主控端有声、被控端无声；断开后被控端恢复原音量/静音状态。
