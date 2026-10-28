@@ -25,15 +25,15 @@
   - 第一次 `isVisible = true` 让 AppKit 创建 `NSToolbarFullScreenWindow`；
   - 下一个 runloop 隐藏，再在 200 ms 后显示；进入全屏 0.7 s 后还会在指针不在顶边时做一次隐藏预热；
   - 之后同一全屏会话直接显示，不再重复预热。
-- 居中：`centeredItemIdentifier = tbMission`，任务控制作为中心锚点，桌面紧挨其右。
+- 居中：使用 macOS 13+ 的 `centeredItemIdentifiers = [tbMission, tbDesktop]`，把两个标准项作为一个居中集合。旧的 `centeredItemIdentifier` 只能指定一个锚点，窗口从 1200 pt 拉宽到远端尺寸后两个按钮会留在右侧；必须在 `window.toolbar` 赋值后再设置该属性。窗口标题改为 `titleVisibility = .hidden`，避免标题和居中按钮重叠。
 - 画面位移使用全屏工具栏窗口的实际下沿：菜单栏显示时是 30 + 68 = 98 pt，菜单栏自动隐藏时是 68 pt（窗口模式仍是 52 pt）。之前只按固定 52/68 下移，远端画面会顶到菜单栏/工具栏下沿，或留下黑带。
-- 窗口模式的工具栏、标题栏和状态标签保持不变。
+- 窗口模式保留原生标题栏材质、交通灯和分隔线策略；标题隐藏，52 pt 标题栏里只显示图标（toolTip 可读），全屏 68 pt 工具栏显示图标和文字。
 
 ## 验证
 
 ```bash
 swift build -c release --disable-sandbox --scratch-path .build
-# 通过；app 版本 0.12.2 (214)
+# 通过；app 版本 0.12.2 (215)
 
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --disable-sandbox --scratch-path .build
 # Executed 92 tests, with 1 test skipped and 0 failures

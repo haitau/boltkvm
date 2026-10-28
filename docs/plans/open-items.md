@@ -90,6 +90,6 @@
 
 ### 4.3 2026-10-28 全屏工具栏首次弹出无按钮
 
-- **最终实现**：回到原生 `NSToolbar`，但把动作项改为标准 `NSToolbarItem`（系统绘制图标、文字和按压态），不再使用首次布局会空白的 view-based 自定义项。全屏第一次显隐额外做一次“显示→隐藏→显示”预热，让 `NSToolbarFullScreenWindow` 完成首次布局；之后直接显示。画面按全屏工具栏窗口的实际下沿下移：菜单栏显示时 98 pt，菜单栏自动隐藏时为 68 pt；不再写死 52/98。
-- **验证**：窗口模式截图可见原生「调度中心」「桌面」图标与文字；首次全屏顶边停留日志出现 `toolbar shown ... shifted down by 68/98 pt`（随菜单栏是否显示），全屏工具栏子窗口 3008×68；`swift test` 92 项通过（1 项跳过）。
+- **最终实现**：回到原生 `NSToolbar`，但把动作项改为标准 `NSToolbarItem`（系统绘制图标、文字和按压态），不再使用首次布局会空白的 view-based 自定义项。全屏第一次显隐额外做一次 `alpha=0` 的隐藏预热，让 `NSToolbarFullScreenWindow` 完成首次布局；之后直接显示。动作项用 macOS 13+ 的 `centeredItemIdentifiers = [tbMission, tbDesktop]` 整体居中（旧的单锚点 `centeredItemIdentifier` 在窗口拉宽后会留在右侧），并隐藏窗口标题避免与按钮重叠。画面按全屏工具栏窗口的实际下沿下移：菜单栏显示时 98 pt，菜单栏自动隐藏时为 68 pt；不再写死 52/98。
+- **验证**：窗口从 1200 pt 拉宽到 2764 pt 后，窗口模式截图两个原生按钮位于窗口中心（`NSToolbarView` 2764 pt，item viewer 1348/1379，窗口中心 1382）；窗口模式 52 pt 标题栏只显示图标，全屏 68 pt 工具栏显示图标和文字。首次全屏顶边停留日志出现 `toolbar shown ... shifted down by 68/98 pt`（随菜单栏是否显示），全屏工具栏子窗口 3008×68；`swift test` 92 项通过（1 项跳过）；本机 app 215。
 - **边界**：SCK/系统截图不采集 `NSToolbarFullScreenWindow` 子窗口，无法用静态截图直接证明全屏按钮像素；本机以窗口模式截图、子窗口尺寸与日志推断。未做旧版 macOS、多显示器、深浅色切换的逐一验证；A-4 的长周期闪烁仍需单独录屏确认。

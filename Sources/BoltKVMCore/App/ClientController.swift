@@ -191,11 +191,13 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         toolbar.displayMode = .iconAndLabel
         toolbar.allowsUserCustomization = false
         toolbar.autosavesConfiguration = false
-        // 屏幕共享的三个按钮是居中的；把第一个动作项设为居中锚点，
-        // 第二个紧挨其右，状态留在最右。
-        toolbar.centeredItemIdentifier = Self.tbMission
+        // 屏幕共享的两个动作按钮作为一组居中。macOS 13+ 用
+        // centeredItemIdentifiers 把两个标识一起加入居中集合；旧 API 只能
+        // 指定一个锚点，窗口变宽后会把按钮留在右侧。
+        window?.titleVisibility = .hidden
         window?.toolbar = toolbar
         window?.toolbarStyle = .unified
+        toolbar.centeredItemIdentifiers = [Self.tbMission, Self.tbDesktop]
     }
 
     /// A standard toolbar item, so AppKit draws the icon, label and pressed
@@ -229,9 +231,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     /// height. The top of the remote screen starts just below the toolbar and
     /// the bottom goes off-screen, exactly like Screen Sharing; the drawable is
     /// never resized, so the picture cannot change aspect ratio. `chrome` is
-    /// the band height (52 pt windowed; menu bar + toolbar = 98 pt in
-    /// fullscreen on this macOS), passed in so the geometry is unit testable
-    /// without a window.
+    /// the band height (52 pt windowed; 68/98 pt fullscreen depending on
+    /// whether the menu bar is showing), passed in so the geometry is unit
+    /// testable without a window.
     enum ChromeLayout {
         static func videoFrame(content: CGSize, chrome: CGFloat,
                                fullScreen: Bool, toolbarVisible: Bool) -> CGRect {
@@ -264,9 +266,10 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         // new contentLayoutRect; use the last known band height for that frame
         // instead of showing one unshifted frame.
         var chrome = measured > 0 ? measured : (toolbarVisible ? chromeHeight : 0)
-        // In fullscreen the menu bar (30 pt) + AppKit toolbar (68 pt) cover the
-        // top 98 pt, while the windowed band is 52 pt. Shift by the real chrome
-        // so no remote pixel is hidden under the menu bar or toolbar.
+        // In fullscreen the toolbar window's bottom is 68 pt from the top when
+        // the menu bar is hidden, and 98 pt when it is showing; the windowed
+        // band is 52 pt. Shift by the real chrome so no remote pixel is hidden
+        // under the menu bar or toolbar.
         if fullScreen, toolbarVisible {
             chrome = max(chrome, fullScreenChromeHeight)
         }
@@ -281,12 +284,8 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         }
     }
 
-    /// Distance from the content top to the bottom of AppKit's fullscreen
-    /// toolbar. Do not derive this from the child window frame: during the
-    /// fullscreen reveal animation its height/position are intermediate (44–84
-    /// pt measured), which is why the remote picture kept sliding under the
-    /// toolbar. Use the stable screen menu-bar height + the fullscreen toolbar
-    /// height (68 pt; the windowed band is 52 pt).
+    /// The AppKit child window that hosts the fullscreen toolbar. Its frame is
+    /// the only authoritative source for where the toolbar actually ends.
     private var fullScreenToolbarWindow: NSWindow? {
         window?.childWindows?.first {
             String(describing: type(of: $0)).contains("ToolbarFullScreen")
