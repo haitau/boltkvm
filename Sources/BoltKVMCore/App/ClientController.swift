@@ -595,7 +595,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     }
 
     func shutdown() {
-        session?.disconnect()
+        session?.disconnect(pauseRemoteMedia: true)
         session = nil
         window?.close()
     }
@@ -621,7 +621,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         log("window: closed by user")
         // Closing the window *is* the disconnect (R4); for the client role the
         // app has nothing left to do, so it quits the way a document window would.
-        session?.disconnect()
+        session?.disconnect(pauseRemoteMedia: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.onClosed?()
         }

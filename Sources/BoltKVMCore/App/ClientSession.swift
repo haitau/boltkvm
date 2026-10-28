@@ -423,7 +423,17 @@ final class ClientSession: @unchecked Sendable {
         }
     }
 
-    func disconnect() {
+    /// Closing the controller is an intentional disconnect, not a dropped
+    /// network. If this session was playing the remote's audio, pause its Now
+    /// Playing app first; otherwise the controlled Mac's output is unmuted on
+    /// teardown and the music abruptly resumes on its speaker (R5).
+    ///
+    /// `connect()` also calls this before replacing a session, so an old
+    /// session with audio selected gets the same treatment.
+    func disconnect(pauseRemoteMedia: Bool = true) {
+        if pauseRemoteMedia, audio != nil, isActive {
+            sendCommand(.pauseMedia)
+        }
         endRouteSystemMute()
         _ = bumpGeneration()
         task?.cancel()

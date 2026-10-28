@@ -35,6 +35,10 @@ final class Server: NSObject, SCStreamOutput {
     /// selected audio. Kept separate from the explicit `--local-mute` opt-in so
     /// stop() restores whichever one is active.
     private var clientAudioMute: AudioOutputMute?
+    /// True between `muteLocalOutput` and `unmuteLocalOutput`/session end,
+    /// even when muting the device failed. The cleanup path uses it to pause
+    /// the Now Playing app before restoring the controlled Mac's output.
+    private var clientAudioActive = false
     private var clientAudioMuteLock = NSLock()
     private var dumped = false
 
@@ -573,20 +577,22 @@ final class Server: NSObject, SCStreamOutput {
         }
     }
 
-    /// Stop() is async; taking the mute out under a synchronous helper keeps
+    /// Stop() is async; taking the state out under a synchronous helper keeps
     /// NSLock out of the async body (Swift 6 flags that as an error).
-    private func takeClientAudioMute() -> AudioOutputMute? {
+    private func takeClientAudioState() -> (active: Bool, mute: AudioOutputMute?) {
         clientAudioMuteLock.lock()
         defer { clientAudioMuteLock.unlock() }
-        let mute = clientAudioMute
+        let state = (clientAudioActive, clientAudioMute)
+        clientAudioActive = false
         clientAudioMute = nil
-        return mute
+        return state
     }
 
     private func setClientAudioActive(_ active: Bool) {
         clientAudioMuteLock.lock()
         defer { clientAudioMuteLock.unlock() }
         if active {
+            clientAudioActive = true
             guard clientAudioMute == nil, localMute == nil else { return }
             let mute = AudioOutputMute()
             if mute.start() {
@@ -595,17 +601,28 @@ final class Server: NSObject, SCStreamOutput {
             } else {
                 log("audio: client selected audio, but local output could not be muted; remote audio continues")
             }
-        } else if let mute = clientAudioMute {
-            mute.stop()
-            clientAudioMute = nil
-            log("audio: client audio ended; restored controlled Mac output")
+        } else {
+            clientAudioActive = false
+            if let mute = clientAudioMute {
+                mute.stop()
+                clientAudioMute = nil
+                log("audio: client audio ended; restored controlled Mac output")
+            }
         }
     }
 
     func stop() async {
+        let audioState = takeClientAudioState()
+        if audioState.active {
+            // The client may have closed its window without sending a pause
+            // (crash, network loss, or a race with the explicit command). Do
+            // not unmute a Mac whose music is still playing.
+            log("audio: client ended with audio active; pausing media before unmute")
+            await MainActor.run { performRemoteAction(.pauseMedia) }
+        }
         localMute?.stop()
         localMute = nil
-        takeClientAudioMute()?.stop()
+        audioState.mute?.stop()
         clipboard?.stop()
         clipboard = nil
         if let stream {
