@@ -19,7 +19,7 @@
 
 ## 验证
 
-- mini 已部署 218；服务端日志中有 `audio source: 48000 Hz ...` 和 `capture started`，说明 `--audio` 采集仍在运行。
+- mini 已部署 219；服务端日志中有 `audio source: 48000 Hz ...` 和 `capture started`，说明 `--audio` 采集仍在运行。
 - **未选择音频**（`hosts.json` 中 `"audio": false`）重新连接：mini 最新会话只有
   `capture started` / `audio source` / `stats ... audio=...`，**没有** `command: pauseMedia`，也**没有** `media: paused the current Now Playing app`；主控端日志也没有 `audio: asked server to pause media`。
 - **临时选择音频**（同一 host 条目改为 `"audio": true`，测完已恢复 false）：主控端日志出现
