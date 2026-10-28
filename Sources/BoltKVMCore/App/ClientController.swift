@@ -4,7 +4,7 @@ import Foundation
 
 /// Client role window: the remote screen, and nothing else. Which machine, key,
 /// input and audio all come from the connection list (that is where a "连接" is
-/// configured); status lives in the window subtitle, like Screen Sharing.
+/// configured); status lives in the toolbar's trailing edge.
 final class ClientController: NSWindowController, NSWindowDelegate {
     private var renderer: Renderer?
     /// 60 s windowed report from the renderer, so a long GUI session leaves the
@@ -13,7 +13,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     private var session: ClientSession?
 
     private var videoView: NSView!
-    /// Connection state, mirrored into the window subtitle.
+    /// Connection state, mirrored into the toolbar's trailing label.
     private var stateText = L.t("client.state.idle")
     private var statsText = ""
     /// How much of 1:1 the picture gets, shown in the toolbar ("92%").
@@ -41,6 +41,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
     private static let tbMission = NSToolbarItem.Identifier("boltkvm.missionControl")
     private static let tbDesktop = NSToolbarItem.Identifier("boltkvm.desktop")
+    private static let tbStatus = NSToolbarItem.Identifier("boltkvm.status")
+    /// Live `fps · bitrate` label hosted in the toolbar's trailing edge.
+    private let toolbarStatusLabel = NSTextField(labelWithString: "")
     /// "桌面" becomes "还原窗口" after the remote moved its windows aside, so the
     /// second press does what the title says instead of toggling the remote back.
     private var desktopToolbarItem: NSToolbarItem?
@@ -132,6 +135,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         session?.onState = { [weak self] state in
             guard let self else { return }
             self.stateText = state.text
+            self.toolbarStatusLabel.textColor = state == .streaming ? .systemGreen : .secondaryLabelColor
             self.refreshToolbarStatus()
             // Closing the window is the disconnect (R4); there is no button.
             if state == .streaming, self.reportTimer == nil {
@@ -160,6 +164,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             self.statsText = text
             self.refreshToolbarStatus()
         }
+        toolbarStatusLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        toolbarStatusLabel.textColor = .secondaryLabelColor
+        toolbarStatusLabel.alignment = .right
         installToolbar()
         setupFullScreenChrome()
         layoutVideo()
@@ -184,11 +191,10 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         toolbar.displayMode = .iconAndLabel
         toolbar.allowsUserCustomization = false
         toolbar.autosavesConfiguration = false
-        // Screen Sharing keeps the traffic lights and the host name on the
-        // left, then pushes control/App/Mission Control/Desktop to the right.
-        // Do not center the items: the windowed native toolbar is trailing.
+        // 用户只要求动作按钮居中：标题和右侧状态保持原样。
         window?.toolbar = toolbar
         window?.toolbarStyle = .unified
+        toolbar.centeredItemIdentifiers = [Self.tbMission, Self.tbDesktop]
     }
 
     /// A standard toolbar item, so AppKit draws the icon, label and pressed
@@ -439,7 +445,6 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             refreshToolbarStatus()
             return
         }
-        window?.title = host.name.isEmpty ? host.host : host.name
         Prefs.host = host.host
         Prefs.port = Int(host.port)
         let forwardInput = host.forwardInput ?? Prefs.forwardInput
@@ -527,9 +532,9 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         return measured > 0 ? measured : chromeHeight
     }
 
-    /// `已连接 · 24 fps · 385 Mbps · 92%` lives under the host name in the
-    /// window subtitle. The trailing percentage is the picture scale: 100% is
-    /// 1:1 (sharp), lower means the window is smaller than the stream.
+    /// `已连接 · 24 fps · 385 Mbps · 92%` lives in the toolbar's trailing edge.
+    /// The trailing percentage is the picture scale: 100% is 1:1 (sharp), lower
+    /// means the window is smaller than the stream and the image is resampled.
     private func refreshToolbarStatus() {
         var parts: [String] = []
         if !stateText.isEmpty { parts.append(stateText) }
@@ -540,7 +545,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         if session?.isActive == true, streamColor == .wide {
             parts.append("P3")
         }
-        window?.subtitle = parts.joined(separator: " · ")
+        toolbarStatusLabel.stringValue = parts.joined(separator: " · ")
     }
 
     // MARK: - Remote system shortcuts
@@ -616,7 +621,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
 
 extension ClientController: NSToolbarDelegate {
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.tbMission, Self.tbDesktop]
+        [.flexibleSpace, Self.tbMission, Self.tbDesktop, .flexibleSpace, Self.tbStatus]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -641,6 +646,14 @@ extension ClientController: NSToolbarDelegate {
                                             action: #selector(showDesktop))
             desktopToolbarItem = desktop
             return desktop
+        case Self.tbStatus:
+            toolbarStatusLabel.setFrameSize(NSSize(width: 150, height: 18))
+            toolbarStatusLabel.alignment = .right
+            let item = NSToolbarItem(itemIdentifier: identifier)
+            item.label = ""
+            item.paletteLabel = L.t("client.label.stats")
+            item.view = toolbarStatusLabel
+            return item
         default:
             return nil
         }
