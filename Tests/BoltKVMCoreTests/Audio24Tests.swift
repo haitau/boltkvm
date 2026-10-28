@@ -17,18 +17,23 @@ final class Audio24Tests: XCTestCase {
         let converter = try XCTUnwrap(AVAudioConverter(from: src, to: dst))
         let input = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: src, frameCapacity: 1024))
         input.frameLength = 1024
-        let output = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: dst, frameCapacity: 3072))
-        var supplied = false
-        var error: NSError?
-        let status = converter.convert(to: output, error: &error) { _, outStatus in
-            if supplied { outStatus.pointee = .endOfStream; return nil }
-            supplied = true
-            outStatus.pointee = .haveData
-            return input
+        // Repeat on the SAME converter: `.endOfStream` permanently ended it
+        // after the first buffer, so ScreenCaptureKit delivered only one audio
+        // packet per session.
+        for round in 0..<5 {
+            let output = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: dst, frameCapacity: 3072))
+            var supplied = false
+            var error: NSError?
+            let status = converter.convert(to: output, error: &error) { _, outStatus in
+                if supplied { outStatus.pointee = .noDataNow; return nil }
+                supplied = true
+                outStatus.pointee = .haveData
+                return input
+            }
+            XCTAssertNil(error, "round \(round)")
+            XCTAssertNotEqual(status, .error, "round \(round)")
+            XCTAssertGreaterThan(output.frameLength, 0, "round \(round)")
         }
-        XCTAssertNil(error)
-        XCTAssertNotEqual(status, .error)
-        XCTAssertGreaterThan(output.frameLength, 0)
     }
 
     func test24BitGraphBuildsWithoutPlayingAudio() throws {

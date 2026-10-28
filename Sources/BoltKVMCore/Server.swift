@@ -766,7 +766,11 @@ final class Server: NSObject, SCStreamOutput {
         var conversionError: NSError?
         _ = converter.convert(to: outBuf, error: &conversionError) { _, status in
             if supplied {
-                status.pointee = .endOfStream
+                // Do NOT use .endOfStream: it permanently ends this converter,
+                // so only the first ScreenCaptureKit buffer would ever produce
+                // audio. .noDataNow says "no more input for now" and leaves the
+                // converter reusable for the next buffer.
+                status.pointee = .noDataNow
                 return nil
             }
             supplied = true
