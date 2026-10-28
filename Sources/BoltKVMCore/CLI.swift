@@ -587,19 +587,6 @@ public enum CLI {
                         try? c.send(timeSyncRequest())
                     }
                     pump.onFormat = { _ in
-                        // Selecting audio must mute the controlled Mac's local
-                        // output, not pause its player: that player is the source
-                        // we are forwarding.
-                        if audio != nil, !askedInitialMute {
-                            askedInitialMute = true
-                            do {
-                                try c.send(packet(type: .command,
-                                                  payload: Data([RemoteAction.muteLocalOutput.rawValue])))
-                                log("audio: asked server to mute local output (client audio enabled)")
-                            } catch {
-                                log("audio: could not send local mute request: \(error)")
-                            }
-                        }
                         if wantsInput && !inputStarted {
                             inputStarted = true
                             DispatchQueue.main.async {
@@ -608,7 +595,19 @@ public enum CLI {
                             }
                         }
                     }
-                    pump.onAudio = { [audio] payload in audio?.enqueue(payload) }
+                    pump.onAudio = { [audio, weak c] payload in
+                        if audio != nil, !askedInitialMute, let c {
+                            do {
+                                try c.send(packet(type: .command,
+                                                  payload: Data([RemoteAction.muteLocalOutput.rawValue])))
+                                askedInitialMute = true
+                                log("audio: asked server to mute local output (first audio packet)")
+                            } catch {
+                                log("audio: could not send local mute request: \(error)")
+                            }
+                        }
+                        audio?.enqueue(payload)
+                    }
                     pump.onWindow = { window in
                         packets += window.packets
                         frames += window.frames

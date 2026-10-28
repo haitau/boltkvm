@@ -202,21 +202,6 @@ final class ClientSession: @unchecked Sendable {
                         }
                     }
                     pump.onFormat = { format in
-                        // The first format means the server's command pump is
-                        // fully started. Selecting audio must not pause the
-                        // controlled Mac's player: its sound is what we forward.
-                        // Mute its local output instead, leaving the source
-                        // playing, so it is heard only on this controller.
-                        if audio != nil, !askedInitialMute {
-                            askedInitialMute = true
-                            do {
-                                try c.send(packet(type: .command,
-                                                  payload: Data([RemoteAction.muteLocalOutput.rawValue])))
-                                log("audio: asked server to mute local output (client audio enabled)")
-                            } catch {
-                                log("audio: could not send local mute request: \(error)")
-                            }
-                        }
                         let size = (format.width, format.height)
                         DispatchQueue.main.async {
                             self.renderer.setColorMode(format.color)
@@ -228,7 +213,25 @@ final class ClientSession: @unchecked Sendable {
                             DispatchQueue.main.async { self.startInput(conn: c) }
                         }
                     }
-                    pump.onAudio = { [audio] payload in audio?.enqueue(payload) }
+                    pump.onAudio = { [audio, weak c] payload in
+                        // Do not mute on the first video frame: the server may
+                        // have been launched without --audio, in which case
+                        // there is no audio stream and muting would silence the
+                        // controlled Mac for nothing. The first real audio
+                        // packet proves the source is active. Send the command
+                        // before scheduling that packet locally.
+                        if audio != nil, !askedInitialMute, let c {
+                            do {
+                                try c.send(packet(type: .command,
+                                                  payload: Data([RemoteAction.muteLocalOutput.rawValue])))
+                                askedInitialMute = true
+                                log("audio: asked server to mute local output (first audio packet)")
+                            } catch {
+                                log("audio: could not send local mute request: \(error)")
+                            }
+                        }
+                        audio?.enqueue(payload)
+                    }
                     pump.onWindow = { window in
                         // The host is already in the connect bar; the toolbar only
                         // carries the live numbers. This runs on the pump thread and

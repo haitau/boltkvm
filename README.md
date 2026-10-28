@@ -153,7 +153,7 @@ defaults write io.github.boltkvm server.audio -bool true
 
 然后在菜单栏停止再启动服务即可生效。
 
-**服务端仅以 `--audio` 启动、但主控端没有为该主机选择音频时，不会暂停任何播放器。** 选中音频后，客户端收到第一帧格式时发送 `muteLocalOutput`，服务端用 `AudioOutputMute` 静音本机默认输出，但**不暂停 Now Playing**：源继续播放，ScreenCaptureKit 在设备静音之前取音，所以主控端仍能听到完整声音。主控端断开时服务端恢复保存的静音/音量状态，不自动恢复媒体。
+**服务端仅以 `--audio` 启动、但主控端没有为该主机选择音频时，不会暂停任何播放器。** 选中音频后，客户端收到第一个音频包时发送 `muteLocalOutput`，服务端用 `AudioOutputMute` 静音本机默认输出，但**不暂停 Now Playing**：源继续播放，ScreenCaptureKit 在设备静音之前取音，所以主控端仍能听到完整声音。主控端断开时服务端恢复保存的静音/音量状态，不自动恢复媒体。
 
 主控端正在播放转发音频时，如果默认输出设备发生变化（蓝牙耳机开关、有线耳机插拔），客户端会立即停止本地转发播放并静音**主控端整机默认输出**（不只是 BoltKVM 播放器），同时向服务端发一次 `pauseMedia`，服务端用 MediaRemote 暂停当前 Now Playing 应用。设备稳定后客户端重建一次音频图，2.5 s 后恢复主控端系统输出；被控端媒体保持暂停，不自动恢复。多个 CoreAudio 通知会合并，不会连续发暂停；日志为 `muted Pro system output during route change` 与 `output route changed; asked server to pause media`。
 
