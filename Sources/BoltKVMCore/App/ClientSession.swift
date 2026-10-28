@@ -180,27 +180,8 @@ final class ClientSession: @unchecked Sendable {
                         // playing the forwarded audio. Tell the server to pause
                         // its current Now Playing app, so music does not keep
                         // running on a speaker nobody is listening to.
-                        audio?.onOutputRouteChangeBegan = { [weak self] in
-                            self?.beginRouteSystemMute()
-                        }
-                        audio?.onOutputRouteChange = { [weak self, weak c] in
-                            guard let self, let c else { return }
-                            // One route change can produce several CoreAudio
-                            // notifications. Pause the remote media once, not
-                            // on every notification.
-                            let now = DispatchTime.now().uptimeNanoseconds
-                            self.audioRouteLock.lock()
-                            let due = now &- self.lastRoutePauseAt >= 2_000_000_000
-                            if due { self.lastRoutePauseAt = now }
-                            self.audioRouteLock.unlock()
-                            guard due else { return }
-                            do {
-                                try c.send(packet(type: .command,
-                                                  payload: Data([RemoteAction.pauseMedia.rawValue])))
-                                log("audio: output route changed; asked server to pause media")
-                            } catch {
-                                log("audio: could not send pause request: \(error)")
-                            }
+                        if let audio {
+                            self.installAudioRouteCallbacks(audio, connection: c)
                         }
                         // Ask for the size the connection list chose *before*
                         // anything else: the server reads exactly one frame here.
@@ -353,6 +334,33 @@ final class ClientSession: @unchecked Sendable {
     /// Ask the remote to perform a system-UI action (Mission Control, …).
     /// Keystrokes cannot do this: macOS ignores synthetic events for its own
     /// hotkeys, so the server performs the action itself.
+    /// Route callbacks are installed from a method rather than nested inside
+    /// the auth closure: the auth closure already captures self/c strongly, and
+    /// a nested [weak self] would both warn and obscure the ownership.
+    private func installAudioRouteCallbacks(_ audio: AudioPlayer, connection c: TCPConnection) {
+        audio.onOutputRouteChangeBegan = { [weak self] in
+            self?.beginRouteSystemMute()
+        }
+        audio.onOutputRouteChange = { [weak self, weak c] in
+            guard let self, let c else { return }
+            // One route change can produce several CoreAudio notifications.
+            // Pause the remote media once, not on every notification.
+            let now = DispatchTime.now().uptimeNanoseconds
+            self.audioRouteLock.lock()
+            let due = now &- self.lastRoutePauseAt >= 2_000_000_000
+            if due { self.lastRoutePauseAt = now }
+            self.audioRouteLock.unlock()
+            guard due else { return }
+            do {
+                try c.send(packet(type: .command,
+                                  payload: Data([RemoteAction.pauseMedia.rawValue])))
+                log("audio: output route changed; asked server to pause media")
+            } catch {
+                log("audio: could not send pause request: \(error)")
+            }
+        }
+    }
+
     /// Mute Pro's whole default output while the audio device is changing.
     /// This intentionally stops other local apps too, per the 2026-10-28
     /// requirement; the saved state is restored after the route settles.

@@ -343,7 +343,7 @@ final class AudioPlayer: @unchecked Sendable {
             // A notification from the graph we already replaced must not tear
             // down the new one.
             guard active, current == generation else { return }
-            self.handleOutputRouteSignal(reason: "output configuration changed")
+            self.handleOutputRouteSignal(reason: "output configuration changed", systemMute: false)
         }
     }
 
@@ -357,7 +357,7 @@ final class AudioPlayer: @unchecked Sendable {
             mElement: kAudioObjectPropertyElementMain
         )
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.handleOutputRouteSignal(reason: "default output device changed")
+            self?.handleOutputRouteSignal(reason: "default output device changed", systemMute: true)
             self?.notifyOutputRouteChange()
         }
         let status = AudioObjectAddPropertyListenerBlock(
@@ -375,11 +375,16 @@ final class AudioPlayer: @unchecked Sendable {
     /// immediately, tell the app to mute system output, then coalesce the
     /// rebuild. The later `onOutputRouteChange` is the deliberately delayed
     /// pause request; it is not the thing that stops local playback.
-    private func handleOutputRouteSignal(reason: String) {
+    private func handleOutputRouteSignal(reason: String, systemMute: Bool) {
         controlQueue.async { [weak self] in
             self?.suspendOnControlQueue()
         }
-        notifyRouteChangeBegan()
+        // Only a real default-output change should mute the controller's whole
+        // system output. An engine reconfiguration still stops our player, but
+        // must not silence unrelated local apps.
+        if systemMute {
+            notifyRouteChangeBegan()
+        }
         requestRebuild(reason: reason)
     }
 

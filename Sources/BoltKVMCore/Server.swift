@@ -565,6 +565,16 @@ final class Server: NSObject, SCStreamOutput {
         }
     }
 
+    /// Stop() is async; taking the mute out under a synchronous helper keeps
+    /// NSLock out of the async body (Swift 6 flags that as an error).
+    private func takeClientAudioMute() -> AudioOutputMute? {
+        clientAudioMuteLock.lock()
+        defer { clientAudioMuteLock.unlock() }
+        let mute = clientAudioMute
+        clientAudioMute = nil
+        return mute
+    }
+
     private func setClientAudioActive(_ active: Bool) {
         clientAudioMuteLock.lock()
         defer { clientAudioMuteLock.unlock() }
@@ -584,10 +594,7 @@ final class Server: NSObject, SCStreamOutput {
     func stop() async {
         localMute?.stop()
         localMute = nil
-        clientAudioMuteLock.lock()
-        clientAudioMute?.stop()
-        clientAudioMute = nil
-        clientAudioMuteLock.unlock()
+        takeClientAudioMute()?.stop()
         clipboard?.stop()
         clipboard = nil
         if let stream {
