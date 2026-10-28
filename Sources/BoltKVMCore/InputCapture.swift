@@ -3,6 +3,12 @@ import AppKit
 import CoreGraphics
 import Darwin
 
+/// macOS virtual key codes for the three hardware volume keys. When the client
+/// is playing forwarded audio, these must adjust the controller's own output
+/// instead of being sent to the controlled Mac; otherwise the remote HUD jumps
+/// mute/100% while the user is only changing local headphone volume.
+private let audioPassthroughVolumeKeys: Set<UInt16> = [0x48, 0x49, 0x4A]
+
 private func inputTapCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,
@@ -71,6 +77,8 @@ final class InputCapture {
     private let statsLock = NSLock()
     private let displayBounds: CGRect
     private let tapLocation: CGEventTapLocation
+    /// Playing forwarded audio: keep hardware volume keys local.
+    private let audioSelected: Bool
     private lazy var sender: InputSender = {
         let sender = InputSender(conn: conn)
         sender.onError = { [weak self] error in
@@ -101,8 +109,10 @@ final class InputCapture {
         mask |= CGEventMask(1) << CGEventMask(type.rawValue)
     }
 
-    init(conn: TCPConnection, tapLocation: CGEventTapLocation = .cgSessionEventTap) {
+    init(conn: TCPConnection, tapLocation: CGEventTapLocation = .cgSessionEventTap,
+         audioSelected: Bool = false) {
         self.conn = conn
+        self.audioSelected = audioSelected
         self.tapLocation = tapLocation
         self.displayBounds = CGDisplayBounds(CGMainDisplayID())
     }
@@ -169,6 +179,12 @@ final class InputCapture {
             return Unmanaged.passUnretained(event)
         }
         guard active else { return Unmanaged.passUnretained(event) }
+        if audioSelected, type == .keyDown || type == .keyUp {
+            let code = UInt16(clamping: event.getIntegerValueField(.keyboardEventKeycode))
+            if audioPassthroughVolumeKeys.contains(code) {
+                return Unmanaged.passUnretained(event)
+            }
+        }
 
         // ⌃⌥⌘Q stops forwarding and quits the client.
         if type == .keyDown {
@@ -239,6 +255,8 @@ final class InputCapture {
 /// is mapped onto.
 final class WindowInputCapture {
     private let conn: TCPConnection
+    /// Playing forwarded audio: keep hardware volume keys local.
+    private let audioSelected: Bool
     private lazy var sender: InputSender = {
         let sender = InputSender(conn: conn)
         sender.onError = { [weak self] error in
@@ -280,9 +298,10 @@ final class WindowInputCapture {
     /// remote, so it is never part of any release sweep.
     private static let toggleKey: UInt16 = 57
 
-    init(conn: TCPConnection, view: NSView) {
+    init(conn: TCPConnection, view: NSView, audioSelected: Bool = false) {
         self.conn = conn
         self.view = view
+        self.audioSelected = audioSelected
     }
 
     func start() -> Bool {
@@ -460,6 +479,13 @@ final class WindowInputCapture {
             // next plain click into a control-click — i.e. a right click. Hand
             // everything back instead of dropping the release.
             releaseForwardedState(flags: flags)
+            return event
+        }
+        // Hardware volume keys are the one exception: with forwarded audio,
+        // the controller's own output is what the user is hearing, so keep
+        // these local instead of making the remote HUD jump.
+        if audioSelected, event.type == .keyDown || event.type == .keyUp,
+           audioPassthroughVolumeKeys.contains(event.keyCode) {
             return event
         }
         var nx = Double((point.x - fit.minX) / max(1, fit.width))

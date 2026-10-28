@@ -463,14 +463,14 @@ final class RenderSession: NSObject, NSApplicationDelegate {
         inputCapture = nil
     }
 
-    func restartInput(conn: TCPConnection) {
+    func restartInput(conn: TCPConnection, audioSelected: Bool = false) {
         stopInput()
-        startInput(conn: conn)
+        startInput(conn: conn, audioSelected: audioSelected)
     }
 
-    func startInput(conn: TCPConnection) {
+    func startInput(conn: TCPConnection, audioSelected: Bool = false) {
         guard inputCapture == nil else { return }
-        let cap = InputCapture(conn: conn)
+        let cap = InputCapture(conn: conn, audioSelected: audioSelected)
         if cap.start() {
             inputCapture = cap
         } else {

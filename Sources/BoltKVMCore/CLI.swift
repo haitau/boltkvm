@@ -603,7 +603,8 @@ public enum CLI {
                         if wantsInput && !inputStarted {
                             inputStarted = true
                             DispatchQueue.main.async {
-                                RenderSession.shared.restartInput(conn: c)
+                                RenderSession.shared.restartInput(conn: c,
+                                                                   audioSelected: args.contains("--audio"))
                             }
                         }
                     }

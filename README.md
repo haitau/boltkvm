@@ -78,7 +78,7 @@ CGEvent 注入              ◄── 输入与音频 ──────── C
 - 工具栏居中提供「调度中心」与「桌面」两个远端系统操作（后者按下后变成「还原窗口」，再按一次恢复原来的窗口）；最右侧实时显示 `fps · Mbps`；
 - 全屏下工具栏作为浮层自动隐藏，指针在屏幕顶边停留片刻后浮现；远端画面整体下移一个工具栏高度，尺寸和比例不变（底部超出屏幕），与 macOS「屏幕共享」的表现一致，不再因工具栏出现而被压扁重新缩放；
 - 关闭视频窗口即断开连接并返回主机列表；
-- 仅当鼠标指针位于画面区域内时转发键鼠事件。指针移出画面、窗口失焦或连接断开时，已按下的按键与鼠标键会自动抬起；每次按键注入前也会按事件携带的修饰键掩码对齐远端状态，防止修饰键卡死。
+- 仅当鼠标指针位于画面区域内时转发键鼠事件。指针移出画面、窗口失焦或连接断开时，已按下的按键与鼠标键会自动抬起；每次按键注入前也会按事件携带的修饰键掩码对齐远端状态，防止修饰键卡死。为该主机开启音频并播放时，键盘上的音量加/减/静音键保留在主控端，用来调整本地输出，不再发给被控端；未选音频时仍照常转发。
 
 ### 色彩模式
 
@@ -269,8 +269,8 @@ git tag v0.12.1 && git push origin v0.12.1
 - **安全输入与锁屏限制**：系统处于锁屏或密码输入框（Secure Input）状态时，会话级事件监听会被系统拦截；锁屏解锁请使用系统自带的屏幕共享（VNC）。
 - **不支持多显示器同传**：被控端仅创建并采集一块虚拟屏。
 - **没有可用音频输出设备时**：开启 `--audio` 但机器没有输出设备（例如 CI runner）时，音频链路会降级为静音并记录 `audio: playback unavailable (...)`，视频与输入不受影响，服务端不再崩溃；设备稍后出现会自动重试。
-- **音频输出切换/蓝牙耳机重连**：蓝牙耳机断开再连接、插拔带扬声器的显示器等导致系统默认输出变化时，客户端会自动重建音频输出图，日志出现 `audio: playing to default output (...; graph #n)`，无需重连会话；仍无声时可查 `audio: retrying output` 与 `audio: playback unavailable`。同时会通知被控端暂停当前媒体，日志出现 `media: paused the current Now Playing app`；这是预期行为，不是被控端自己停了。若某播放器不响应系统 Now Playing，暂停可能无效。
-- **被控端媒体暂停**：主控端为该主机选择音频后，日志出现 `media: paused the current Now Playing app` 表示当前播放器已暂停，不是设备被静音；主控端没选音频时不应出现这条日志，重新连接也不会暂停。默认不会改动系统静音/音量。只有显式加 `--local-mute` 才会出现 `audio: muted local output ...`，断开后出现 `audio: restored local output ...`。若旧版本曾被 `SIGKILL` 且留下 `~/Library/Application Support/BoltKVM/mute-state.json`，新服务端启动时会先恢复并删除该标记。
+- **音频输出切换/蓝牙耳机重连**：蓝牙耳机断开再连接、插拔带扬声器的显示器等导致系统默认输出变化时，客户端会立即停止本地转发播放、静音主控端整机默认输出，并通知被控端暂停当前媒体；设备稳定后只重建一次音频图（日志 `audio: playing to default output (...; graph #n)`），2.5 s 后恢复主控端系统声音。日志还会出现 `muted Pro system output during route change`、`media: paused the current Now Playing app`。被控端媒体不自动恢复；若某播放器不响应系统 Now Playing，暂停可能无效。
+- **被控端本地静音**：主控端为该主机选择音频后，服务端日志出现 `audio: client selected audio; muted controlled Mac output`，表示默认输出被静音、Now Playing 仍在播放；断开后出现 `audio: client audio ended; restored controlled Mac output`。主控端没选音频时不会发这条命令，重新连接也不会影响被控端播放。选音频时媒体不会自动暂停；只有换主控端输出设备时才会出现 `media: paused the current Now Playing app`。显式 `--local-mute` 仍可用同一套 `AudioOutputMute`；若旧版本曾被 `SIGKILL` 且留下 `~/Library/Application Support/BoltKVM/mute-state.json`，新服务端启动时会先恢复并删除该标记。
 - **虚拟屏创建失败**：连续重试仍拿不到虚拟屏时，服务端以退出码 3 退出并交给守护逻辑重启，不会回退去采集本地真实桌面（避免把操作者自己的桌面推给主控端）。
 
 ## 里程碑

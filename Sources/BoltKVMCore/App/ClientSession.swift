@@ -299,14 +299,14 @@ final class ClientSession: @unchecked Sendable {
     private func startInput(conn: TCPConnection) {
         guard input == nil, windowInput == nil else { return }
         if let view = inputView {
-            let capture = WindowInputCapture(conn: conn, view: view)
+            let capture = WindowInputCapture(conn: conn, view: view, audioSelected: audio != nil)
             capture.aspectProvider = { [weak self] in self?.renderer.imageAspect ?? 0 }
             if capture.start() {
                 windowInput = capture
                 return
             }
         }
-        let capture = InputCapture(conn: conn)
+        let capture = InputCapture(conn: conn, audioSelected: audio != nil)
         if capture.start() {
             input = capture
         } else {
