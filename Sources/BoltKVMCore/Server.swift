@@ -279,8 +279,11 @@ final class Server: NSObject, SCStreamOutput {
         // audio player for this session.
         if audioEnabled && muteLocalOutput {
             let mute = AudioOutputMute()
-            mute.start()
-            localMute = mute
+            if mute.start() {
+                localMute = mute
+            } else {
+                log("audio: local mute requested, but this output cannot be muted; leaving it audible")
+            }
         }
     }
 
@@ -586,9 +589,12 @@ final class Server: NSObject, SCStreamOutput {
         if active {
             guard clientAudioMute == nil, localMute == nil else { return }
             let mute = AudioOutputMute()
-            mute.start()
-            clientAudioMute = mute
-            log("audio: client selected audio; muted controlled Mac output")
+            if mute.start() {
+                clientAudioMute = mute
+                log("audio: client selected audio; local output is muted")
+            } else {
+                log("audio: client selected audio, but local output could not be muted; remote audio continues")
+            }
         } else if let mute = clientAudioMute {
             mute.stop()
             clientAudioMute = nil

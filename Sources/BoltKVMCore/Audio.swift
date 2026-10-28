@@ -394,7 +394,7 @@ final class AudioPlayer: @unchecked Sendable {
         lock.unlock()
         observe(engine, generation: gen)
         retries = 0
-        log("audio: playing to default output (\(reason); graph #\(startNumber))")
+        log("audio: playing to \(AudioOutputMute.describeDefaultOutput()) (\(reason); graph #\(startNumber))")
     }
 
     /// A rebuild is requested by any signal that the output may have moved:

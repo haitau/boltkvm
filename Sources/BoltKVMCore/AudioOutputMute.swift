@@ -17,6 +17,14 @@ import CoreAudio
 /// binary), the next helper restores the saved state before muting again, so a
 /// crash cannot leave the Mac silent forever.
 final class AudioOutputMute: @unchecked Sendable {
+    private struct MemberState: Codable {
+        let uid: String
+        /// Original mute/volume values. Both are restored even if the fallback
+        /// path used only one of them, so a crash cannot leave a member silent.
+        let mute: UInt32?
+        let volume: Float32?
+    }
+
     private struct State: Codable {
         let uid: String
         let usedMute: Bool
@@ -25,6 +33,19 @@ final class AudioOutputMute: @unchecked Sendable {
         /// The server that owns this mute. A second helper starting while the
         /// first is still alive must not restore the first one's mute.
         let pid: Int32?
+        /// Set when `uid` is an aggregate device with no native mute/volume.
+        /// Its physical subdevices are muted individually instead.
+        let members: [MemberState]?
+
+        init(uid: String, usedMute: Bool, mute: UInt32, volume: Float32?,
+             pid: Int32?, members: [MemberState]? = nil) {
+            self.uid = uid
+            self.usedMute = usedMute
+            self.mute = mute
+            self.volume = volume
+            self.pid = pid
+            self.members = members
+        }
     }
 
     private static let marker: URL = {
@@ -59,7 +80,10 @@ final class AudioOutputMute: @unchecked Sendable {
             log("audio: mute marker is owned by live pid \(pid); leaving it alone")
             return
         }
-        if let dev = device(forUID: state.uid) {
+        if let members = state.members, !members.isEmpty {
+            for member in members { restoreMember(member) }
+            log("audio: restored a stale local-mute marker for \(members.count) aggregate members")
+        } else if let dev = device(forUID: state.uid) {
             if state.usedMute { _ = setUInt32(dev, muteAddress, state.mute) }
             if let volume = state.volume { _ = setVolume(dev, volume) }
             log("audio: restored a stale local-mute marker for \(deviceName(dev) ?? state.uid)")
@@ -67,7 +91,9 @@ final class AudioOutputMute: @unchecked Sendable {
         try? FileManager.default.removeItem(at: marker)
     }
 
-    func start() {
+    @discardableResult
+    func start() -> Bool {
+        var muted = false
         queue.sync {
             guard !self.running else { return }
             self.running = true
@@ -75,9 +101,10 @@ final class AudioOutputMute: @unchecked Sendable {
                 log("audio: no default output device to mute; local output stays as is")
                 return
             }
-            self.mute(dev)
+            muted = self.mute(dev)
             self.installListener()
         }
+        return muted
     }
 
     func stop() {
@@ -92,18 +119,24 @@ final class AudioOutputMute: @unchecked Sendable {
 
     // MARK: - Mute / restore
 
-    private func mute(_ dev: AudioDeviceID) {
-        guard let uid = Self.deviceUID(dev) else { return }
+    @discardableResult
+    private func mute(_ dev: AudioDeviceID) -> Bool {
+        guard let uid = Self.deviceUID(dev) else { return false }
         var muteAddress = Self.muteAddress
         let canMute = AudioObjectHasProperty(dev, &muteAddress)
         let mute = Self.readUInt32(dev, Self.muteAddress) ?? 0
         let volume = Self.readVolume(dev)
+        if !(canMute && Self.isSettable(dev, Self.muteAddress)) && volume == nil {
+            let name = Self.deviceName(dev) ?? uid
+            let members = Self.aggregateMembers(dev)
+            if !members.isEmpty {
+                return self.muteAggregate(dev, uid: uid, name: name, members: members)
+            }
+            log("audio: output device \(name) has no mute or volume control; not muting")
+            return false
+        }
         let state = State(uid: uid, usedMute: canMute && Self.isSettable(dev, Self.muteAddress),
                           mute: mute, volume: volume, pid: getpid())
-        guard state.usedMute || volume != nil else {
-            log("audio: output device \(Self.deviceName(dev) ?? uid) has no mute or volume control; not muting")
-            return
-        }
         self.device = dev
         self.saved = state
         guard self.writeMarker(state) else {
@@ -111,14 +144,14 @@ final class AudioOutputMute: @unchecked Sendable {
             // Better to leave the local output alone than to risk that.
             log("audio: cannot write the mute-state marker; not muting local output")
             self.saved = nil
-            return
+            return false
         }
 
         var ok = false
         if state.usedMute {
             ok = Self.setUInt32(dev, Self.muteAddress, 1)
         }
-        if !ok, let volume {
+        if !ok, volume != nil {
             // Fall back to zero volume. Save the original first, already done.
             ok = Self.setVolume(dev, 0)
             if ok, let current = self.saved {
@@ -128,16 +161,61 @@ final class AudioOutputMute: @unchecked Sendable {
         }
         if ok {
             log("audio: muted local output \(Self.deviceName(dev) ?? uid) while the client listens")
-        } else {
-            log("audio: could not mute local output; the remote stream is unaffected")
-            self.saved = nil
-            try? FileManager.default.removeItem(at: Self.marker)
+            return true
         }
+        log("audio: could not mute local output; the remote stream is unaffected")
+        self.saved = nil
+        try? FileManager.default.removeItem(at: Self.marker)
+        return false
+    }
+
+    /// Multi-Output/Aggregate devices created in Audio MIDI Setup usually have
+    /// no mute or master volume of their own. Their physical subdevices do, so
+    /// mute those individually. This is the common "Mac mini + BlackHole"
+    /// setup: the aggregate has no controls, but the built-in speakers do.
+    private func muteAggregate(_ dev: AudioDeviceID, uid: String,
+                               name: String, members: [MemberState]) -> Bool {
+        let state = State(uid: uid, usedMute: false, mute: 0, volume: nil,
+                          pid: getpid(), members: members)
+        guard self.writeMarker(state) else {
+            log("audio: cannot write the mute-state marker; not muting local output")
+            return false
+        }
+        var applied = 0
+        for member in members {
+            guard let sub = Self.device(forUID: member.uid) else { continue }
+            if member.mute != nil, Self.setUInt32(sub, Self.muteAddress, 1) {
+                applied += 1
+                continue
+            }
+            if let volume = member.volume, Self.setVolume(sub, 0) {
+                applied += 1
+                log("audio: aggregate member \(Self.deviceName(sub) ?? member.uid) has no usable mute; set volume to zero (was \(volume))")
+            }
+        }
+        guard applied > 0 else {
+            log("audio: aggregate output \(name) has no muteable physical members; not muting")
+            try? FileManager.default.removeItem(at: Self.marker)
+            return false
+        }
+        self.device = dev
+        self.saved = state
+        if applied < members.count {
+            log("audio: muted \(applied)/\(members.count) members of aggregate output \(name); some outputs may still play")
+        } else {
+            log("audio: muted local output \(name) via \(applied) aggregate members while the client listens")
+        }
+        return true
     }
 
     private func restore() {
         guard let state = saved else { return }
         saved = nil
+        if let members = state.members, !members.isEmpty {
+            for member in members { Self.restoreMember(member) }
+            log("audio: restored local output \(state.uid) aggregate members")
+            return
+        }
         guard let dev = Self.device(forUID: state.uid) else {
             log("audio: original output device \(state.uid) is gone; cannot restore its volume")
             return
@@ -149,6 +227,12 @@ final class AudioOutputMute: @unchecked Sendable {
             _ = Self.setVolume(dev, volume)
         }
         log("audio: restored local output \(Self.deviceName(dev) ?? state.uid)")
+    }
+
+    private static func restoreMember(_ member: MemberState) {
+        guard let dev = device(forUID: member.uid) else { return }
+        if let mute = member.mute { _ = setUInt32(dev, muteAddress, mute) }
+        if let volume = member.volume { _ = setVolume(dev, volume) }
     }
 
     @discardableResult
@@ -192,6 +276,64 @@ final class AudioOutputMute: @unchecked Sendable {
         AudioObjectRemovePropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject), &address, queue, listener)
         self.listener = nil
+    }
+
+    /// Physical members of an aggregate device. Virtual devices are skipped:
+    /// muting BlackHole would not silence a speaker and could break a loopback
+    /// workflow that shares the aggregate.
+    private static func aggregateMembers(_ dev: AudioDeviceID) -> [MemberState] {
+        var result: [MemberState] = []
+        for uid in aggregateSubDeviceUIDs(dev) {
+            guard let sub = device(forUID: uid), !isVirtual(sub) else { continue }
+            let hasMute = isSettable(sub, muteAddress)
+            let volume = readVolume(sub)
+            guard hasMute || volume != nil else { continue }
+            result.append(MemberState(uid: uid,
+                                      mute: hasMute ? readUInt32(sub, muteAddress) : nil,
+                                      volume: volume))
+        }
+        return result
+    }
+
+    private static func aggregateSubDeviceUIDs(_ dev: AudioDeviceID) -> [String] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioAggregateDevicePropertyFullSubDeviceList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectHasProperty(dev, &address) else { return [] }
+        var value: CFArray?
+        var size = UInt32(MemoryLayout<CFArray?>.size)
+        let status = withUnsafeMutablePointer(to: &value) { ptr in
+            AudioObjectGetPropertyData(dev, &address, 0, nil, &size,
+                                       UnsafeMutableRawPointer(ptr))
+        }
+        guard status == noErr, let value else { return [] }
+        return value as? [String] ?? []
+    }
+
+    private static func isVirtual(_ dev: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var transport: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(dev, &address, 0, nil, &size, &transport) == noErr
+        else { return false }
+        return transport == kAudioDeviceTransportTypeVirtual
+    }
+
+    /// Human-readable route for logs. The 2026-10-28 report could only say
+    /// "default output"; when a user hears silence the device name, volume and
+    /// mute state are the first things needed to tell a routing mistake from a
+    /// playback defect.
+    static func describeDefaultOutput() -> String {
+        guard let dev = defaultOutputDevice() else { return "no default output" }
+        let name = deviceName(dev) ?? "unknown"
+        let uid = deviceUID(dev) ?? "?"
+        let volume = readVolume(dev).map { String(format: "%.2f", $0) } ?? "n/a"
+        let mute = readUInt32(dev, muteAddress).map(String.init) ?? "n/a"
+        return "\(name) [uid=\(uid) volume=\(volume) mute=\(mute)]"
     }
 
     // MARK: - CoreAudio helpers

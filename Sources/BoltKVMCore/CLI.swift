@@ -698,9 +698,9 @@ public enum CLI {
         let requested = parseRequestSize(args)
         let seconds = Double(argInt(args, "--seconds", 20))
         let audioRecord = argValue(args, "--audio-record", "")
-        let audio: AudioPlayer? = (args.contains("--audio") || !audioRecord.isEmpty)
-            ? AudioPlayer(play: args.contains("--audio"), recordPath: audioRecord.isEmpty ? nil : audioRecord)
-            : nil
+        let wantsAudio = args.contains("--audio") || !audioRecord.isEmpty
+        var audio: AudioPlayer?
+        var askedInitialMute = false
         do {
             let conn = try tcpConnect(host: host, port: port)
             log("connected to \(host):\(port)")
@@ -723,7 +723,33 @@ public enum CLI {
                     conn: conn, nonce: challengeNonce,
                     forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
                 log("auth ok")
-                installPauseOnRouteChange(audio, conn: conn)
+                let supportsAudio24 = authOkFlags(payload) & FLAG_SUPPORTS_AUDIO_24 != 0
+                var use24 = false
+                var config = requested ?? SessionConfig(width: 0, height: 0, quality: 0, color: .standard)
+                if wantsAudio, supportsAudio24 {
+                    config.audio = .int24
+                    use24 = true
+                }
+                if header.payloadLength >= 1, payload.first == 1, (requested != nil || use24) {
+                    do {
+                        try conn.send(packet(type: .config, payload: config.encode()))
+                        log("sent config \(config.width)x\(config.height) audio=\(use24 ? "int24" : "int16")")
+                    } catch {
+                        use24 = false
+                        log("could not send config: \(error)")
+                    }
+                } else {
+                    // Old servers do not accept config. Never decode a 24-bit
+                    // sink when the negotiation packet could not be sent.
+                    use24 = false
+                }
+                if wantsAudio {
+                    let fmt: AudioWireFormat = use24 ? .int24 : .int16
+                    audio = AudioPlayer(play: args.contains("--audio"),
+                                        recordPath: audioRecord.isEmpty ? nil : audioRecord,
+                                        wireFormat: fmt)
+                    installPauseOnRouteChange(audio, conn: conn)
+                }
                 if !args.contains("--no-clipboard") {
                     let sync = ClipboardSync(conn: conn, enabled: true,
                                              maxItemBytes: clipboardMaxItemBytes(args),
@@ -737,13 +763,17 @@ public enum CLI {
                     decoder.setClockOffset(t2 - (authSentAt + t3) / 2,
                                            rttMs: Double(t3 - authSentAt) / 1000.0)
                 }
-                if header.payloadLength >= 1, payload.first == 1, let requested {
-                    try? conn.send(packet(type: .config, payload: requested.encode()))
-                    log("sent config \(requested.width)x\(requested.height) quality=\(requested.quality)")
-                }
                 try? conn.send(timeSyncRequest())
             }
-            pump.onAudio = { audio?.enqueue($0) }
+            pump.onAudio = { payload in
+                if audio != nil, !askedInitialMute {
+                    try? conn.send(packet(type: .command,
+                                          payload: Data([RemoteAction.muteLocalOutput.rawValue])))
+                    askedInitialMute = true
+                    log("audio: asked server to mute local output (first audio packet)")
+                }
+                audio?.enqueue(payload)
+            }
             pump.onLongWindow = { packets, received in
                 log("loop.win packets=\(packets) received=\(received)")
             }
