@@ -257,7 +257,10 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         let bounds = content.bounds
         let measured = max(0, bounds.height - window.contentLayoutRect.height)
         if measured > 0 { chromeHeight = measured }
-        let toolbarVisible = window.toolbar?.isVisible ?? false
+        // The child window can outlive `isVisible = false` on this macOS; key
+        // the picture shift off what is actually on screen so the two never
+        // disagree for longer than one 0.2 s poll.
+        let toolbarVisible = fullScreenToolbarActuallyVisible
         let fullScreen = window.styleMask.contains(.fullScreen)
         // In fullscreen the titlebar's extra strip otherwise sits over the
         // remote menu bar; hide it there and restore the windowed title so the
@@ -290,6 +293,41 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         window?.childWindows?.first {
             String(describing: type(of: $0)).contains("ToolbarFullScreen")
         }
+    }
+
+    /// Show/hide the fullscreen toolbar. On this macOS (27.0.1), setting
+    /// `toolbar.isVisible = false` leaves the `NSToolbarFullScreenWindow` child
+    /// ordered on screen, and even AppKit's own fullscreen transition can leave
+    /// it opaque — the flag then says "hidden" while the band is still drawn,
+    /// and nothing ever hides it (the 2026-11-02 stuck 菜单 report). Every
+    /// show/hide must therefore also drive the child's alpha: opaque when
+    /// shown, transparent when hidden.
+    private func setFullScreenToolbarShown(_ shown: Bool) {
+        guard let window else { return }
+        window.toolbar?.isVisible = shown
+        if window.styleMask.contains(.fullScreen) {
+            fullScreenToolbarWindow?.alphaValue = shown ? 1 : 0
+        }
+    }
+
+    /// What is *actually* on screen: the flag alone lies while the child window
+    /// lingers. A stuck (ordered, opaque) child counts as visible so the 5 Hz
+    /// poll can hide it, and a redundant dwell-reveal is not armed on top of it.
+    var fullScreenToolbarActuallyVisible: Bool {
+        guard let window else { return false }
+        let child = fullScreenToolbarWindow
+        return Self.toolbarActuallyVisible(
+            flag: window.toolbar?.isVisible ?? false,
+            childOrdered: child?.isVisible ?? false,
+            childAlpha: child?.alphaValue ?? 0
+        )
+    }
+
+    /// Pure decision behind `fullScreenToolbarActuallyVisible`, so the
+    /// stuck-child rule stays unit testable without AppKit windows.
+    static func toolbarActuallyVisible(flag: Bool, childOrdered: Bool, childAlpha: CGFloat) -> Bool {
+        if flag { return true }
+        return childOrdered && childAlpha >= 0.99
     }
 
     private var fullScreenChromeHeight: CGFloat {
@@ -330,26 +368,27 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     /// `NSToolbarFullScreenWindow`, the second lays out its standard items.
     /// Without this the first top-edge dwell can show an empty band.
     private func revealFullScreenToolbar() {
-        guard let window, let toolbar = window.toolbar else { return }
+        guard let window else { return }
+        guard window.toolbar != nil else { return }
         if fullScreenToolbarPrimed {
-            toolbar.isVisible = true
+            setFullScreenToolbarShown(true)
             layoutVideo()
             log("fs: toolbar shown at the top edge (content shifted down by \(Int(fullScreenChromeHeight)) pt)")
             return
         }
         fullScreenToolbarPrimed = true
-        toolbar.isVisible = true
+        setFullScreenToolbarShown(true)
         layoutVideo()
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window,
                   window.styleMask.contains(.fullScreen) else { return }
-            window.toolbar?.isVisible = false
+            self.setFullScreenToolbarShown(false)
             self.layoutVideo()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 guard let self, let window = self.window,
                       window.styleMask.contains(.fullScreen) else { return }
                 window.toolbar?.validateVisibleItems()
-                window.toolbar?.isVisible = true
+                self.setFullScreenToolbarShown(true)
                 self.layoutVideo()
                 log("fs: toolbar shown at the top edge (content shifted down by \(Int(self.fullScreenChromeHeight)) pt)")
             }
@@ -370,7 +409,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         let fullScreen = window.styleMask.contains(.fullScreen)
         if appliedFullScreen != fullScreen {
             appliedFullScreen = fullScreen
-            window.toolbar?.isVisible = !fullScreen
+            setFullScreenToolbarShown(!fullScreen)
             fullScreenToolbarPrimed = false
             window.titlebarSeparatorStyle = .none
             topEdgeEnteredAt = nil
@@ -385,18 +424,20 @@ final class ClientController: NSWindowController, NSWindowDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
                     guard let self, let window = self.window,
                           window.styleMask.contains(.fullScreen),
-                          window.toolbar?.isVisible != true,
+                          !self.fullScreenToolbarActuallyVisible,
                           NSEvent.mouseLocation.y < (window.screen?.frame.maxY ?? 0) - 110
                     else { return }
                     // Lay out the fullscreen toolbar invisibly: the first real
                     // user reveal then reuses a populated NSToolbarFullScreenWindow.
+                    // The alpha stays 0 after the pass — restoring it here is
+                    // what left the toolbar stuck on screen (2026-11-02); the
+                    // real reveal sets it back to 1.
                     self.fullScreenToolbarWindow?.alphaValue = 0
                     window.toolbar?.isVisible = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                         guard let self, let window = self.window,
                               window.styleMask.contains(.fullScreen) else { return }
-                        window.toolbar?.isVisible = false
-                        self.fullScreenToolbarWindow?.alphaValue = 1
+                        self.setFullScreenToolbarShown(false)
                         self.layoutVideo()
                         self.fullScreenToolbarPrimed = true
                     }
@@ -409,7 +450,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         }
         let y = NSEvent.mouseLocation.y
         let top = screen.frame.maxY
-        let visible = window.toolbar?.isVisible ?? false
+        let visible = fullScreenToolbarActuallyVisible
         // A short dwell at the edge avoids popping the chrome (and moving the
         // picture) when the pointer merely crosses the top on its way to a
         // remote menu item.
@@ -429,7 +470,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             // toolbar height; the hide threshold has to clear that band or the
             // two states fight (the old 110 pt hysteresis).
             if y < top - 110, visible {
-                window.toolbar?.isVisible = false
+                setFullScreenToolbarShown(false)
                 layoutVideo()
                 log("fs: toolbar hidden")
             }
