@@ -30,10 +30,6 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     /// Full screen reuses it for the one tick between "toolbar shown" and the
     /// window reporting the new content layout rect.
     private var chromeHeight: CGFloat = 52
-    /// When the pointer first reached the top edge; the toolbar only appears
-    /// after a short dwell so brushing the edge mid-click does not move the
-    /// picture.
-    private var topEdgeEnteredAt: Date?
 
     private static let tbMission = NSToolbarItem.Identifier("boltkvm.missionControl")
     private static let tbDesktop = NSToolbarItem.Identifier("boltkvm.desktop")
@@ -418,12 +414,13 @@ final class ClientController: NSWindowController, NSWindowDelegate {
     /// Neither the `windowWillEnterFullScreen` delegate callbacks nor the
     /// did-* notifications fired for this window (verified with temporary logs),
     /// so the fullscreen chrome is polled instead: the style mask is the truth,
-    /// and the pointer position decides whether the toolbar is out. This is the
-    /// Screen Sharing behaviour — hidden by default, revealed at the top edge.
+    /// and the pointer position decides whether the bar is out. 10 Hz keeps the
+    /// show latency at one tick — the bar must track the system menu bar, which
+    /// the system reveals the instant the pointer touches the top.
     private func setupFullScreenChrome() {
         guard let window else { return }
         window.acceptsMouseMovedEvents = true
-        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.tickChrome()
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -444,7 +441,6 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         let fullScreen = window.styleMask.contains(.fullScreen)
         if appliedFullScreen != fullScreen {
             appliedFullScreen = fullScreen
-            topEdgeEnteredAt = nil
             if fullScreen {
                 // Detach the NSToolbar: as long as it is attached, AppKit keeps
                 // the native fullscreen overlay in play (opaque at entry, never
@@ -470,27 +466,17 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         let y = NSEvent.mouseLocation.y
         let top = screen.frame.maxY
         let barVisible = fullscreenBar?.isVisible ?? false
-        // A short dwell at the edge avoids popping the chrome (and moving the
-        // picture) when the pointer merely crosses the top on its way to a
-        // remote menu item.
+        // The bar's lifetime MIRRORS the system menu bar's, which is the one
+        // thing in fullscreen macOS owns flawlessly: the menu bar pops the
+        // moment the pointer touches the top and retracts the moment it leaves
+        // the chrome strip. Any offset predicate of our own (0.2 s dwell, the
+        // old 110 pt hysteresis) desynchronises the two — the 2026-11-02
+        // "bar and menu bar keep fighting" report. One predicate, no bands:
+        // pointer inside the chrome zone ⇒ bar out; below it ⇒ bar gone.
         if y > top - 4 {
-            if barVisible {
-                topEdgeEnteredAt = nil
-            } else {
-                if topEdgeEnteredAt == nil { topEdgeEnteredAt = Date() }
-                if let entered = topEdgeEnteredAt, Date().timeIntervalSince(entered) >= 0.2 {
-                    topEdgeEnteredAt = nil
-                    showFullscreenBar()
-                }
-            }
-        } else {
-            topEdgeEnteredAt = nil
-            // Revealing the bar moves the pointer's relative position by the
-            // bar height; the hide threshold has to clear that band or the two
-            // states fight (the old 110 pt hysteresis).
-            if y < top - 110, barVisible {
-                hideFullscreenBar()
-            }
+            if !barVisible { showFullscreenBar() }
+        } else if barVisible, y < top - fullscreenChromeHeight - 4 {
+            hideFullscreenBar()
         }
         // Covers the window/content relayout that follows a bar change.
         layoutVideo()
