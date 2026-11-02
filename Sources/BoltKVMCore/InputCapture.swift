@@ -271,9 +271,6 @@ final class WindowInputCapture {
     var aspectProvider: (() -> CGFloat)?
     private var monitor: Any?
     private var sent = 0
-    /// TEMPORARY (2026-11-02): throttle counter for the fullscreen input
-    /// diagnostics. Remove with the DIAG log lines.
-    private var diagCount = 0
     /// Key codes whose keyDown we forwarded (and therefore swallowed). The
     /// matching keyUp must only be swallowed if we swallowed the keyDown —
     /// otherwise the local system is left with a keyDown and no release, which
@@ -432,19 +429,6 @@ final class WindowInputCapture {
             return nil
         }
         guard let view, let window = view.window else { return event }
-        // TEMPORARY DIAGNOSTIC (2026-11-02, fullscreen keys/clicks dead): log
-        // where key/click events are actually routed, throttled to 1 in 20.
-        // Remove once the fullscreen input failure is root-caused.
-        if event.type == .keyDown || event.type == .leftMouseDown {
-            diagCount += 1
-            if diagCount % 20 == 1 {
-                let evWin: String
-                if event.window === window { evWin = "main" }
-                else if let ew = event.window { evWin = "other:\(String(describing: type(of: ew)))" }
-                else { evWin = "nil" }
-                log("input: DIAG route \(event.type == .keyDown ? "keyDown" : "leftMouseDown") code=\(event.keyCode) evWin=\(evWin) isKey=\(window.isKeyWindow) active=\(NSApp.isActive)")
-            }
-        }
         // Local monitors receive events for every window in the app, including
         // the fullscreen toolbar overlay. Never let an event that AppKit has
         // already routed to another window fall through to the video hit test:
@@ -458,7 +442,6 @@ final class WindowInputCapture {
         // click on the toolbar act on the remote app instead.
         if event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .otherMouseDown,
            !window.isKeyWindow {
-            log("input: DIAG click->makeKey (window not key)")
             window.makeKeyAndOrderFront(nil)
             return event
         }
@@ -489,11 +472,6 @@ final class WindowInputCapture {
         let flags = UInt64(event.modifierFlags.rawValue)
         if inChrome, event.type == .leftMouseDown {
             log("input: chrome click kept local (pointerY=\(Int(NSEvent.mouseLocation.y)) videoTop=\(Int(videoTopInScreen)))")
-        }
-        // TEMPORARY DIAGNOSTIC (see route log above): the gate decision for
-        // key/click events, throttled to 1 in 20.
-        if event.type == .keyDown || event.type == .leftMouseDown, diagCount % 20 == 1 {
-            log("input: DIAG gate keyDown=\(event.type == .keyDown) inVideo=\(inVideo) fitOK=\(fit.contains(point)) inChrome=\(inChrome) y=\(Int(NSEvent.mouseLocation.y)) videoTop=\(Int(videoTopInScreen)) viewBounds=\(Int(view.bounds.width))x\(Int(view.bounds.height))")
         }
         if !inVideo || !fit.contains(point) || inChrome {
             // The pointer left the picture. Anything we forwarded and never saw
