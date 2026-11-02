@@ -428,23 +428,10 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             // Revealing the toolbar moves the pointer's relative position by the
             // toolbar height; the hide threshold has to clear that band or the
             // two states fight (the old 110 pt hysteresis).
-            //
-            // Known 245 failure mode (2026-11-02 morning): the priming pass can
-            // leave the NSToolbarFullScreenWindow child ordered and opaque while
-            // `isVisible` says false; the poll then trusts the flag and the
-            // stuck band never hides. Treat an opaque lingering child as hidden-
-            // needing and force it transparent. In normal operation the child
-            // is only opaque while `isVisible` is true, so this branch is a
-            // no-op unless that exact stuck state is on screen.
-            let stuckChild = window.childWindows?.first {
-                String(describing: type(of: $0)).contains("ToolbarFullScreen")
-            }
-            let childStuck = stuckChild.map { $0.isVisible && $0.alphaValue > 0.99 } ?? false
-            if y < top - 110, visible || childStuck {
+            if y < top - 110, visible {
                 window.toolbar?.isVisible = false
-                stuckChild?.alphaValue = 0
                 layoutVideo()
-                log("fs: toolbar hidden\(childStuck && !visible ? " (stuck child cleared)" : "")")
+                log("fs: toolbar hidden")
             }
         }
         // Covers the window/content relayout that follows a toolbar change.

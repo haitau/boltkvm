@@ -93,3 +93,9 @@ swift test               # 105 项通过（1 skip）；删除随启发式一起�
 实施：`git checkout c94f541 -- ClientController.swift` 恢复 245 chrome 全部原样（预热、reveal 舞步、0.2s 驻留、110pt 迟滞一律不动），唯一补丁是 hide 分支的僵尸自愈：当 `NSToolbarFullScreenWindow` 子窗口滞留在屏且不透明而 `isVisible=false` 时强制其透明。正常路径下子窗口只在 isVisible=true 时不透明，该分支不触发，对 245 行为零影响。与 245 的差异共 19 行（含注释）。
 
 验证：release 构建通过；swift test 105 项通过（1 skip）。显隐行为与 245 完全一致，若卡死再现，重启可清（用户已接受此 workaround）。
+
+# 终版（254）：纯 245，自愈补丁一并撤除
+
+253 的自愈把僵尸子窗口改为 alpha=0 而非移除，留下一个隐形但仍挂载的工具条窗口，会吞键盘焦点（用户实测：鼠标正常、按键全死；窗口列表证实存在 alpha=0 的 44pt 隐形带）。orderOut 替代方案被探针否决（orderOut 后 isVisible=true 无法再唤出工具条，两次 reveal 均失败）。alpha=0 与 orderOut 两条修复路线全部不可行。
+
+结论：**完整回退到 245 的 ClientController（与 c94f541 逐字节一致，diff 为空）**。245 的卡死形态是可见 band、不吞键盘（11-02 上午用户仅抱怨显示），配合用户接受的"重启清除" workaround。工具条问题到此冻结；后续若再处理，必须先读本报告的四个探针结论。
