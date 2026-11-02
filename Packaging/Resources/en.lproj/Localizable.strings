@@ -142,3 +142,5 @@
 "server.panel.rotate.failed" = "Rotation failed: %@";
 "client.state.badKey" = "The host refused the connection — most likely a wrong password (%@)";
 "server.panel.openAccessibility" = "Accessibility…";
+"client.toolbar.exitFullscreen" = "Exit Full Screen";
+"client.toolbar.exitFullscreen.tip" = "Leave fullscreen and return to the window";

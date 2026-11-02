@@ -80,32 +80,3 @@ final class ClientChromeLayoutTests: XCTestCase {
     }
 }
 
-/// `toolbar.isVisible = false` leaves the `NSToolbarFullScreenWindow` child
-/// ordered on screen on this macOS (2026-11-02: the toolbar band stayed stuck
-/// in fullscreen and nothing hid it, because the poll trusted the flag alone).
-/// "Actually visible" must therefore also treat an ordered, opaque child as
-/// visible, so the 5 Hz poll hides what AppKit left behind.
-final class FullscreenToolbarVisibilityTests: XCTestCase {
-    func testFlagTrueIsVisibleRegardlessOfChild() {
-        XCTAssertTrue(ClientController.toolbarActuallyVisible(flag: true, childOrdered: false, childAlpha: 0))
-    }
-
-    func testStuckOpaqueChildCountsAsVisible() {
-        // The regression: flag=false, child ordered at alpha=1 — the poll used
-        // to read this state as hidden and never issued a hide again.
-        XCTAssertTrue(ClientController.toolbarActuallyVisible(flag: false, childOrdered: true, childAlpha: 1))
-    }
-
-    func testHiddenChildIsNotVisible() {
-        // The fixed end state: flag=false and the child forced transparent.
-        XCTAssertFalse(ClientController.toolbarActuallyVisible(flag: false, childOrdered: true, childAlpha: 0))
-    }
-
-    func testNoChildIsNotVisible() {
-        XCTAssertFalse(ClientController.toolbarActuallyVisible(flag: false, childOrdered: false, childAlpha: 0))
-    }
-
-    func testMidAnimationChildIsNotYetVisible() {
-        XCTAssertFalse(ClientController.toolbarActuallyVisible(flag: false, childOrdered: true, childAlpha: 0.5))
-    }
-}

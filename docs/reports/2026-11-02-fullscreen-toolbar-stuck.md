@@ -45,3 +45,41 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --disable-sa
 
 - 真实双端会话（主控 GUI + mini 被控端）里的全屏显隐尚未人工复测，待用户替换 /Applications 里的 245 后确认；
 - 预热窗口与 tick 的竞争本身未消除（保留了预热），只是坏状态可自愈；若后续仍有首次 reveal 空带，再考虑移除预热。
+
+---
+
+# 追记（同日晚些）：滞留修好了，但与 AppKit 原生唤出打架 → 改为自绘全屏工具条
+
+## 现象（250 版本，重启后）
+
+- 卡死消失（自愈在工作），但出现新问题：顶边唤出时菜单栏不弹（日志 `shifted down by 52 pt`，正常是 82 pt）、调度中心/桌面按钮不显示（空带），且日志出现**连续十几拍 `toolbar hidden` 而无 `shown`**——每拍我们隐藏、AppKit 又自己唤出，打架 8 秒。
+
+## 根因（native 探针，只写一次 `isVisible=false` 后不再干预）
+
+这台 macOS 27.0.1 的原生行为是：**全屏一进入，`NSToolbarFullScreenWindow` 就以 alpha=1 挂在屏幕上，之后无论指针怎么动都不隐藏**；只有菜单栏跟着指针在顶边弹出（offset 30 pt）。也就是说这个仓库一直在用轮询+预热去驯服一个系统根本不维护的状态机——空白首弹（10-28）、全天卡死（11-02 上午）、显隐打架（11-02 下午）三轮 bug 同源。继续在原生工具栏上打补丁没有出路。
+
+## 最终改动：全屏工具条改为自有子窗口（`ClientController.swift`）
+
+- 进全屏：**卸下 NSToolbar**（`window.toolbar = nil`，保存引用）——原生浮层彻底退场；构建自有 bar：无边框子窗口（`.fullScreenAuxiliary` + `addChildWindow`），titlebar 材质，左侧窗口标题、居中「调度中心 / 桌面 / 退出全屏」按钮（NSButton + SF Symbols），右侧状态；**显示= `orderFront`，隐藏= `orderOut`，状态机只剩我们自己**。
+- 退出全屏：隐藏 bar，把 NSToolbar 原样装回（reattach 探针验证 items/居中标识/工具栏带完整恢复）。
+- 菜单栏让位：系统在菜单栏弹出时会把我们的 bar 子窗口往下推约 30 pt（与当年推 `NSToolbarFullScreenWindow` 同一机制），画面位移 = bar 高度 + `screenTop - bar.frame.maxY`（沿用原 childTop 逻辑）。
+- 删除：预热、reveal 舞步、`setFullScreenToolbarShown` alpha 驱动、`toolbarActuallyVisible` 启发式及其测试。0.2 s 顶边驻留 + 110 pt 迟滞保留（这是产品 UX，与底层窗口无关）。
+- 桌面按钮「还原窗口」文案切换、状态栏 `fps · Mbps` 同步到 bar 上的对应控件。
+- 新增本地化键 `client.toolbar.exitFullscreen(.tip)`（中英）。
+
+## 验证
+
+```bash
+swift build -c release   # 通过
+swift test               # 105 项通过（1 skip）；删除随启发式一起失效的 5 项
+```
+
+三个探针（均自动驱动指针）：
+
+1. `native`：证明原生行为=永久可见（见上），排除"少干预"路线；
+2. `ownbar`：自有 bar 显隐循环 3 轮无打架，截图确认观感（材质/居中按钮/右侧状态）与原生几乎一致；
+3. `reattach`：全屏卸载→恢复 NSToolbar 两轮循环，items/居中标识/工具栏带全部完整。
+
+## 未验证
+
+- 真实双端会话的全屏人工复测：顶边驻留弹出、离开隐藏、菜单栏弹出时 82 pt 跟随、bar 按钮点击（调度中心/桌面/退出全屏）、窗口↔全屏往返后窗口工具栏完好——待用户部署 0.13 (251) 后确认。
