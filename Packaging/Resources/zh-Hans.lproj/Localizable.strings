@@ -143,5 +143,3 @@
 "server.panel.rotate.failed" = "重新生成失败：%@";
 "client.state.badKey" = "被控端拒绝了连接，多半是连接密码不对（%@）";
 "server.panel.openAccessibility" = "辅助功能权限…";
-"client.toolbar.exitFullscreen" = "退出全屏";
-"client.toolbar.exitFullscreen.tip" = "退出全屏，回到窗口模式";
