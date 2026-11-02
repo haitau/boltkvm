@@ -164,6 +164,15 @@ final class ClientController: NSWindowController, NSWindowDelegate {
             self.statsText = text
             self.refreshToolbarStatus()
         }
+        // Server → client operational notices (e.g. input-injection permission
+        // lost on the remote): put them where the user actually looks — the
+        // status line — until the next state/stats refresh replaces them.
+        session?.onNotice = { [weak self] text in
+            guard let self else { return }
+            self.stateText = text
+            self.refreshToolbarStatus()
+            log("server notice: \(text)")
+        }
         toolbarStatusLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         toolbarStatusLabel.textColor = .secondaryLabelColor
         toolbarStatusLabel.alignment = .right

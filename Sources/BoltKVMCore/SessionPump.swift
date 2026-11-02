@@ -22,6 +22,10 @@ final class SessionPump {
     var onAudio: ((Data) -> Void)?
     var onClipboard: ((Data) -> Void)?
     var onFileTransfer: ((Data) -> Void)?
+    /// Server → client operational notice (`.notice`, UTF-8 text): e.g. the
+    /// input-injection permission was lost at runtime and clicks/keys will not
+    /// reach the remote until it is re-granted.
+    var onNotice: ((String) -> Void)?
     var onWindow: ((Window) -> Void)?
     /// Lifetime totals every 60 s; the CLI smoke test uses it to prove the loop
     /// is still alive on a quiet screen.
@@ -101,6 +105,10 @@ final class SessionPump {
             case .fileTransfer:
                 try requireSession()
                 onFileTransfer?(payload)
+            case .notice:
+                if let text = String(data: payload, encoding: .utf8), !text.isEmpty {
+                    onNotice?(text)
+                }
             case .timeSync:
                 handleTimeSync(header, payload, decoder: decoder)
             }

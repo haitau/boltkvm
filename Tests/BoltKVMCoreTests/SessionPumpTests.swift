@@ -62,6 +62,22 @@ final class SessionPumpTests: XCTestCase {
         XCTAssertEqual(clock, 123_456_789)
     }
 
+    /// Server → client operational notices (`.notice`, UTF-8) reach the client
+    /// as text. The 2026-11-02 mini incident: the injection permission was
+    /// lost at runtime and the only trace was a stderr line nobody reads.
+    func testNoticePacketDeliversUTF8Text() throws {
+        let (conn, peer) = makePair()
+        let pump = SessionPump(conn: conn, decoder: VideoDecoder())
+        var notice: String?
+        pump.onNotice = { notice = $0 }
+        let text = "被控端输入注入权限失效 (input injection disabled)"
+        writeAll(peer, packet(type: .notice, flags: 0, ptsMicros: 0, payload: Data(text.utf8)))
+        close(peer)
+
+        XCTAssertThrowsError(try pump.run())
+        XCTAssertEqual(notice, text)
+    }
+
     /// Production clients opt into the gate: a plaintext format/frame before
     /// authOk (a rogue server that skipped the PSK handshake) must be rejected
     /// rather than rendered or forwarded.

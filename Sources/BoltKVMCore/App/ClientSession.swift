@@ -82,6 +82,10 @@ final class ClientSession: @unchecked Sendable {
     var requestedConfig: SessionConfig?
     /// Real stream size, reported once the server describes its format.
     var onFormat: ((Int, Int, ColorMode) -> Void)?
+    /// Server → client operational notice (`.notice`): e.g. input-injection
+    /// permission lost on the remote, surfaced in the client's status line.
+    /// Delivered on the main thread.
+    var onNotice: ((String) -> Void)?
 
     func connect(host: String, port: UInt16, key: Data?, forwardInput: Bool, playAudio: Bool,
                  shareClipboard: Bool = true) {
@@ -151,6 +155,12 @@ final class ClientSession: @unchecked Sendable {
                     pump.requireAuthenticatedTransport = true
                     pump.onClipboard = { [weak self] payload in self?.clipboard?.handleClipboard(payload) }
                     pump.onFileTransfer = { [weak self] payload in self?.clipboard?.handleFile(payload) }
+                    pump.onNotice = { [weak self] text in
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self, self.isCurrent(gen) else { return }
+                            self.onNotice?(text)
+                        }
+                    }
                     pump.onChallenge = { payload in
                         challengeNonce = payload
                         authResponseSentAt = Int64(Date().timeIntervalSince1970 * 1_000_000)

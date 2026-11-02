@@ -141,6 +141,7 @@ final class Server: NSObject, SCStreamOutput {
         }
         if !CGPreflightPostEventAccess() {
             log("warning: Accessibility/post-event permission missing; input injection will fail")
+            sendNotice("被控端输入注入权限失效：点击/按键无法控制被控端。请在被控端「系统设置 → 隐私与安全性 → 辅助功能」重新允许 BoltKVM，然后重启被控端的 BoltKVM。(input injection disabled)")
         }
         if clipboardEnabled {
             let sync = ClipboardSync(conn: connection, enabled: true,
@@ -151,6 +152,7 @@ final class Server: NSObject, SCStreamOutput {
         }
         startClockResponder()
         startHeartbeat()
+        startPermissionMonitor()
 
         var s: VTCompressionSession?
         // M1 measurement: hardware HEVC without low-latency rate control gave
@@ -397,6 +399,43 @@ final class Server: NSObject, SCStreamOutput {
                     break
                 }
             }
+        }
+    }
+
+    /// Re-checks the input-injection permission every 60 s for the lifetime of
+    /// the session. The startup preflight (2026-11-02 mini incident) only speaks
+    /// once, into a log nobody watches: a TCC reset at runtime silently killed
+    /// every click and keystroke while video kept flowing. On a healthy → broken
+    /// (or broken → healthy) transition the server now tells the client over the
+    /// `.notice` channel, which the GUI surfaces in its status line.
+    private func startPermissionMonitor() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            var lastOK = CGPreflightPostEventAccess()
+            while !self.isDisconnected {
+                Thread.sleep(forTimeInterval: 60)
+                if self.isDisconnected { break }
+                let ok = CGPreflightPostEventAccess()
+                guard ok != lastOK else { continue }
+                lastOK = ok
+                if ok {
+                    log("permission monitor: input injection available again")
+                    self.sendNotice("被控端输入注入权限已恢复（input injection restored）。")
+                } else {
+                    log("permission monitor: input injection permission lost at runtime; clicks/keys will not reach the remote")
+                    self.sendNotice("被控端输入注入权限失效：点击/按键无法控制被控端。请在被控端「系统设置 → 隐私与安全性 → 辅助功能」重新允许 BoltKVM，然后重启被控端的 BoltKVM。(input injection disabled)")
+                }
+            }
+        }
+    }
+
+    /// Best-effort server → client text notice. Send failures (a closing
+    /// connection) are the teardown itself and are ignored.
+    private func sendNotice(_ text: String) {
+        do {
+            try connection.send(packet(type: .notice, payload: Data(text.utf8)))
+        } catch {
+            log("notice send failed: \(error)")
         }
     }
 

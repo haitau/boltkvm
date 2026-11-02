@@ -61,6 +61,10 @@ enum PacketType: UInt8 {
     /// One packet of a file/folder transfer: begin(manifest), chunk, end, abort.
     /// Files stream to disk instead of the in-memory clipboard path.
     case fileTransfer = 14
+    /// Server → client operational notice (UTF-8 text): e.g. the input-injection
+    /// permission was lost at runtime. Old clients decode this as `.unknown` and
+    /// skip it, so the server may send it unconditionally.
+    case notice = 15
 }
 
 /// Colour pipeline. `.standard` is what every session used before this existed:

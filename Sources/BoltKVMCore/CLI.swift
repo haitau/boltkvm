@@ -567,6 +567,7 @@ public enum CLI {
                     pump.requireAuthenticatedTransport = true
                     pump.onClipboard = { clipboardSync?.handleClipboard($0) }
                     pump.onFileTransfer = { clipboardSync?.handleFile($0) }
+                    pump.onNotice = { log("server notice: \($0)") }
                     pump.onChallenge = { payload in
                         sawChallenge = true
                         challengeNonce = payload
@@ -730,6 +731,7 @@ public enum CLI {
             var clipboardSync: ClipboardSync?
             pump.onClipboard = { clipboardSync?.handleClipboard($0) }
             pump.onFileTransfer = { clipboardSync?.handleFile($0) }
+            pump.onNotice = { log("server notice: \($0)") }
             var challengeNonce: Data?
             var authSentAt: Int64 = 0
             pump.onChallenge = { payload in
