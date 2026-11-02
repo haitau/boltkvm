@@ -34,3 +34,4 @@
 - 服务器新增权限监视器：会话内存活期间每 60s 复检 `CGPreflightPostEventAccess()`，OK→失效/失效→恢复的转变都会发 `.notice` 并记日志；启动时缺权也直接通知。
 - 客户端 GUI 把通知显示在状态行；CLI 记日志。mini 与主控端均已部署 0.13 (258)。
 - 待用户执行：mini 每周一 04:00 自动重启的 LaunchDaemon 已预置在 mini:/tmp/com.boltkvm.weekly-restart.plist，安装需 sudo（一次性命令见对话记录）。
+- 定时重启时间修正：原定周一 04:00 与 mini 升级任务带正面冲突（02:30 brew、03:00 agent 更新、03:30 openviking、04:00 ollama、04:30 omlx）。改为**每周一 01:00**——18:30 后至 02:29 是无任务的夜间大空窗，重启+索引风暴（约 10-15 分钟）完全落在空窗内。plist 已预置 mini:/tmp/，安装待用户 sudo 执行。
