@@ -27,3 +27,10 @@
 - 重启前 mini 还存在**系统级 UI 假死**：连系统"重新启动"对话框都点击无效，用户长按电源强制关机。重启前 mini 已连续运行 5 天以上；开机后 3-5 分钟内出现负载风暴（load 峰值 128：fileproviderd/bird/Google Drive/mds_stores/corespotlightd 索引与云同步），约 7 分钟回落到 12 以下。
 - 经验：headless 被控端长期运行会积累两类故障——①授权被重置后进程不重启就拿不到（且无人察觉）；②索引/同步风暴与残留状态导致 UI 假死。远程"全面失灵"时先查 mini 负载与 TCC 授权，再怀疑链路。
 - 待办（未实施）：服务器运行中周期性复检注入权限并上屏提示；主控端 255 的诊断日志已随本结论移除（3ded0b1 引入，本次移除）。
+
+## 后续改进实施（同日，提交 7c101ba）
+
+- 新增 `.notice(15)` server→client 文本包：老客户端 decode 为 `.unknown` 跳过，无需能力协商。
+- 服务器新增权限监视器：会话内存活期间每 60s 复检 `CGPreflightPostEventAccess()`，OK→失效/失效→恢复的转变都会发 `.notice` 并记日志；启动时缺权也直接通知。
+- 客户端 GUI 把通知显示在状态行；CLI 记日志。mini 与主控端均已部署 0.13 (258)。
+- 待用户执行：mini 每周一 04:00 自动重启的 LaunchDaemon 已预置在 mini:/tmp/com.boltkvm.weekly-restart.plist，安装需 sudo（一次性命令见对话记录）。
