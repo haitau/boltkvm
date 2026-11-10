@@ -24,7 +24,7 @@ git push origin v0.14.0   # 换成实际版本
 发版前检查：
 
 - `main` 的 CI 全绿；
-- 本地构建的版本号已盖章：`build-app.sh` 默认使用 `Packaging/Info.plist` 的数值版本（当前本地开发版本 0.13）与提交数 `git rev-list --count HEAD`，CI 用 `BOLTKVM_VERSION`（标签）与 `BOLTKVM_BUILD`（运行号）覆盖；本地不再把 `git describe` 的 `0.13-29-g...` 直接写进 `CFBundleShortVersionString`，因为它不是合法的数值版本；
+- 本地构建的版本号已盖章：`build-app.sh` 默认使用 `Packaging/Info.plist` 的数值版本（当前本地开发版本 0.13.2）与提交数 `git rev-list --count HEAD`，CI 用 `BOLTKVM_VERSION`（标签）与 `BOLTKVM_BUILD`（运行号）覆盖；本地不再把 `git describe` 的 `0.13-29-g...` 直接写进 `CFBundleShortVersionString`，因为它不是合法的数值版本；
 - 只给要发布的提交打 `v*` 标签，不要在普通提交上打标签。
 
 **只推送 `main` 不会发布**：`release.yml` 只监听 `v*` 标签，普通提交只触发 `ci.yml`。因此日常合并、文档修正都不需要担心误发版；要发版时先确认 `main` 的 CI 全绿，再打标签。
@@ -32,8 +32,8 @@ git push origin v0.14.0   # 换成实际版本
 ## 版本号规则
 
 - Git 标签：`v0.14.0`（发布名显示为 `0.14.0`，示例；实际按发布版本替换）；
-- `CFBundleShortVersionString`：发布时用标签去掉 `v`（如 `0.14.0`）；本地开发默认 `0.13`；
-- `CFBundleVersion`：CI 使用 `GITHUB_RUN_NUMBER`，本地使用提交数 `git rev-list --count HEAD`；
+- `CFBundleShortVersionString`：发布时用标签去掉 `v`（如 `0.14.0`）；本地开发默认 `0.13.2`；
+- `CFBundleVersion`：CI 使用 `GITHUB_RUN_NUMBER`，本地使用提交数 `git rev-list --count HEAD`；两者不要求相同，比较版本时只看 `CFBundleShortVersionString`；
 - 本地构建用 `CFBundleVersion`（提交数）区分最新代码；工作树有未提交改动时不会改变 `CFBundleShortVersionString`，避免产生 macOS 不接受的版本串。
 
 ## 持续集成（CI）
