@@ -37,6 +37,15 @@ final class ClipboardSync: @unchecked Sendable {
     /// Added by the system to pasteboard items that arrived through Universal
     /// Clipboard; the bytes are not on this Mac until somebody reads them.
     static let remoteType = "com.apple.is-remote-clipboard"
+    /// Written by us whenever this Mac's pasteboard receives content from the
+    /// peer. The poller then treats the item as "not a local copy" and never
+    /// sends it back. Without this mark, everything we receive becomes a
+    /// "local copy" 0.5 s later and travels straight back — files bounce
+    /// forever (2026-11-08: an 80 MB dmg crossed the link five times, each hop
+    /// appending " 2" to the name and leaving another 80 MB copy in both
+    /// inboxes), and images bounce whenever the platform re-encodes them
+    /// (PNG 220657 B → 220675 B round trip defeats the content-hash guard).
+    static let originMarkerType = "io.github.boltkvm.peer-origin"
     static let concealedTypes = [
         "org.nspasteboard.ConcealedType",
         "org.nspasteboard.TransientType",
@@ -126,10 +135,14 @@ final class ClipboardSync: @unchecked Sendable {
     }
 
     /// Stop polling and abort any partial file transfer. Safe to call more than
-    /// once; waits for the queue so the connection can be closed afterwards.
+    /// once and deliberately non-blocking: teardown paths call this on the app's
+    /// main thread, and the queue may be mid-way through a large transfer that
+    /// would otherwise keep the UI frozen until it finishes. The caller closes
+    /// (or has already closed) the socket, so an in-flight `send` fails on its
+    /// own and the running transfer aborts through the normal error path.
     func stop() {
-        queue.sync {
-            guard !self.stopped else { return }
+        queue.async { [weak self] in
+            guard let self, !self.stopped else { return }
             self.stopped = true
             self.timer?.cancel()
             self.timer = nil
@@ -149,6 +162,12 @@ final class ClipboardSync: @unchecked Sendable {
         lastChangeCount = count
 
         let types = (pb.types ?? []).map({ $0.rawValue })
+        if types.contains(Self.originMarkerType) {
+            // Content this Mac just received from the peer. Sending it back is
+            // the echo loop; leave it alone. lastChangeCount stays current so
+            // the next genuine local copy is still detected.
+            return
+        }
         if Self.isFromUniversalClipboard(types) {
             // Reading it would fetch the bytes from the other device and pop
             // the system "Pasting From…" window for a copy Handoff has
@@ -227,6 +246,7 @@ final class ClipboardSync: @unchecked Sendable {
         var offset = 0
         do {
             while offset < data.count {
+                guard !stopped else { throw POSIXError(.ECANCELED) }
                 let end = min(offset + Self.clipboardChunk, data.count)
                 var payload = Data(capacity: 12 + (end - offset))
                 payload.appendUInt32BE(id)
@@ -298,6 +318,8 @@ final class ClipboardSync: @unchecked Sendable {
                 pb.setData(entry.data, forType: NSPasteboard.PasteboardType(entry.uti))
             }
         }
+        // Mark as peer-originated before the next poll (0.5 s away) can see it.
+        pb.setData(Data([1]), forType: NSPasteboard.PasteboardType(Self.originMarkerType))
         lastChangeCount = pb.changeCount
         lastAppliedHash = hash
         lastSentHash = hash
@@ -372,6 +394,7 @@ final class ClipboardSync: @unchecked Sendable {
                 }
                 defer { try? handle.close() }
                 while true {
+                    guard !stopped else { throw POSIXError(.ECANCELED) }
                     guard let chunk = try handle.read(upToCount: Self.fileChunk), !chunk.isEmpty else { break }
                     var payload = Data(capacity: 7 + chunk.count)
                     payload.append(FilePhase.chunk.rawValue)
@@ -442,6 +465,9 @@ final class ClipboardSync: @unchecked Sendable {
                 let pb = NSPasteboard.general
                 pb.prepareForNewContents(with: .currentHostOnly)
                 _ = pb.writeObjects(urls as [NSURL])
+                // Same echo rule as `apply`: received files must not travel
+                // back to the peer that just sent them.
+                pb.setData(Data([1]), forType: NSPasteboard.PasteboardType(Self.originMarkerType))
                 lastChangeCount = pb.changeCount
                 log("clipboard: file transfer applied, \(urls.count) item(s) in \(incoming.destination.path)")
             } else {
