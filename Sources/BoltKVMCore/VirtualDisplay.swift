@@ -80,6 +80,11 @@ func prepareVirtualDisplay(args: [String]) -> BuiltinVirtualDisplay? {
     let hiDPI = !args.contains("--virtual-display-lodpi")
 
     let started = Date()
+    // Wake BEFORE creation: a display that comes up asleep can have its HiDPI
+    // mode negotiation skipped or deferred by WindowServer (2026-11-13 mini:
+    // after heavy restart churn every new display came up 1:1 with an empty
+    // mode list until the wake ran first).
+    wakeDisplay()
     var display = BuiltinVirtualDisplay(name: "boltKVM", width: logicalWidth, height: logicalHeight, hiDPI: hiDPI)
     if display == nil {
         // A display with this identity is usually still being torn down by the

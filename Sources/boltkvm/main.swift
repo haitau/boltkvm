@@ -46,17 +46,24 @@ struct BoltKVM {
     /// the busy encode process, which reads as "the app hung"; 2026-11-13 the
     /// user force-rebooted mini over it). Give the long-lived server mode a
     /// real, UI-less main runloop: `.prohibited` means no Dock icon and no
-    /// menu (what TransformProcessType used to fake), while the runloop
-    /// answers the ping so Activity Monitor shows a healthy process.
+    /// menu, while the runloop answers the ping so Activity Monitor shows a
+    /// healthy process.
     ///
-    /// This must be called synchronously from async main() BEFORE the first
-    /// suspension, so it still runs on the main thread. Occupying the main
-    /// thread with `app.run()` is fine; occupying the main ACTOR is not —
-    /// a `MainActor.run { app.run() }` variant deadlocked the server task's
-    /// own `MainActor.run` hops (virtual-display setup) behind the runloop
-    /// job, because main-actor jobs are strictly serial and `run()` inside
-    /// such a job never returns.
+    /// ORDERING CONSTRAINT (2026-11-13 mini): the NSApplication event loop must
+    /// start only AFTER the virtual display has been created. Creating the
+    /// display while an NSApp runloop is already active made the private API's
+    /// HiDPI negotiation silently degrade to 1:1 — the stream lost its 2x
+    /// backing and turned blurry, deterministically on one machine and never
+    /// on the other, surviving reboots once the fallback had happened. So this
+    /// function pumps a bare main-thread run loop (no NSApp) until
+    /// `CLI.onVirtualDisplayReady` fires, and only then takes over with
+    /// NSApplication. All virtual-display work therefore still happens in the
+    /// same NSApp-free environment as before the badge fix.
     private static func runServerEventLoop(_ args: [String]) {
+        let displayReadyTimeout = Date().addingTimeInterval(60)
+        var displayReady = false
+        CLI.onVirtualDisplayReady = { displayReady = true }
+
         let serverTask = Task.detached(priority: .userInitiated) {
             await CLI.runServer(args)
             // The server ended (a bounded `--seconds` run); let the runloop
@@ -65,6 +72,13 @@ struct BoltKVM {
             // come through here.
             await MainActor.run { NSApplication.shared.stop(nil) }
         }
+
+        // Pump the bare main run loop while the display is being created; this
+        // services the main queue (prepareVirtualDisplay) without an NSApp.
+        while !displayReady && Date() < displayReadyTimeout {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.1))
+        }
+
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         app.run()

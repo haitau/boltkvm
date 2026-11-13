@@ -17,13 +17,20 @@ nonisolated(unsafe) private var terminationSources: [DispatchSourceSignal] = []
 nonisolated(unsafe) private var displayCleanupInstalled = false
 
 /// The helper lives inside BoltKVM.app, so LaunchServices registers it under
-/// the bundle's identity ("BoltKVM"). TransformProcessType-to-background only
-/// hid the Dock icon; Activity Monitor still pinged the process for
-/// responsiveness and a CLI process without a main runloop can never answer —
-/// it was flagged 未响应 forever (2026-11-13 mini: the phantom badge was read
-/// as a hang and the machine got force-rebooted). The real fix lives in the
-/// `boltkvm` target's entry point: run an NSApplication with `.prohibited`
-/// policy on the main thread so the ping gets answered.
+/// the bundle's identity ("BoltKVM"). Beyond hiding the Dock icon, the
+/// background-application transform is REQUIRED for the virtual display: an
+/// unregistered process only gets a single-mode static display from the
+/// WindowServer (no HiDPI variant, empty mode list). The Activity Monitor
+/// responsiveness ping that this registration invites is answered by the
+/// NSApplication runloop installed for the server mode (boltkvm main.swift).
+private func becomeBackgroundApp() {
+    var psn = ProcessSerialNumber(highLongOfPSN: 0, lowLongOfPSN: UInt32(kCurrentProcess))
+    let status = TransformProcessType(
+        &psn,
+        ProcessApplicationTransformState(kProcessTransformToBackgroundApplication)
+    )
+    if status != noErr { log("process: could not switch to background app (status \(status))") }
+}
 
 private func installDisplayCleanup(_ display: BuiltinVirtualDisplay) {
     displayToRelease = display
@@ -80,13 +87,26 @@ private func installPauseOnRouteChange(_ audio: AudioPlayer?, conn: TCPConnectio
 
 public enum CLI {
 
+    /// Fired on the main queue right after the builtin virtual display has
+    /// been created. The app entry point uses it to start its NSApplication
+    /// event loop only after the display's HiDPI negotiation has finished.
+    public static var onVirtualDisplayReady: (() -> Void)?
+
     public static func runServer(_ args: [String]) async {
         // A previous helper may have been killed while it had muted the local
         // output for a client. Restore it before doing anything else.
         AudioOutputMute.restoreStaleState()
-        // Dock-icon suppression and Activity Monitor's responsiveness ping are
-        // handled by the NSApplication runloop the entry point installs for
-        // this mode (see the `boltkvm` target's main.swift).
+        // Required for the virtual display: without an application identity the
+        // WindowServer only negotiates a single-mode static display for this
+        // process — applySettings for the HiDPI variant is accepted but never
+        // delivered, CGDisplayCopyAllDisplayModes returns an empty list and the
+        // stream degrades to 1:1 (blurry; 2026-11-13 mini). TransformProcessType
+        // also registers the process with LaunchServices as "BoltKVM", which
+        // used to earn a permanent 未响应 badge in Activity Monitor — that half
+        // is fixed by the NSApplication runloop the entry point installs for
+        // this mode (see the `boltkvm` target's main.swift), which answers the
+        // responsiveness ping.
+        becomeBackgroundApp()
         if let owner = SingleInstance.acquire(.server) {
             FileHandle.standardError.write(Data("boltkvm: another server is already running (pid \(owner))\n".utf8))
             exit(9)
@@ -99,7 +119,14 @@ public enum CLI {
         // Creation must happen on the main thread, so hop there before the
         // async server loop starts.
         var virtualDisplay = await MainActor.run { prepareVirtualDisplay(args: args) }
-        if let virtualDisplay { installDisplayCleanup(virtualDisplay) }
+        // The entry point starts its NSApplication event loop only AFTER this
+        // hook fires: creating the virtual display while an NSApp runloop is
+        // already active makes the private API's HiDPI negotiation silently
+        // degrade to 1:1 (2026-11-13 mini regression, see the report).
+        if let virtualDisplay {
+            CLI.onVirtualDisplayReady?()
+            installDisplayCleanup(virtualDisplay)
+        }
         let width = argInt(args, "--width", 3840)
         let height = argInt(args, "--height", 2160)
         let port = UInt16(argInt(args, "--port", 7474))

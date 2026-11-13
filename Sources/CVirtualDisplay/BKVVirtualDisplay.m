@@ -33,6 +33,25 @@ static uint32_t BKVSerialFor(NSString *identity) {
     return hash;
 }
 
+/// Dumps every advertised mode so a missing HiDPI variant is distinguishable
+/// from a present-but-unapplicable one.
+static void BKVDumpModes(CGVirtualDisplay *display) {
+    CGDirectDisplayID did = (CGDirectDisplayID)[display displayID];
+    CFArrayRef modes = CGDisplayCopyAllDisplayModes(did, NULL);
+    if (!modes) {
+        fprintf(stderr, "virtual display: modes dump: no mode list\n");
+        return;
+    }
+    for (CFIndex i = 0; i < CFArrayGetCount(modes); i++) {
+        CGDisplayModeRef mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
+        fprintf(stderr, "virtual display: modes dump: %ux%u pixel=%ux%u refresh=%.0f\n",
+                (unsigned)CGDisplayModeGetWidth(mode), (unsigned)CGDisplayModeGetHeight(mode),
+                (unsigned)CGDisplayModeGetPixelWidth(mode), (unsigned)CGDisplayModeGetPixelHeight(mode),
+                CGDisplayModeGetRefreshRate(mode));
+    }
+    CFRelease(modes);
+}
+
 /// Runs the main run loop briefly so the window server can apply a mode change.
 static void BKVPump(double seconds) {
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
@@ -160,13 +179,24 @@ BKVVirtualDisplay *BKVVirtualDisplayCreate(const char *nameC, int width, int hei
     BOOL gotHiDPI = NO;
 
     if (display && hiDPI) {
-        BKVPump(1.8);
-        gotHiDPI = BKVModeMatches(display, width, height, YES);
+        // Poll for the HiDPI mode instead of pumping one fixed window: the
+        // 6016x3384 flip can take well over 2 s to reach the client side
+        // (first creation after a reboot, system under load — 2026-11-13
+        // mini read back LoDPI at 2 s while WindowServer was still flipping,
+        // then the premature 1:1 fallback made the whole stream blurry), and
+        // CGDisplayCopyAllDisplayModes returns NULL until the client-side
+        // mode list populates. Poll ~12 s before considering a fallback.
+        for (int attempt = 0; attempt < 24; attempt++) {
+            BKVPump(0.5);
+            gotHiDPI = BKVModeMatches(display, width, height, YES);
+            if (gotHiDPI) break;
+        }
         if (!gotHiDPI) gotHiDPI = BKVSelectHiDPIMode(display, width, height);
         if (!gotHiDPI) {
             // No HiDPI variant exists: rebuild at 1x so proportions stay right
             // (a rejected 2x request silently degrades to a squashed picture).
             fprintf(stderr, "virtual display: no %dx%d HiDPI variant, falling back to 1:1\n", width, height);
+            BKVDumpModes(display);
             display = nil;
             BKVPump(0.6);
             display = BKVMakeDisplay(name, width, height, NO, identity, handle);

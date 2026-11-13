@@ -36,19 +36,27 @@
 | helper 被注册成 "BoltKVM" 且永不应答 ping | 实锤（lsappinfo 双 ASN + 探针对照） | `boltkvm` 入口：`server` 模式改为在主线程同步安装 `NSApplication`（`.prohibited`，无 Dock 无菜单）并 `run()`，服务逻辑移入后台任务。runloop 应答 ping，假标记消失；`CLI.swift` 删除 `TransformProcessType` 方案。注意实现禁忌：runloop 不能包进 `MainActor.run`（首版即因此死锁虚拟显示创建——main actor 任务严格串行，`run()` 在其中永不返回，后续 `MainActor.run` 全部饿死），必须作为 async main 的同步前缀执行。 |
 | 日志超限即删除 | 实锤（本次事故取证失败直接原因） | `AppLog.redirect()`：>5 MB 时改名轮转为 `.log.1` 保留一代，不再删除。 |
 
-## 验证
+## 追加：helper runloop 修复引发的 HiDPI 回退（同日 11:40–12:50）
+
+给 helper 接入 NSApplication runloop（修假标记）后，mini 的远程画面变糊：虚拟显示丢失 2x backing（流从 6016×3384 掉到 3008×1692）。定位过程与结论：
+
+- 现象确定性极强：换显示身份（serial）、换 WindowServer 缓存键（vendor/product）、清除全部环境变量、提前唤醒显示、重启 mini——全部无效；而 pro 上同一份二进制（含 runloop）创建同一显示 2.1s 即 HiDPI 成功。
+- `lsappinfo` 双 ASN + WindowServer 日志给出机制：WindowServer 侧**每次都正确收到 6016×3384 模式并 set to preferred**，但 helper 进程自己的 CG 会话对这块显示的状态从未更新（`CGDisplayCopyDisplayMode`/`CGDisplayCopyAllDisplayModes` 长期返回 NULL/LoDPI）。NSApp 事件循环已激活时创建虚拟显示，私有 API 的 HiDPI 协商结果无法送回创建进程——固定 1.8s 窗口的回读必然扑空，shim 随即回退 1:1 并重建，糊屏从此固化（连完全复刻旧代码形态的直通模式在"第一次失败"之后也失败，因为回退已经发生过）。
+- 修复：**调整顺序而非对抗机制**——`CLI` 暴露 `onVirtualDisplayReady` 钩子，helper 入口先在无 NSApp 的环境里用裸主线程 RunLoop 泵完成虚拟显示创建（与旧版完全相同的协商环境，实测 0.8s 完成 HiDPI），创建完成后才安装 `.prohibited` NSApplication 事件循环应答 ping。两个问题（假标记、HiDPI）同时成立。
+- 实现禁忌（记入 main.swift 注释）：runloop 不能包进 `MainActor.run`（main actor 任务严格串行，`run()` 在其中永不返回会饿死后续 `MainActor.run`，首版死锁虚拟显示创建）；必须作为 async main 的同步前缀执行。
+- 遗留风险：客户端中途请求分辨率变更触发的虚拟显示重建（`boltKVM-WxH` 路径）仍发生在 NSApp 激活之后，理论上存在同样的退化窗口；该路径使用不同产品名，且当前用户配置（3008×1692）在初始创建时已满足，暂不处理，出现糊屏复发时优先检查此处。
+
+## 验证（最终态，build 265+runloop+late-ordering）
 
 ```bash
 swift build -c release   # 通过
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter ClipboardTests
-# Executed 10 tests, with 0 failures
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 # Executed 107 tests, with 1 test skipped and 0 failures
 .build/release/boltkvm selftest   # SELFTEST OK
 .build/release/boltkvm cryptotest # PASS (1000 frames, 3 tamper cases)
 ```
 
-回声循环本身没有自动化测试（`poll`/`apply` 依赖真实 NSPasteboard，测试刻意不碰用户剪贴板）；修复的正确性由日志证据 + 机制推演支撑，**未在真机上复测回声场景**——建议日常使用中复制一次大文件验证 mini 侧 inbox 不再新增副本。回声标记已于 11:16 在真机对（pro→mini 58 B 测试文件）验证：单程一次传输、0 回发、0 重复副本。
+部署 mini 后：`virtual display: id=23 ... backing=6016x3384 hiDPI=true (0.8s)`（协商 0.8s 完成，快于历史正常值 2.1–2.5s，证明干净环境下协商近乎瞬时）；`displays` 读回 `pixel=6016x3384`；pro 客户端 `decoder ready 6016x3384`。假标记消失已由用户目检确认（runloop 存在性未变）。回声循环已在真机对（pro→mini 58 B 测试文件）验证：单程一次传输、0 回发、0 重复副本。回声标记已于 11:16 在真机对（pro→mini 58 B 测试文件）验证：单程一次传输、0 回发、0 重复副本。
 
 ## 标题修正（2026-11-13 12:00）
 
