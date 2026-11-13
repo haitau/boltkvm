@@ -665,7 +665,12 @@ public enum AppLog {
         // can open, and keep it from growing without bound.
         let fm = FileManager.default
         if let size = (try? fm.attributesOfItem(atPath: path)[.size] as? Int) ?? nil, size > 5_000_000 {
-            try? fm.removeItem(atPath: path)
+            // Rotate instead of deleting: the log is the only cross-restart
+            // record of what a hung app did before it was killed, and deleting
+            // it at relaunch destroyed the evidence of the 2026-11-12 mini
+            // hang. One generation is enough to diagnose the previous run.
+            try? fm.removeItem(atPath: path + ".1")
+            try? fm.moveItem(atPath: path, toPath: path + ".1")
         }
         freopen(path, "a", stderr)
         // stderr is block-buffered once it is a file, which made the app's own
