@@ -102,12 +102,18 @@ final class Server: NSObject, SCStreamOutput {
     /// keeps the 8-bit BT.709 path every previous build used.
     let colorMode: ColorMode
 
+    /// Runs when the controller deliberately ends the session and asks this Mac
+    /// to lock (A-6). Production default is `lockScreenImmediate`; tests inject
+    /// a counting closure. Failure to lock must not tear the session down.
+    let lockScreen: () -> Void
+
     init(width: Int, height: Int, codec: VideoCodec, connection: TCPConnection, dumpPath: String?,
          audioEnabled: Bool = false, audioFormat: AudioWireFormat = .int16,
          preferredDisplayID: CGDirectDisplayID? = nil,
          colorMode: ColorMode = .standard, clipboardEnabled: Bool = true,
          muteLocalOutput: Bool = false, clipboardMaxItemBytes: Int = ClipboardSync.defaultMaxItemBytes,
-         clipboardMaxTransferBytes: Int64 = 0) {
+         clipboardMaxTransferBytes: Int64 = 0,
+         lockScreenHandler: @escaping () -> Void = lockScreenImmediate) {
         self.colorMode = colorMode
         self.clipboardEnabled = clipboardEnabled
         self.muteLocalOutput = muteLocalOutput
@@ -123,6 +129,9 @@ final class Server: NSObject, SCStreamOutput {
         self.connection = connection
         self.dumpPath = dumpPath
         self.preferredDisplayID = preferredDisplayID
+        // Injectable so the regression tests can drive the `.command` dispatch
+        // with a counting closure and never lock a real screen (A-6).
+        self.lockScreen = lockScreenHandler
         // HEVC needs ~4 frames in flight to sustain 60fps (its encoder
         // pipeline is ~20ms). ProRes is ~9ms, so two are enough and keep the
         // queue shorter.
@@ -370,16 +379,7 @@ final class Server: NSObject, SCStreamOutput {
                             self.inject(ev)
                         }
                     } else if h.type == .command {
-                        if let raw = payload.first, let action = RemoteAction(rawValue: raw) {
-                            switch action {
-                            case .muteLocalOutput:
-                                self.setClientAudioActive(true)
-                            case .unmuteLocalOutput:
-                                self.setClientAudioActive(false)
-                            default:
-                                self.performRemote(action)
-                            }
-                        }
+                        self.handleCommand(payload)
                     } else if h.type == .clipboard {
                         self.clipboard?.handleClipboard(payload)
                     } else if h.type == .fileTransfer {
@@ -399,6 +399,27 @@ final class Server: NSObject, SCStreamOutput {
                     break
                 }
             }
+        }
+    }
+
+    /// `.command` dispatch: the first payload byte is a `RemoteAction`. Kept
+    /// internal (not folded into the read loop) so the regression tests can
+    /// drive it directly with injected closures; an unknown byte from a newer
+    /// client is ignored, which is what keeps old servers alive across
+    /// versions. A-6: `.lockScreen` runs the injected closure — a deliberate
+    /// disconnect of the controller locks this Mac; the generic actions stay on
+    /// the synthetic-event path.
+    func handleCommand(_ payload: Data) {
+        guard let raw = payload.first, let action = RemoteAction(rawValue: raw) else { return }
+        switch action {
+        case .muteLocalOutput:
+            setClientAudioActive(true)
+        case .unmuteLocalOutput:
+            setClientAudioActive(false)
+        case .lockScreen:
+            lockScreen()
+        default:
+            performRemote(action)
         }
     }
 

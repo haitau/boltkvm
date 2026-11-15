@@ -85,6 +85,7 @@ func usage() -> Never {
       boltkvm client [--host <mini>] [--port 7474] [--seconds 20] [--render] [--switch-mode]
                      [--input] [--reconnect] [--key <psk>] [--request-size WxH] [--request-quality 0|1]
                      [--audio] [--audio-record <path>]   # 播放 / 落盘被控端音频
+                     [--lock-on-exit]   # 退出时让被控端锁屏（默认不发锁屏命令）
 
     utilities:
       boltkvm keygen [--path <file>] [--force]   # 生成 ~/.boltkvm-key 并打印指纹

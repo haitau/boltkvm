@@ -50,6 +50,18 @@ enum Prefs {
         set { d.set(newValue, forKey: "client.clipboard") }
     }
 
+    /// Ask the controlled Mac to lock its screen when this controller
+    /// deliberately ends the session (window close, app quit) — A-6. On by
+    /// default: the operator just left, and nobody is watching the remote
+    /// desktop. A dropped network or a crash does not reach this path, so it
+    /// never locks in those cases; reconnects are unaffected because the
+    /// decision lives at the controller's disconnect points, not inside
+    /// `ClientSession.disconnect`.
+    static var lockOnDisconnect: Bool {
+        get { d.object(forKey: "client.lockOnDisconnect") as? Bool ?? true }
+        set { d.set(newValue, forKey: "client.lockOnDisconnect") }
+    }
+
     /// Clipboard non-file item ceiling, in MB. 512 MB is only the default; the
     /// user can raise it via `defaults write`.
     static var clipboardMaxMB: Int {

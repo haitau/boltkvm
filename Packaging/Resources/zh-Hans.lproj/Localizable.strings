@@ -33,6 +33,7 @@
 "client.check.input" = "转发键鼠";
 "client.check.audio" = "音频";
 "client.check.clipboard" = "剪切板（文本/图片/文件）";
+"client.check.lockScreen" = "断开时锁定被控端屏幕";
 "client.hosts.color" = "色彩";
 "client.color.standard" = "标准（8-bit）";
 "client.color.wide" = "广色域（10-bit P3）";

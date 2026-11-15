@@ -183,6 +183,22 @@ enum RemoteAction: UInt8 {
     /// The controller deselected audio or is ending the session. Restore the
     /// controlled Mac's output to exactly the state saved by muteLocalOutput.
     case unmuteLocalOutput = 9
+    /// The controller is deliberately ending the session (window close, app
+    /// quit, `--lock-on-exit`): lock the controlled Mac's screen now (A-6).
+    /// Appended, never renumbered — an old server ignores the unknown byte, an
+    /// old client never sends it, so both ends stay compatible across versions.
+    case lockScreen = 10
+}
+
+/// Whether ending the remote session now must ask the controlled Mac to lock
+/// (A-6). The GUI passes its panel switch, the CLI its `--lock-on-exit` flag;
+/// both default to *not* locking so loopback/self-test runs can never lock the
+/// machine they run on. Deliberate disconnects only: a dropped network or a
+/// crash never reaches this decision, and `ClientSession.connect`'s internal
+/// session-reuse disconnect must not consult it (that would lock right before
+/// reconnecting).
+func lockCommandOnDisconnect(enabled: Bool) -> RemoteAction? {
+    enabled ? .lockScreen : nil
 }
 
 struct PacketHeader {

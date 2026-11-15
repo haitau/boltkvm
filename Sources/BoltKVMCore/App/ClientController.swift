@@ -603,8 +603,23 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         window?.toggleFullScreen(sender)
     }
 
+    /// A deliberate end of the remote session (window close, app quit, role
+    /// switch) also locks the controlled Mac (A-6): its operator just walked
+    /// away, and the desktop should not stay open behind them. This is *not*
+    /// wired into `ClientSession.disconnect` — `connect` reuses that before
+    /// replacing a session, and locking right before a reconnect is exactly
+    /// the false lock this switch exists to avoid. A dropped network or a
+    /// crash never reaches this path either, so those leave the screen alone.
+    private func disconnectRemote() {
+        guard let session else { return }
+        if let action = lockCommandOnDisconnect(enabled: Prefs.lockOnDisconnect) {
+            session.sendCommand(action)
+        }
+        session.disconnect(pauseRemoteMedia: true)
+    }
+
     func shutdown() {
-        session?.disconnect(pauseRemoteMedia: true)
+        disconnectRemote()
         session = nil
         window?.close()
     }
@@ -630,7 +645,7 @@ final class ClientController: NSWindowController, NSWindowDelegate {
         log("window: closed by user")
         // Closing the window *is* the disconnect (R4); for the client role the
         // app has nothing left to do, so it quits the way a document window would.
-        session?.disconnect(pauseRemoteMedia: true)
+        disconnectRemote()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.onClosed?()
         }

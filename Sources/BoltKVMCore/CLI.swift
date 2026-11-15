@@ -737,12 +737,14 @@ public enum CLI {
         let seconds = Double(argInt(args, "--seconds", 20))
         let audioRecord = argValue(args, "--audio-record", "")
         let playsAudio = args.contains("--audio")
+        let lockOnExit = args.contains("--lock-on-exit")
         let wantsAudio = playsAudio || !audioRecord.isEmpty
         let audioRequest: AudioRequest = playsAudio
             ? .selected
             : (audioRecord.isEmpty ? .unselected : .recordOnly)
         var audio: AudioPlayer?
         var askedInitialMute = false
+        var sawAuthOk = false
         do {
             let conn = try tcpConnect(host: host, port: port)
             log("connected to \(host):\(port)")
@@ -763,6 +765,7 @@ public enum CLI {
                 try respondToAuthChallenge(conn: conn, nonce: payload)
             }
             pump.onAuthOk = { header, payload in
+                sawAuthOk = true
                 try enableClientEncryption(
                     conn: conn, nonce: challengeNonce,
                     forwardSecrecy: authOkFlags(payload) & FLAG_SUPPORTS_KEY_EXCHANGE != 0)
@@ -834,6 +837,19 @@ public enum CLI {
             audio?.finish()
             decoder.report()
             log("received frames=\(pump.frames) lastType=\(String(describing: pump.lastType))")
+            // `--lock-on-exit`: this run is ending on purpose, so ask the
+            // controlled Mac to lock (A-6). Default stays off so loopback and
+            // self-test runs never lock the machine they run on. Only a
+            // session that got past the handshake may lock: a rejected or
+            // failed connection is not a disconnect worth locking over.
+            if let action = lockCommandOnDisconnect(enabled: lockOnExit), sawAuthOk {
+                do {
+                    try conn.send(packet(type: .command, payload: Data([action.rawValue])))
+                    log("lock: asked the server to lock the screen (--lock-on-exit)")
+                } catch {
+                    log("lock: lock request failed: \(error)")
+                }
+            }
             conn.close()
             exit(0)
         } catch {

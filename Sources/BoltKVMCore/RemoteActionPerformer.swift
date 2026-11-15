@@ -52,6 +52,31 @@ private let mediaRemoteGetIsPlaying: MediaRemoteGetIsPlayingFn? = {
     return unsafeBitCast(symbol, to: MediaRemoteGetIsPlayingFn.self)
 }()
 
+/// Locks the screen the same way ⌃⌘Q does (A-6). The symbol lives in the
+/// private login framework, so resolve it at runtime and tolerate its absence:
+/// a failed lock is a log line, never a session teardown. There is deliberately
+/// no pmset display-sleep fallback — on the mini the display-sleep assertion is
+/// held by caffeinate/boltkvm-server, and asleep ≠ locked anyway.
+private typealias SACLockScreenImmediateFn = @convention(c) () -> Void
+
+private let sacLockScreen: SACLockScreenImmediateFn? = {
+    let path = "/System/Library/PrivateFrameworks/login.framework/login"
+    guard let handle = dlopen(path, RTLD_NOW),
+          let symbol = dlsym(handle, "SACLockScreenImmediate") else {
+        log("lock: SACLockScreenImmediate unavailable; cannot lock the screen")
+        return nil
+    }
+    return unsafeBitCast(symbol, to: SACLockScreenImmediateFn.self)
+}()
+
+/// Production lock closure handed to `Server` (injectable, so regression tests
+/// never lock the machine running them).
+func lockScreenImmediate() {
+    guard let sacLockScreen else { return }
+    log("lock: locking the screen via SACLockScreenImmediate")
+    sacLockScreen()
+}
+
 private final class ResumeOnce: @unchecked Sendable {
     private let lock = NSLock()
     private var done = false
@@ -153,6 +178,10 @@ func performRemoteAction(_ action: RemoteAction) {
         postShortcut(.spaceRight)
     case .muteLocalOutput, .unmuteLocalOutput:
         // Handled by Server before this generic action dispatcher.
+        return
+    case .lockScreen:
+        // Handled by Server's injected lock closure; this generic dispatcher
+        // posts synthetic events, and screen lock is not one of those.
         return
     case .pauseMedia:
         guard let mediaRemotePause else { return }

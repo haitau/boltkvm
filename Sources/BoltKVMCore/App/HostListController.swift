@@ -240,6 +240,10 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         // link, and a clipboard is a property of the session, not of a display.
         let clipboardCheck = NSButton(checkboxWithTitle: L.t("client.check.clipboard"), target: nil, action: nil)
         clipboardCheck.state = Prefs.clipboard ? .on : .off
+        // Global too: locking the controlled Mac when the session ends is a
+        // property of the person leaving, not of one host (A-6).
+        let lockCheck = NSButton(checkboxWithTitle: L.t("client.check.lockScreen"), target: nil, action: nil)
+        lockCheck.state = Prefs.lockOnDisconnect ? .on : .off
         // Colour is per host: it changes what the *server* captures, so it
         // cannot be a global preference shared with a standard-gamut machine.
         let colorPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -260,6 +264,7 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         rows.append(("", inputCheck))
         rows.append(("", audioCheck))
         rows.append(("", clipboardCheck))
+        rows.append(("", lockCheck))
         let rowHeight = 32
         let form = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: CGFloat(rows.count * rowHeight + 10)))
         let formHeight = form.frame.height
@@ -303,6 +308,7 @@ final class HostListController: NSWindowController, NSTableViewDataSource, NSTab
         let forwardsInput = inputCheck.state == .on
         let playsAudio = audioCheck.state == .on
         Prefs.clipboard = clipboardCheck.state == .on
+        Prefs.lockOnDisconnect = lockCheck.state == .on
         let color = colorPopUp.indexOfSelectedItem == 1 ? ColorMode.wide.rawValue : ColorMode.standard.rawValue
         if var existing = host {
             existing.name = name

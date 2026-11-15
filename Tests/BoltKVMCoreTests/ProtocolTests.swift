@@ -116,6 +116,29 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(RemoteAction.missionControl.rawValue, 1)
     }
 
+    func testLockScreenActionKeepsExistingCommandValues() {
+        // A-6: appended after unmuteLocalOutput, never renumbered. An old
+        // server must ignore the unknown byte, an old client never sends it.
+        XCTAssertEqual(RemoteAction.lockScreen.rawValue, 10)
+        XCTAssertEqual(RemoteAction.unmuteLocalOutput.rawValue, 9)
+
+        // Both send paths (GUI `sendCommand`, CLI `--lock-on-exit`) put the
+        // action into a `.command` packet's first payload byte; the server
+        // dispatch must read the same action back.
+        let wire = packet(type: .command, payload: Data([RemoteAction.lockScreen.rawValue]))
+        let (header, payload) = (PacketHeader.decode(wire)!, wire.subdata(in: (wire.count - 1)..<wire.count))
+        XCTAssertEqual(header.type, .command)
+        XCTAssertEqual(payload.first, 10)
+        XCTAssertEqual(RemoteAction(rawValue: payload.first!), .lockScreen)
+    }
+
+    func testLockCommandOnDisconnectDecision() {
+        // Switch on (GUI default) → the lock command is issued; switch off or
+        // CLI without `--lock-on-exit` → nothing is even constructed.
+        XCTAssertEqual(lockCommandOnDisconnect(enabled: true), .lockScreen)
+        XCTAssertNil(lockCommandOnDisconnect(enabled: false))
+    }
+
 
     func testAudioFormatRidesInReservedByte() {
         let c = SessionConfig(width: 3008, height: 1692, quality: 1, audio: .int24)
