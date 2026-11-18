@@ -42,3 +42,37 @@
 - 8dabd04 实施时的验证：release 构建通过、`swift test` 112/1/0、探针显隐两轮 h=0.0%/r=44.0%——均通过但**不足以覆盖真实退化路径**；
 - revert 681c54d 后：release 构建通过；部署 build 273 后待用户确认工具栏恢复；
 - 本报告的探针脚本：`docs/_scratch/fs-chrome-probe-27.2.swift`（原生行为）、`fs-menubar-probe-27.2.swift`（菜单栏窗口枚举）、`fs-menubar-probe3-27.2.swift`（指针驱动+像素）、`fs-visual-probe-27.2.swift`、`fs-appfaithful-probe-27.2.swift`（orderOut 证伪）、`/tmp/fsprobe7.swift`（无工具栏对照）。
+
+---
+
+# 夜间实验（19:00-19:10）：菜单栏卡死根因落定与解除
+
+## 现象重述（19:00 状态）
+
+探针 8（`fs-menubar-lifecycle-27.2.swift`，CGEvent mouseMoved 事件流驱动指针）实测：**全屏一进入菜单栏就全程在屏**（M0 基线即 bar=true，3 轮「顶边扫动→移开」完全不改变状态），四个自愈（M4 presentationOptions 切换 / M5 工具栏 show→hide / M6 chrome 子窗口 orderFront→orderOut / M7 Mission Control 切换）**全部无效**。此时窗口化对比 15:41 探针 2（全屏菜单栏正常停在屏外 y=-30）可知：系统在 15:41-19:00 之间进入了一种**跨进程、跨 app 重启存活的坏状态**——所有 app 的全屏（包括用户实测的 Windows RDP 客户端）菜单栏都永久显示。
+
+## 根因与解除（实测）
+
+- 机器 5 天未重启（kern.boottime = 11-13），坏状态活在 WindowServer 运行态；
+- **`killall Dock` 一键解除**：重启 Dock 后全屏菜单栏立即恢复自动隐藏（在屏=false），窗口模式菜单栏正常（在屏=true）；
+- `_HIHideMenuBar`（历史键「自动隐藏和显示全屏菜单栏」）在 27.2.1 上**已失效**：0↔1 翻转对全屏菜单栏行为无任何影响（解除前后各测一轮），已恢复原值 0；
+- 重启 MenuBarAgent 无效；
+- 健康状态复验：chrome 子窗口回到正常 32 pt 驻留（深色外观下不可见），自动隐藏工作正常。CGEvent posted mouseMoved 仍无法唤出菜单栏（探针限制，真鼠标不受影响）。
+
+## 触发源（强关联，非 100% 证明）
+
+坏状态出现的时间窗（15:41 之后、19:00 之前）内发生的全屏 chrome 子窗口 `orderOut` 实验：探针 6（15:47-15:49）与 **build 272 的正式全屏使用（16:11-16:30，用户实际运行）**。推测：反复 `orderOut` 全屏 chrome 宿主条会把 WindowServer 的全屏菜单栏状态打坏（该条正是菜单栏滑入滑出的宿主）。原 245/build 270 的**间歇性**卡死（11-02 起、app 重启可清）是另一层：app 内部的子窗口滞留（app-scoped），与本次系统级 wedge（system-scoped，需 killall Dock/注销）不是同一层。
+
+**对傍晚结论的修正**：用户「RDP 也一样」的观察成立且被证实（当时系统确实处于坏状态），但该坏状态是今天的 orderOut 实验引出的，不能作为「27.2.1 原生系统 bug」的直接证据；macOS 27 系列全屏 chrome 脆弱（27.0.1 起三连 bug）的判断仍成立。Reddit r/applehelp /comments/1wi7cfx（macOS 27 全屏菜单栏问题，F3 修复）供参考；检索通道：Firecrawl keyless（web_search 因用户 DeepSeek 402 不可用）。
+
+## 用户侧 remedy
+
+- **再遇全屏菜单栏卡死（任何 app）：终端跑 `killall Dock`，秒级解除，无需重启 BoltKVM**；
+- 待裁决的可选产品化：BoltKVM 工具条加「修复全屏菜单栏」按钮（本质 killall Dock），是否要做由用户决定——它是系统级维护动作，不宜自动触发；
+- 产品代码无需改动：245/build 274 保持现状；
+- 建议向 Apple 提交 Feedback：macOS 27.x 全屏 chrome（NSToolbarFullScreenWindow + 菜单栏状态机）脆弱，附本报告两份探针数据。
+
+## 夜间验证留痕
+
+- 探针输出：/tmp/fsprobe8.out（wedge 态全记录）、/tmp/fsprobe8b.out（解除后健康态）、/tmp/probe9（开关 `_HIHideMenuBar` 前后对照，脚本 /tmp/probe9.swift）；
+- 机器收尾状态：`_HIHideMenuBar` 已恢复原值 0；Dock 已重启、全屏菜单栏自动隐藏正常；BoltKVM build 274 在跑；机器未重启、未注销。
